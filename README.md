@@ -1,9 +1,13 @@
 # StinkOS
 
-A minimalist x86 operating system, written from scratch, whose goal is to **boot
-into a start menu and run selectable games from it**. The aim is a small,
-standardized runtime where games share a uniform size and are easy to list,
-pick, and play straight from the menu.
+A real, standard x86 PC operating system, written from scratch. StinkOS targets
+**32-bit protected mode** with a proper split between **kernel space** and
+**userland (Ring 3)**: processes, isolation, and a **syscall** contract.
+
+Games, a browser, and other apps are built inside this project but run as
+**independent userland binaries** — not compiled into the kernel. The kernel
+stays lean: it loads those binaries from disk and runs them in Ring 3 through a
+loader.
 
 The project is built with no external dependencies: bootloader, kernel, drivers,
 and libraries are all written inside the repository.
@@ -12,15 +16,15 @@ and libraries are all written inside the repository.
 
 | File         | Role |
 |--------------|------|
-| `boot.s`     | Assembly bootloader (16-bit real mode). Initializes the machine, loads the kernel from disk, and jumps into it. |
-| `kernel.c`   | Kernel. Currently prints text via BIOS; it will grow to hold the drivers and the infrastructure that runs the games. |
+| `boot.s`     | Bootloader. Loads the kernel from disk (LBA), enables A20, sets up the GDT, switches to 32-bit protected mode, and jumps into the kernel. |
+| `kernel.c`   | 32-bit kernel. Brings up a VGA text console and a serial debug console; it will grow to hold the drivers, the loader, and the userland infrastructure. |
 | `Makefile`   | Build automation: assembles `boot.s`, compiles `kernel.c`, links everything into `os.bin` (output in `build/`). |
 | `tools/`     | Setup utilities (e.g. the cross-compiler build script). |
 | `CLAUDE.md`  | Development rules for the project. |
 
 ## Architecture and tooling
 
-- Target: **x86** (i386), starting in 16-bit real mode.
+- Target: **x86** (i386), 32-bit protected mode (boots through real mode).
 - Toolchain: a dedicated **`i386-elf` cross-compiler** (`i386-elf-as`,
   `i386-elf-gcc`, `i386-elf-ld`) — a compiler built for bare metal, not the host
   `gcc`.
@@ -55,9 +59,10 @@ i386-elf-gcc --version
 ## Build and run
 
 ```sh
-make            # build everything -> build/ and os.bin
-make run        # build and run in qemu
-make clean      # remove build/ and os.bin
+make             # build everything -> build/ and os.bin
+make run         # build and run in qemu
+make test-headless  # build and verify the boot via the serial console
+make clean       # remove build/ and os.bin
 ```
 
 Helper targets: `make hex` (hexdump of the image), `make dboot` / `make dkernel`
@@ -65,8 +70,10 @@ Helper targets: `make hex` (hexdump of the image), `make dboot` / `make dkernel`
 
 ## Roadmap
 
-- [ ] Finish the **video** (`screen.h`) and **IO** (`io.h`) drivers/libraries.
-- [ ] Move the boot path from 16-bit real mode to **32-bit protected mode** (GDT).
-- [ ] Lay out the `os.bin` image that holds the whole system.
-- [ ] Start menu for game selection.
-- [ ] Plan the game engine integrated into the kernel.
+- [x] Switch the boot path to **32-bit protected mode** (LBA load, A20, GDT).
+- [x] VGA text console and serial debug console.
+- [ ] Set up the video mode via **VBE** (real mode) before entering protected mode.
+- [ ] Interrupts: **IDT**, PIC remap, timer and keyboard handlers.
+- [ ] Memory management: paging and a kernel allocator.
+- [ ] **Userland (Ring 3)**: TSS, a loader for on-disk binaries, and the **syscall** interface.
+- [ ] Start menu and the first userland apps/games.
