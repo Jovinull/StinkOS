@@ -2,6 +2,7 @@
  * common little-endian B,G,R[,X] byte order used by VBE true-colour modes. */
 #include "fb.h"
 #include "vbe.h"
+#include "font.h"
 
 static volatile unsigned char *fb;
 static unsigned int pitch;
@@ -44,4 +45,22 @@ void fb_rect(unsigned int x0, unsigned int y0,
 	for (unsigned int y = 0; y < h; y++)
 		for (unsigned int x = 0; x < w; x++)
 			fb_putpixel(x0 + x, y0 + y, rgb);
+}
+
+void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb)
+{
+	const unsigned char *glyph = font8x8[(unsigned char)c & 0x7F];
+
+	for (int row = 0; row < 8; row++)
+		for (int col = 0; col < 8; col++)
+			if (glyph[row] & (0x80 >> col))
+				fb_putpixel(x + col, y + row, rgb);
+}
+
+void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb)
+{
+	for (; *s != '\0'; s++) {
+		fb_char(x, y, *s, rgb);
+		x += 8;
+	}
 }

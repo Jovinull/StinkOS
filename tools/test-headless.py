@@ -102,6 +102,8 @@ w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
 pr, pg, pb = pixel_at(w, px, 15, 15)      # inside the app's 20x20 white square
 app_drew = pr > 200 and pg > 200 and pb > 200
+tr, tg, tb = pixel_at(w, px, 122, 90)     # a lit pixel of the "STINKOS" title
+title_drawn = tr > 200 and tg > 200 and tb > 200
 qemu.send_signal(signal.SIGKILL)
 
 checks = {
@@ -111,6 +113,7 @@ checks = {
     "pmm alloc":       "pmm: frame 0x" in out,
     "VBE mode":        "vbe: 1024x768" in out,
     "framebuffer draw": drawn > 100000,
+    "text render":     title_drawn,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
     "disk app loaded": "loader: app loaded from disk slot" in out,
@@ -126,4 +129,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + timer + keyboard + disk-app ring3 (log/draw/getkey/alloc) syscalls")
+print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + text + timer + keyboard + disk-app ring3 (log/draw/getkey/alloc) syscalls")

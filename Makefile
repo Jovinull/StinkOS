@@ -13,7 +13,7 @@ IMG_MIN = 20992
 APP_LBA = 64
 APP_END = 34816            # (APP_LBA + 4) * 512: keep the whole slot present
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c pmm.c paging.c gdt.c ata.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)

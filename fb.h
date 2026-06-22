@@ -9,5 +9,7 @@ void fb_putpixel(unsigned int x, unsigned int y, unsigned int rgb);
 void fb_fill(unsigned int rgb);
 void fb_rect(unsigned int x0, unsigned int y0,
              unsigned int w, unsigned int h, unsigned int rgb);
+void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb);
+void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
 
 #endif

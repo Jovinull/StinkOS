@@ -54,6 +54,7 @@ void kernel_main(void)
 		fb_init(&vm);
 		fb_fill(0x001022);                                  /* dark background */
 		fb_rect(112, 84, vm.width - 224, vm.height - 168, 0x3050C0);
+		fb_text(120, 90, "STINKOS", 0xFFFFFF);
 	} else {
 		serial_write("vbe: unavailable\n");
 	}
