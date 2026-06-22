@@ -21,6 +21,7 @@ void kernel_main(void)
 
 	pmm_init(0x100000, 0x2000000);          /* manage 1 MiB .. 32 MiB */
 	paging_init();
+	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");
 
 	unsigned int frame = pmm_alloc();

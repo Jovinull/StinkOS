@@ -159,13 +159,9 @@ static void syscall_dispatch(struct regs *r)
 	case 3:                                    /* SYS_GETKEY: -> char or 0 */
 		r->eax = (unsigned char)keyboard_getchar();
 		break;
-	case 4: {                                  /* SYS_ALLOC: -> frame addr or 0 */
-		unsigned int frame = pmm_alloc();
-		if (frame)
-			paging_set_user(frame);
-		r->eax = frame;
+	case 4:                                    /* SYS_ALLOC: -> user page or 0 */
+		r->eax = paging_user_alloc();
 		break;
-	}
 	case 5:                                    /* SYS_EXIT: return to the menu */
 		menu_exit();                       /* does not return */
 		break;

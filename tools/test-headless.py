@@ -139,4 +139,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: full cycle - menu -> launch disk app in ring3 (log/draw/getkey/alloc) -> exit -> menu")
+print("PASS: full cycle - menu -> launch isolated ring3 app (log/draw/getkey/alloc) -> exit -> menu")

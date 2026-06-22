@@ -16,7 +16,6 @@ extern void klongjmp(struct kctx *ctx, int val);
 
 static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT */
 
-#define APP_ADDR     0x400000
 #define APP_SECTORS  4
 
 struct app_entry {
@@ -29,8 +28,6 @@ static const struct app_entry apps[] = {
 	{ "2 BOX",   72 },
 };
 #define APP_COUNT (int)(sizeof(apps) / sizeof(apps[0]))
-
-static unsigned char app_stack[4096] __attribute__((aligned(16)));
 
 static void draw(int selected)
 {
@@ -55,11 +52,10 @@ static void launch(int index)
 	if (ksetjmp(&exit_ctx) != 0)
 		return;                         /* app called SYS_EXIT: back to menu */
 
-	ata_read(apps[index].lba, APP_SECTORS, (void *)APP_ADDR);
+	paging_reset_user_heap();
+	ata_read(apps[index].lba, APP_SECTORS, (void *)paging_user_code());
 	serial_write("loader: app loaded from disk slot\n");
-	paging_set_user(APP_ADDR);
-	paging_set_user((unsigned int)app_stack);
-	enter_user_mode(APP_ADDR, (unsigned int)(app_stack + sizeof(app_stack)));
+	enter_user_mode(paging_user_code(), paging_user_stack_top());
 }
 
 void menu_run(void)
