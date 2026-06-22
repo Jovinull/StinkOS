@@ -3,6 +3,8 @@
 #include "serial.h"
 #include "keyboard.h"
 #include "fb.h"
+#include "pmm.h"
+#include "paging.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -156,6 +158,13 @@ static void syscall_dispatch(struct regs *r)
 	case 3:                                    /* SYS_GETKEY: -> char or 0 */
 		r->eax = (unsigned char)keyboard_getchar();
 		break;
+	case 4: {                                  /* SYS_ALLOC: -> frame addr or 0 */
+		unsigned int frame = pmm_alloc();
+		if (frame)
+			paging_set_user(frame);
+		r->eax = frame;
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;

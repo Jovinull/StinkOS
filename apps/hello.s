@@ -5,6 +5,7 @@
 #   1 = log     (ebx = string)
 #   2 = draw    (ebx = x, ecx = y, edx = rgb)
 #   3 = getkey  (-> eax = char, or 0 if none)
+#   4 = alloc   (-> eax = frame address, or 0)
 .code32
 .global _start
 _start:
@@ -28,6 +29,18 @@ xloop:
 	cmp $30, %esi          # y in [10, 30)
 	jl yloop
 
+	mov $4, %eax           # SYS_ALLOC -> eax = frame address
+	int $0x80
+	test %eax, %eax
+	jz poll                # out of memory: skip the check
+	mov %eax, %edi
+	movl $0xCAFE, (%edi)   # write then read back to prove it is usable
+	cmpl $0xCAFE, (%edi)
+	jne poll
+	mov $1, %eax           # SYS_LOG
+	mov $msg3, %ebx
+	int $0x80
+
 poll:                          # wait for a keypress from the kernel
 	mov $3, %eax           # SYS_GETKEY
 	int $0x80
@@ -45,3 +58,5 @@ msg:
 	.asciz "hello from disk app"
 msg2:
 	.asciz "app: key received"
+msg3:
+	.asciz "app: alloc ok"

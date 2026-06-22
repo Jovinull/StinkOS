@@ -116,6 +116,7 @@ checks = {
     "disk app loaded": "loader: app loaded from disk slot" in out,
     "ring3 syscall":   "ring3: hello from disk app" in out,
     "draw syscall":    app_drew,
+    "alloc syscall":   "app: alloc ok" in out,
     "getkey syscall":  "app: key received" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
@@ -125,4 +126,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + timer + keyboard + disk-app ring3 (log+draw+getkey) syscalls")
+print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + timer + keyboard + disk-app ring3 (log/draw/getkey/alloc) syscalls")
