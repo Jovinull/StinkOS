@@ -9,7 +9,7 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 40) * 512 = 20992.
 IMG_MIN = 20992
 
-C_SRCS  = kernel.c serial.c interrupts.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(C_OBJS)
@@ -38,17 +38,11 @@ dall:
 run: all
 	qemu-system-i386 -drive format=raw,file=os.bin
 
-# Headless smoke test: boot, capture the kernel's serial debug log, and assert
-# the timer IRQ fired -- which proves protected mode, the IDT, the PIC remap and
-# the PIT all work. Greps for the exact string the timer handler emits on COM1.
-EXPECT = StinkOS: timer tick
+# Headless verification: boots the image in qemu, reads the serial debug log and
+# injects keystrokes via the monitor to assert protected mode, the timer IRQ and
+# the keyboard IRQ all work. See tools/test-headless.py.
 test-headless: all
-	@out=$$(timeout 3s qemu-system-i386 -drive format=raw,file=os.bin -display none -serial stdio < /dev/null 2>/dev/null); \
-	if echo "$$out" | grep -qF "$(EXPECT)"; then \
-		echo "PASS: timer IRQ fired (serial: \"$(EXPECT)\")"; \
-	else \
-		echo "FAIL: expected serial output not found"; echo "--- serial output ---"; echo "$$out"; exit 1; \
-	fi
+	@python3 tools/test-headless.py
 
 clean:
 	rm -rf $(BUILD) os.bin

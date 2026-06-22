@@ -3,6 +3,7 @@
 #include "io.h"
 #include "serial.h"
 #include "interrupts.h"
+#include "keyboard.h"
 
 /* ---- VGA text console (0xB8000, 80x25) ---- */
 
@@ -39,6 +40,7 @@ void kernel_main(void)
 
 	interrupts_init();
 	pit_init(100);
+	keyboard_init();
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 

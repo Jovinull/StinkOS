@@ -1,6 +1,7 @@
 /* IDT setup, PIC remap, PIT timer and the C-side interrupt handlers. */
 #include "interrupts.h"
 #include "serial.h"
+#include "keyboard.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -151,6 +152,8 @@ void irq_handler(struct regs *r)
 		ticks++;
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
+	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
+		keyboard_handle();
 	}
 
 	if (r->int_no >= 40)                        /* from the slave PIC */
