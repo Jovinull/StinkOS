@@ -102,6 +102,13 @@ time.sleep(0.4)
 sock.sendall(b"sendkey x\n")                      # HELLO gets key -> logs -> SYS_EXIT
 time.sleep(0.5)                                   # ... and the menu redraws
 
+# Back at the menu: move to "3 FAULT" and launch it. It touches kernel memory,
+# so the kernel must kill it and return to the menu (not crash).
+for key in ("s", "s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.5)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -131,6 +138,8 @@ checks = {
     "alloc syscall":   "app: alloc ok" in out,
     "getkey syscall":  "app: key received" in out,
     "exit to menu":    "menu: back" in out,
+    "fault app ran":   "fault app running" in out,
+    "fault killed":    "app: fault, killed" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -139,4 +148,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: full cycle - menu -> launch isolated ring3 app (log/draw/getkey/alloc) -> exit -> menu")
+print("PASS: full cycle - menu -> isolated ring3 app (log/draw/getkey/alloc) -> exit; faulting app killed -> menu")

@@ -12,7 +12,8 @@ IMG_MIN = 20992
 # Userland apps stored on raw disk slots, loaded by the kernel at runtime.
 APP1_LBA = 64
 APP2_LBA = 72
-APP_END  = 38912          # (APP2_LBA + 4) * 512: keep all slots present
+APP3_LBA = 80
+APP_END  = 43008          # (APP3_LBA + 4) * 512: keep all slots present
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
@@ -39,11 +40,16 @@ $(BUILD)/box.bin: apps/box.s | $(BUILD)
 	$(AS) -O0 apps/box.s -o $(BUILD)/box.o
 	$(LD) -Ttext 0x400000 --oformat binary -o $(BUILD)/box.bin $(BUILD)/box.o
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.bin $(BUILD)/box.bin
+$(BUILD)/fault.bin: apps/fault.s | $(BUILD)
+	$(AS) -O0 apps/fault.s -o $(BUILD)/fault.o
+	$(LD) -Ttext 0x400000 --oformat binary -o $(BUILD)/fault.bin $(BUILD)/fault.o
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.bin $(BUILD)/box.bin $(BUILD)/fault.bin
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	dd if=$(BUILD)/hello.bin of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/box.bin   of=os.bin bs=512 seek=$(APP2_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/fault.bin of=os.bin bs=512 seek=$(APP3_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(APP_END) ]; then truncate -s $(APP_END) os.bin; fi
 
 hex:

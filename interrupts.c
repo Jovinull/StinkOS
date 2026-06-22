@@ -178,7 +178,14 @@ void isr_handler(struct regs *r)
 		return;
 	}
 
-	serial_write("StinkOS: CPU exception ");
+	if ((r->cs & 3) == 3) {                    /* fault from ring 3: kill the app */
+		serial_write("app: fault, killed (exception ");
+		serial_write_dec(r->int_no);
+		serial_write(")\n");
+		menu_exit();                       /* return to the menu (no return) */
+	}
+
+	serial_write("StinkOS: kernel exception ");
 	serial_write_dec(r->int_no);
 	serial_write(" - halted\n");
 
