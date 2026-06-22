@@ -44,3 +44,11 @@ void serial_write_dec(unsigned int value)
 	while (i > 0)
 		serial_putc(buf[--i]);
 }
+
+void serial_write_hex(unsigned int value)
+{
+	const char *digits = "0123456789abcdef";
+
+	for (int shift = 28; shift >= 0; shift -= 4)
+		serial_putc(digits[(value >> shift) & 0xF]);
+}

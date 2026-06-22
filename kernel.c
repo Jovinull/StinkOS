@@ -4,6 +4,7 @@
 #include "serial.h"
 #include "interrupts.h"
 #include "keyboard.h"
+#include "vbe.h"
 
 /* ---- VGA text console (0xB8000, 80x25) ---- */
 
@@ -37,6 +38,22 @@ void kernel_main(void)
 	vga_clear();
 	vga_put("StinkOS - 32-bit protected mode active.", 0, 0);
 	serial_write("StinkOS: protected mode active\n");
+
+	struct vbe_mode vm;
+	vbe_read(&vm);
+	if (vm.valid) {
+		serial_write("vbe: ");
+		serial_write_dec(vm.width);
+		serial_putc('x');
+		serial_write_dec(vm.height);
+		serial_putc('x');
+		serial_write_dec(vm.bpp);
+		serial_write(" lfb 0x");
+		serial_write_hex(vm.framebuffer);
+		serial_putc('\n');
+	} else {
+		serial_write("vbe: unavailable\n");
+	}
 
 	interrupts_init();
 	pit_init(100);

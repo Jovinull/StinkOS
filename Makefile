@@ -9,7 +9,7 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 40) * 512 = 20992.
 IMG_MIN = 20992
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(C_OBJS)

@@ -71,6 +71,7 @@ qemu.send_signal(signal.SIGKILL)
 
 checks = {
     "protected mode": "StinkOS: protected mode active" in out,
+    "VBE mode":       "vbe: 1024x768" in out,
     "timer IRQ":      "StinkOS: timer tick" in out,
     "keyboard IRQ":   all(("kbd: " + c) in out for c in "abc"),
 }
@@ -81,4 +82,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: protected mode + timer IRQ + keyboard IRQ verified")
+print("PASS: protected mode + VBE mode + timer IRQ + keyboard IRQ verified")

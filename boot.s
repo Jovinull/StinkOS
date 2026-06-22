@@ -6,6 +6,8 @@
 .equ KSECTORS, 40          # sectors to load from disk (kernel area, ~20 KiB)
 .equ LOAD_ADDR, 0x7E00     # where the kernel area is loaded (right after boot)
 .equ STACK_TOP, 0x90000    # protected-mode stack (below 640 KiB)
+.equ VBE_INFO, 0x0500      # scratch VbeInfoBlock (real-mode, free low RAM)
+.equ MODE_INFO, 0x0700     # VBE ModeInfoBlock, read by the kernel after PM
 
 .code16
 .global _start
@@ -18,6 +20,30 @@ _start:
 	mov %ax, %ss
 	mov $0x7C00, %sp
 	mov %dl, boot_drive        # BIOS leaves the boot drive in DL
+
+	# --- VBE: query controller + a 1024x768 LFB mode (no mode switch yet) ---
+	# Leaves the VBE ModeInfoBlock at MODE_INFO for the kernel to read.
+	cld
+	xor %ax, %ax
+	mov %ax, %es
+	mov $MODE_INFO, %di         # zero the ModeInfoBlock first
+	mov $256, %cx
+	xor %al, %al
+	rep stosb
+	mov $VBE_INFO, %di          # request VBE 2.0 controller info
+	movl $0x32454256, (%di)     # signature 'VBE2'
+	mov $0x4F00, %ax
+	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_done
+	xor %ax, %ax                # restore ES (BIOS may clobber it)
+	mov %ax, %es
+	mov $MODE_INFO, %di         # get info for mode 0x118 (1024x768, true colour)
+	mov $0x118, %cx
+	mov $0x4F01, %ax
+	int $0x10
+vbe_done:
+	# boot_drive was saved before VBE; the disk read reloads DL from it
 
 	# --- load kernel sectors via INT 13h extended read (LBA), with retry ---
 	movb $3, retries
