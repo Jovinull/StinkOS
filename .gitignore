@@ -92,3 +92,5 @@ osdev-refs/
 *.bin
 
 # End of https://www.toptal.com/developers/gitignore/api/c,assembler,visualstudiocode
+
+CLAUDE.md
