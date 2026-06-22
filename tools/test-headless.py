@@ -9,8 +9,9 @@ import subprocess, socket, time, os, signal, sys
 SER = "/tmp/stinkos_ser.log"
 MON = "/tmp/stinkos_mon.sock"
 FB = "/tmp/stinkos_fb.ppm"
+FB2 = "/tmp/stinkos_fb2.ppm"
 
-for f in (SER, MON, FB):
+for f in (SER, MON, FB, FB2):
     try:
         os.remove(f)
     except OSError:
@@ -109,6 +110,20 @@ for key in ("s", "s", "ret"):
     time.sleep(0.2)
 time.sleep(0.5)
 
+# Back at the menu (cursor on FAULT): move to "4 GAME" and launch it. Move the
+# block right+down, capture the screen, then quit back to the menu.
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.3)
+for key in ("d", "s"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+sock.sendall(("screendump %s\n" % FB2).encode())
+time.sleep(0.4)
+sock.sendall(b"sendkey q\n")                      # quit the game -> menu
+time.sleep(0.5)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -118,6 +133,9 @@ tr, tg, tb = pixel_at(w, px, 122, 90)     # a lit pixel of the "STINKOS" title
 title_drawn = tr > 200 and tg > 200 and tb > 200
 mr, mg, mb = pixel_at(w, px, 142, 120)    # a lit pixel of the "1 HELLO" menu entry
 menu_drawn = mr > 200 and mg > 200 and mb > 200
+gw, gh, gpx = read_ppm(FB2)               # game screen after moving the block
+gr, gg, gb = pixel_at(gw, gpx, 120, 120)  # inside the moved green block
+game_block = gg > 200 and gr < 120 and gb < 120
 qemu.send_signal(signal.SIGKILL)
 
 checks = {
@@ -140,6 +158,7 @@ checks = {
     "exit to menu":    "menu: back" in out,
     "fault app ran":   "fault app running" in out,
     "fault killed":    "app: fault, killed" in out,
+    "game block":      game_block,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -148,4 +167,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: full cycle - menu -> isolated ring3 app (log/draw/getkey/alloc) -> exit; faulting app killed -> menu")
+print("PASS: menu -> isolated ring3 apps (log/draw/getkey/alloc/exit); faulting app killed; keyboard game runs -> menu")
