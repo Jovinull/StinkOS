@@ -67,13 +67,13 @@ def pixel_at(width, px, x, y):
     return (px[o], px[o + 1], px[o + 2]) if o + 2 < len(px) else (0, 0, 0)
 
 
-# Wait for the kernel to finish bringing up interrupts.
+# Wait for the start menu to be drawn and ready for input.
 for _ in range(60):
-    if "interrupts enabled" in serial():
+    if "menu: ready" in serial():
         break
     time.sleep(0.1)
 else:
-    fail("kernel did not reach 'interrupts enabled'")
+    fail("kernel did not reach 'menu: ready'")
 
 # Drive the monitor: inject keystrokes, then dump the screen.
 sock = socket.socket(socket.AF_UNIX)
@@ -91,7 +91,9 @@ try:
     sock.recv(4096)        # consume the monitor banner
 except OSError:
     pass
-for key in ("a", "b", "c"):
+# a,b,c: exercise the keyboard IRQ.  s,w: move the menu cursor and back.
+# ret: launch the highlighted app (HELLO).  x: feed the app's getkey poll.
+for key in ("a", "b", "c", "s", "w", "ret", "x"):
     sock.sendall(("sendkey %s\n" % key).encode())
     time.sleep(0.2)
 sock.sendall(("screendump %s\n" % FB).encode())
@@ -104,6 +106,8 @@ pr, pg, pb = pixel_at(w, px, 15, 15)      # inside the app's 20x20 white square
 app_drew = pr > 200 and pg > 200 and pb > 200
 tr, tg, tb = pixel_at(w, px, 122, 90)     # a lit pixel of the "STINKOS" title
 title_drawn = tr > 200 and tg > 200 and tb > 200
+mr, mg, mb = pixel_at(w, px, 142, 120)    # a lit pixel of the "1 HELLO" menu entry
+menu_drawn = mr > 200 and mg > 200 and mb > 200
 qemu.send_signal(signal.SIGKILL)
 
 checks = {
@@ -114,6 +118,8 @@ checks = {
     "VBE mode":        "vbe: 1024x768" in out,
     "framebuffer draw": drawn > 100000,
     "text render":     title_drawn,
+    "menu ready":      "menu: ready" in out,
+    "menu drawn":      menu_drawn,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
     "disk app loaded": "loader: app loaded from disk slot" in out,
@@ -129,4 +135,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + text + timer + keyboard + disk-app ring3 (log/draw/getkey/alloc) syscalls")
+print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + text + timer + keyboard + menu -> launch disk app in ring3 (log/draw/getkey/alloc)")
