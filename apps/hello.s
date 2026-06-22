@@ -1,12 +1,32 @@
-# StinkOS userland app: runs in ring 3, asks the kernel to log a line via the
-# int 0x80 syscall (eax = number, ebx = arg), then idles. Built as a flat binary
-# linked at 0x400000, stored on a raw disk slot and loaded by the kernel.
+# StinkOS userland app (ring 3). Logs a line, then draws a 20x20 white square
+# on screen -- both through int 0x80 syscalls. Flat binary linked at 0x400000,
+# stored on a raw disk slot and loaded by the kernel.
+#   syscall: eax = number, args in ebx/ecx/edx
+#   1 = log   (ebx = string)
+#   2 = draw  (ebx = x, ecx = y, edx = rgb)
 .code32
 .global _start
 _start:
 	mov $1, %eax           # SYS_LOG
-	mov $msg, %ebx         # pointer to the string (absolute, linked at 0x400000)
+	mov $msg, %ebx
 	int $0x80
+
+	mov $10, %esi          # y = 10
+yloop:
+	mov $10, %edi          # x = 10
+xloop:
+	mov $2, %eax           # SYS_DRAW
+	mov %edi, %ebx
+	mov %esi, %ecx
+	mov $0xFFFFFF, %edx    # white
+	int $0x80
+	inc %edi
+	cmp $30, %edi          # x in [10, 30)
+	jl xloop
+	inc %esi
+	cmp $30, %esi          # y in [10, 30)
+	jl yloop
+
 hang:
 	jmp hang
 

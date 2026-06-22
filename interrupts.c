@@ -2,6 +2,7 @@
 #include "interrupts.h"
 #include "serial.h"
 #include "keyboard.h"
+#include "fb.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -146,6 +147,10 @@ static void syscall_dispatch(struct regs *r)
 		serial_write("ring3: ");
 		serial_write((const char *)r->ebx);
 		serial_putc('\n');
+		r->eax = 0;
+		break;
+	case 2:                                    /* SYS_DRAW: ebx=x ecx=y edx=rgb */
+		fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
 		break;
 	default:

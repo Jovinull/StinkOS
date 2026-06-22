@@ -38,25 +38,33 @@ def fail(msg):
     sys.exit(1)
 
 
-def nonblack_pixels(path):
+def read_ppm(path):
     try:
         data = open(path, "rb").read()
     except OSError:
-        return 0
+        return (0, 0, b"")
     if not data.startswith(b"P6"):
-        return 0
-    # skip the 3 whitespace-separated header fields (magic, WxH, maxval)
-    i, fields = 0, 0
-    while fields < 3 and i < len(data):
-        while i < len(data) and data[i:i + 1].isspace():
-            i += 1
-        while i < len(data) and not data[i:i + 1].isspace():
-            i += 1
-        fields += 1
-    i += 1  # single whitespace after maxval
-    px = data[i:]
-    return sum(1 for j in range(0, len(px) - 2, 3)
-               if px[j] or px[j + 1] or px[j + 2])
+        return (0, 0, b"")
+    toks, j = [], 0                       # tokenize: magic, width, height, maxval
+    while len(toks) < 4 and j < len(data):
+        while j < len(data) and data[j:j + 1].isspace():
+            j += 1
+        start = j
+        while j < len(data) and not data[j:j + 1].isspace():
+            j += 1
+        toks.append(data[start:j])
+    j += 1                                # single whitespace after maxval
+    return (int(toks[1]), int(toks[2]), data[j:])
+
+
+def nonblack_count(px):
+    return sum(1 for k in range(0, len(px) - 2, 3)
+               if px[k] or px[k + 1] or px[k + 2])
+
+
+def pixel_at(width, px, x, y):
+    o = (y * width + x) * 3
+    return (px[o], px[o + 1], px[o + 2]) if o + 2 < len(px) else (0, 0, 0)
 
 
 # Wait for the kernel to finish bringing up interrupts.
@@ -90,7 +98,10 @@ sock.sendall(("screendump %s\n" % FB).encode())
 time.sleep(0.6)
 
 out = serial()
-drawn = nonblack_pixels(FB)
+w, h, px = read_ppm(FB)
+drawn = nonblack_count(px)
+pr, pg, pb = pixel_at(w, px, 15, 15)      # inside the app's 20x20 white square
+app_drew = pr > 200 and pg > 200 and pb > 200
 qemu.send_signal(signal.SIGKILL)
 
 checks = {
@@ -104,6 +115,7 @@ checks = {
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
     "disk app loaded": "loader: app loaded from disk slot" in out,
     "ring3 syscall":   "ring3: hello from disk app" in out,
+    "draw syscall":    app_drew,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -112,4 +124,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: pm + gdt/tss + paging + pmm + VBE + fb (%d px) + timer + keyboard + disk-app ring3 syscall" % drawn)
+print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + timer + keyboard + disk-app ring3 (log+draw) syscalls")
