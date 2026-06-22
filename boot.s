@@ -107,6 +107,15 @@ pm_entry:
 	mov %ax, %gs
 	mov %ax, %ss
 	mov $STACK_TOP, %esp
+
+	# zero the .bss section (uninitialized statics) -- not stored in the image
+	cld
+	mov $__bss_start, %edi
+	mov $__bss_end, %ecx
+	sub %edi, %ecx
+	xor %eax, %eax
+	rep stosb
+
 	call kernel_main
 hang32:
 	cli

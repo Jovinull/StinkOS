@@ -25,8 +25,8 @@ $(BUILD)/%.o: %.c | $(BUILD)
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(AS) -O0 $< -o $@
 
-os: $(LINK_OBJS)
-	$(LD) -Ttext 0x7c00 --oformat binary -o os.bin $(LINK_OBJS)
+os: $(LINK_OBJS) linker.ld
+	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 
 hex:
