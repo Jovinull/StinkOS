@@ -1,0 +1,23 @@
+/* Port I/O primitives. */
+#ifndef IO_H
+#define IO_H
+
+static inline void outb(unsigned short port, unsigned char val)
+{
+	__asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline unsigned char inb(unsigned short port)
+{
+	unsigned char ret;
+	__asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
+	return ret;
+}
+
+/* Brief delay by writing to an unused port; lets slow PICs settle. */
+static inline void io_wait(void)
+{
+	outb(0x80, 0);
+}
+
+#endif
