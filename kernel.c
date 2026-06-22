@@ -9,19 +9,16 @@
 #include "pmm.h"
 #include "paging.h"
 #include "gdt.h"
+#include "ata.h"
 
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
-/* Demo ring-3 program: asks the kernel to log a line via int 0x80, then idles. */
-static unsigned char user_stack[4096] __attribute__((aligned(16)));
+/* App loaded from a raw disk slot and run in ring 3. */
+#define APP_LBA      64                 /* sector where the app binary lives */
+#define APP_SECTORS  4
+#define APP_ADDR     0x400000           /* load/run address (app is linked here) */
 
-static void user_program(void)
-{
-	const char *msg = "hello from ring3";
-	__asm__ volatile ("int $0x80" : : "a"(1), "b"(msg));
-	for (;;)
-		;
-}
+static unsigned char user_stack[4096] __attribute__((aligned(16)));
 
 void kernel_main(void)
 {
@@ -67,10 +64,12 @@ void kernel_main(void)
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 
-	/* Allow ring 3 into the demo program's region and drop into it. */
-	paging_set_user((unsigned int)user_program);
-	serial_write("usermode: entering ring 3\n");
-	enter_user_mode((unsigned int)user_program,
+	/* Load the app from its raw disk slot and run it in ring 3. */
+	ata_read(APP_LBA, APP_SECTORS, (void *)APP_ADDR);
+	serial_write("loader: app loaded from disk slot\n");
+	paging_set_user(APP_ADDR);                       /* app code/data region */
+	paging_set_user((unsigned int)user_stack);       /* user stack region */
+	enter_user_mode(APP_ADDR,
 	                (unsigned int)(user_stack + sizeof(user_stack)));
 
 	for (;;)

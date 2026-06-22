@@ -14,6 +14,13 @@ static inline unsigned char inb(unsigned short port)
 	return ret;
 }
 
+static inline unsigned short inw(unsigned short port)
+{
+	unsigned short ret;
+	__asm__ volatile ("inw %1, %0" : "=a"(ret) : "Nd"(port));
+	return ret;
+}
+
 /* Brief delay by writing to an unused port; lets slow PICs settle. */
 static inline void io_wait(void)
 {
