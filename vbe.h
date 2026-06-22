@@ -5,6 +5,7 @@
 struct vbe_mode {
 	unsigned short width;
 	unsigned short height;
+	unsigned short pitch;         /* bytes per scanline */
 	unsigned char  bpp;
 	unsigned int   framebuffer;   /* linear framebuffer physical address */
 	int            valid;

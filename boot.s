@@ -42,6 +42,11 @@ _start:
 	mov $0x118, %cx
 	mov $0x4F01, %ax
 	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_done
+	mov $0x4118, %bx            # set mode 0x118 | 0x4000 (linear framebuffer)
+	mov $0x4F02, %ax
+	int $0x10
 vbe_done:
 	# boot_drive was saved before VBE; the disk read reloads DL from it
 

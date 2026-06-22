@@ -4,6 +4,7 @@
 
 #define MODE_INFO 0x0700        /* must match MODE_INFO in boot.s */
 
+#define OFF_PITCH 16
 #define OFF_XRES  18
 #define OFF_YRES  20
 #define OFF_BPP   25
@@ -11,13 +12,15 @@
 
 void vbe_read(struct vbe_mode *m)
 {
-	unsigned short xres = *(volatile unsigned short *)(MODE_INFO + OFF_XRES);
-	unsigned short yres = *(volatile unsigned short *)(MODE_INFO + OFF_YRES);
-	unsigned char  bpp  = *(volatile unsigned char  *)(MODE_INFO + OFF_BPP);
-	unsigned int   fb   = *(volatile unsigned int    *)(MODE_INFO + OFF_FB);
+	unsigned short pitch = *(volatile unsigned short *)(MODE_INFO + OFF_PITCH);
+	unsigned short xres  = *(volatile unsigned short *)(MODE_INFO + OFF_XRES);
+	unsigned short yres  = *(volatile unsigned short *)(MODE_INFO + OFF_YRES);
+	unsigned char  bpp   = *(volatile unsigned char  *)(MODE_INFO + OFF_BPP);
+	unsigned int   fb    = *(volatile unsigned int    *)(MODE_INFO + OFF_FB);
 
 	m->width = xres;
 	m->height = yres;
+	m->pitch = pitch;
 	m->bpp = bpp;
 	m->framebuffer = fb;
 	m->valid = (xres != 0 && yres != 0 && fb != 0);
