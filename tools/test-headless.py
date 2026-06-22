@@ -92,12 +92,15 @@ try:
 except OSError:
     pass
 # a,b,c: exercise the keyboard IRQ.  s,w: move the menu cursor and back.
-# ret: launch the highlighted app (HELLO).  x: feed the app's getkey poll.
-for key in ("a", "b", "c", "s", "w", "ret", "x"):
+# ret: launch the highlighted app (HELLO), which draws and waits for a key.
+for key in ("a", "b", "c", "s", "w", "ret"):
     sock.sendall(("sendkey %s\n" % key).encode())
     time.sleep(0.2)
-sock.sendall(("screendump %s\n" % FB).encode())
-time.sleep(0.6)
+time.sleep(0.4)                                 # let HELLO draw and reach its key poll
+sock.sendall(("screendump %s\n" % FB).encode())  # capture while HELLO is on screen
+time.sleep(0.4)
+sock.sendall(b"sendkey x\n")                      # HELLO gets key -> logs -> SYS_EXIT
+time.sleep(0.5)                                   # ... and the menu redraws
 
 out = serial()
 w, h, px = read_ppm(FB)
@@ -127,6 +130,7 @@ checks = {
     "draw syscall":    app_drew,
     "alloc syscall":   "app: alloc ok" in out,
     "getkey syscall":  "app: key received" in out,
+    "exit to menu":    "menu: back" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -135,4 +139,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: pm + gdt/tss + paging + pmm + VBE + fb + text + timer + keyboard + menu -> launch disk app in ring3 (log/draw/getkey/alloc)")
+print("PASS: full cycle - menu -> launch disk app in ring3 (log/draw/getkey/alloc) -> exit -> menu")

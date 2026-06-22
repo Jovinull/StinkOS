@@ -51,6 +51,8 @@ poll:                          # wait for a keypress from the kernel
 	mov $msg2, %ebx
 	int $0x80
 
+	mov $5, %eax           # SYS_EXIT: hand control back to the menu
+	int $0x80
 hang:
 	jmp hang
 

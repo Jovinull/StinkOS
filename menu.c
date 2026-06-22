@@ -10,6 +10,12 @@
 
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
+struct kctx { unsigned int esp, ebp, ebx, esi, edi, eip; };
+extern int  ksetjmp(struct kctx *ctx);
+extern void klongjmp(struct kctx *ctx, int val);
+
+static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT */
+
 #define APP_ADDR     0x400000
 #define APP_SECTORS  4
 
@@ -39,8 +45,16 @@ static void draw(int selected)
 	}
 }
 
+void menu_exit(void)
+{
+	klongjmp(&exit_ctx, 1);                 /* jump back into launch() */
+}
+
 static void launch(int index)
 {
+	if (ksetjmp(&exit_ctx) != 0)
+		return;                         /* app called SYS_EXIT: back to menu */
+
 	ata_read(apps[index].lba, APP_SECTORS, (void *)APP_ADDR);
 	serial_write("loader: app loaded from disk slot\n");
 	paging_set_user(APP_ADDR);
@@ -68,7 +82,10 @@ void menu_run(void)
 			selected--;
 			draw(selected);
 		} else if (c == '\n') {
-			launch(selected);          /* does not return */
+			launch(selected);          /* returns here when the app exits */
+			__asm__ volatile ("sti");  /* longjmp skipped the syscall's iret */
+			serial_write("menu: back\n");
+			draw(selected);
 		}
 	}
 }

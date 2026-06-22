@@ -5,6 +5,7 @@
 #include "fb.h"
 #include "pmm.h"
 #include "paging.h"
+#include "menu.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -165,6 +166,9 @@ static void syscall_dispatch(struct regs *r)
 		r->eax = frame;
 		break;
 	}
+	case 5:                                    /* SYS_EXIT: return to the menu */
+		menu_exit();                       /* does not return */
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;
