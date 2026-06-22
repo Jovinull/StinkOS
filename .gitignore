@@ -82,6 +82,12 @@ dkms.conf
 Kernel/
 Boot/
 
+# Build output dir (Makefile)
+build/
+
+# Local study/scratch dir — not part of the project
+osdev-refs/
+
 # Ignore .bin files
 *.bin
 
