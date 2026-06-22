@@ -8,11 +8,15 @@
 #include "fb.h"
 #include "pmm.h"
 #include "paging.h"
+#include "gdt.h"
 
 void kernel_main(void)
 {
 	serial_init();
 	serial_write("StinkOS: protected mode active\n");
+
+	gdt_init();
+	serial_write("gdt: kernel+user segments and tss loaded\n");
 
 	pmm_init(0x100000, 0x2000000);          /* manage 1 MiB .. 32 MiB */
 	paging_init();

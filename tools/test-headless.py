@@ -95,6 +95,7 @@ qemu.send_signal(signal.SIGKILL)
 
 checks = {
     "protected mode":  "StinkOS: protected mode active" in out,
+    "gdt+tss":         "gdt: kernel+user segments and tss loaded" in out,
     "paging":          "paging: enabled" in out,
     "pmm alloc":       "pmm: frame 0x" in out,
     "VBE mode":        "vbe: 1024x768" in out,
@@ -109,4 +110,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: protected mode + paging + pmm + VBE + framebuffer (%d px) + timer + keyboard" % drawn)
+print("PASS: protected mode + gdt/tss + paging + pmm + VBE + framebuffer (%d px) + timer + keyboard" % drawn)
