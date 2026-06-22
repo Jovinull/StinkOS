@@ -124,6 +124,14 @@ time.sleep(0.4)
 sock.sendall(b"sendkey q\n")                      # quit the game -> menu
 time.sleep(0.5)
 
+# Back at the menu (cursor on GAME): move to "5 HIC" (a C app) and launch it.
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.3)
+sock.sendall(b"sendkey z\n")                      # let the C app's getkey return
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -159,6 +167,7 @@ checks = {
     "fault app ran":   "fault app running" in out,
     "fault killed":    "app: fault, killed" in out,
     "game block":      game_block,
+    "c app ran":       "hi from c app" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -167,4 +176,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: menu -> isolated ring3 apps (log/draw/getkey/alloc/exit); faulting app killed; keyboard game runs -> menu")
+print("PASS: menu -> isolated ring3 apps (asm + C); syscalls; faulting app killed; keyboard game; all return to menu")

@@ -28,6 +28,7 @@ static const struct app_entry apps[] = {
 	{ "2 BOX",   72 },
 	{ "3 FAULT", 80 },
 	{ "4 GAME",  88 },
+	{ "5 HIC",   96 },
 };
 #define APP_COUNT (int)(sizeof(apps) / sizeof(apps[0]))
 
