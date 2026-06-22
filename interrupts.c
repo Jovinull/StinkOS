@@ -153,6 +153,9 @@ static void syscall_dispatch(struct regs *r)
 		fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
 		break;
+	case 3:                                    /* SYS_GETKEY: -> char or 0 */
+		r->eax = (unsigned char)keyboard_getchar();
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;

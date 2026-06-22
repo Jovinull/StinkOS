@@ -32,6 +32,30 @@ static const char map_shift[128] = {
 
 static int shift_down = 0;
 
+/* Decoded-character ring buffer, drained by keyboard_getchar (the syscall). */
+#define KBUF_SIZE 128
+static volatile char kbuf[KBUF_SIZE];
+static volatile int  kbuf_head;
+static volatile int  kbuf_tail;
+
+static void kbuf_push(char c)
+{
+	int next = (kbuf_head + 1) % KBUF_SIZE;
+	if (next != kbuf_tail) {
+		kbuf[kbuf_head] = c;
+		kbuf_head = next;
+	}
+}
+
+char keyboard_getchar(void)
+{
+	if (kbuf_head == kbuf_tail)
+		return 0;                          /* empty */
+	char c = kbuf[kbuf_tail];
+	kbuf_tail = (kbuf_tail + 1) % KBUF_SIZE;
+	return c;
+}
+
 void keyboard_init(void)
 {
 	/* drain a possibly-pending byte so the first real key raises IRQ1 */
@@ -61,4 +85,6 @@ void keyboard_handle(void)
 	serial_write("kbd: ");
 	serial_putc(c);
 	serial_putc('\n');
+
+	kbuf_push(c);                              /* make it available to userland */
 }
