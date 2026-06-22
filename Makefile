@@ -16,9 +16,12 @@ APP3_LBA = 80
 APP4_LBA = 88
 APP5_LBA = 96
 APP6_LBA = 104
-APP_END  = 55296          # (APP6_LBA + 4) * 512: keep all slots present
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c menu.c
+# App table-of-contents (mini-filesystem) sector and final image size.
+TOC_LBA  = 120
+TOC_END  = 61952          # (TOC_LBA + 1) * 512: keep the TOC sector present
+
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c fs.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
@@ -71,7 +74,15 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.bin $(BUILD)/box.bin $(BUILD)/fault.bi
 	dd if=$(BUILD)/game.bin  of=os.bin bs=512 seek=$(APP4_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/hi.bin    of=os.bin bs=512 seek=$(APP5_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/anim.bin  of=os.bin bs=512 seek=$(APP6_LBA) conv=notrunc status=none
-	@size=$$(stat -c%s os.bin); if [ $$size -lt $(APP_END) ]; then truncate -s $(APP_END) os.bin; fi
+	python3 tools/make-toc.py $(BUILD)/toc.bin \
+		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.bin" \
+		"2 BOX:$(APP2_LBA):$(BUILD)/box.bin" \
+		"3 FAULT:$(APP3_LBA):$(BUILD)/fault.bin" \
+		"4 GAME:$(APP4_LBA):$(BUILD)/game.bin" \
+		"5 HIC:$(APP5_LBA):$(BUILD)/hi.bin" \
+		"6 ANIM:$(APP6_LBA):$(BUILD)/anim.bin"
+	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
+	@size=$$(stat -c%s os.bin); if [ $$size -lt $(TOC_END) ]; then truncate -s $(TOC_END) os.bin; fi
 
 hex:
 	hexdump os.bin

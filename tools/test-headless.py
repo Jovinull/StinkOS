@@ -185,4 +185,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: menu -> isolated ring3 apps (asm + C); 6 syscalls incl ticks; faulting app killed; game + time-anim; all return to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 6 syscalls; faulting app killed; game + time-anim; back to menu")

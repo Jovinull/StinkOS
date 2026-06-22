@@ -7,6 +7,7 @@
 #include "serial.h"
 #include "ata.h"
 #include "paging.h"
+#include "fs.h"
 
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
@@ -16,31 +17,14 @@ extern void klongjmp(struct kctx *ctx, int val);
 
 static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT */
 
-#define APP_SECTORS  4
-
-struct app_entry {
-	const char  *name;
-	unsigned int lba;
-};
-
-static const struct app_entry apps[] = {
-	{ "1 HELLO", 64 },
-	{ "2 BOX",   72 },
-	{ "3 FAULT", 80 },
-	{ "4 GAME",  88 },
-	{ "5 HIC",   96 },
-	{ "6 ANIM",  104 },
-};
-#define APP_COUNT (int)(sizeof(apps) / sizeof(apps[0]))
-
 static void draw(int selected)
 {
 	fb_fill(0x001022);
 	fb_rect(112, 84, 800, 400, 0x3050C0);
 	fb_text(120, 90, "STINKOS", 0xFFFFFF);
 
-	for (int i = 0; i < APP_COUNT; i++) {
-		fb_text(140, 120 + i * 20, apps[i].name, 0xFFFFFF);
+	for (int i = 0; i < fs_count(); i++) {
+		fb_text(140, 120 + i * 20, fs_name(i), 0xFFFFFF);
 		if (i == selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
@@ -57,7 +41,7 @@ static void launch(int index)
 		return;                         /* app called SYS_EXIT: back to menu */
 
 	paging_reset_user_heap();
-	ata_read(apps[index].lba, APP_SECTORS, (void *)paging_user_code());
+	ata_read(fs_lba(index), fs_sectors(index), (void *)paging_user_code());
 	serial_write("loader: app loaded from disk slot\n");
 	enter_user_mode(paging_user_code(), paging_user_stack_top());
 }
@@ -66,6 +50,7 @@ void menu_run(void)
 {
 	int selected = 0;
 
+	fs_init();
 	draw(selected);
 	serial_write("menu: ready\n");
 
@@ -75,7 +60,7 @@ void menu_run(void)
 			__asm__ volatile ("hlt");
 			continue;
 		}
-		if (c == 's' && selected < APP_COUNT - 1) {
+		if (c == 's' && selected < fs_count() - 1) {
 			selected++;
 			draw(selected);
 		} else if (c == 'w' && selected > 0) {
