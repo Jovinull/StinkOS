@@ -6,11 +6,23 @@
 #include "keyboard.h"
 #include "vbe.h"
 #include "fb.h"
+#include "pmm.h"
+#include "paging.h"
 
 void kernel_main(void)
 {
 	serial_init();
 	serial_write("StinkOS: protected mode active\n");
+
+	pmm_init(0x100000, 0x2000000);          /* manage 1 MiB .. 32 MiB */
+	paging_init();
+	serial_write("paging: enabled\n");
+
+	unsigned int frame = pmm_alloc();
+	serial_write("pmm: frame 0x");
+	serial_write_hex(frame);
+	serial_putc('\n');
+	pmm_free(frame);
 
 	struct vbe_mode vm;
 	vbe_read(&vm);
