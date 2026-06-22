@@ -102,6 +102,7 @@ checks = {
     "framebuffer draw": drawn > 100000,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
+    "ring3 syscall":   "ring3: hello from ring3" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -110,4 +111,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: protected mode + gdt/tss + paging + pmm + VBE + framebuffer (%d px) + timer + keyboard" % drawn)
+print("PASS: pm + gdt/tss + paging + pmm + VBE + fb (%d px) + timer + keyboard + ring3 syscall" % drawn)

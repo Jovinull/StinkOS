@@ -10,6 +10,19 @@
 #include "paging.h"
 #include "gdt.h"
 
+extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
+
+/* Demo ring-3 program: asks the kernel to log a line via int 0x80, then idles. */
+static unsigned char user_stack[4096] __attribute__((aligned(16)));
+
+static void user_program(void)
+{
+	const char *msg = "hello from ring3";
+	__asm__ volatile ("int $0x80" : : "a"(1), "b"(msg));
+	for (;;)
+		;
+}
+
 void kernel_main(void)
 {
 	serial_init();
@@ -53,6 +66,12 @@ void kernel_main(void)
 	keyboard_init();
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
+
+	/* Allow ring 3 into the demo program's region and drop into it. */
+	paging_set_user((unsigned int)user_program);
+	serial_write("usermode: entering ring 3\n");
+	enter_user_mode((unsigned int)user_program,
+	                (unsigned int)(user_stack + sizeof(user_stack)));
 
 	for (;;)
 		__asm__ volatile ("hlt");

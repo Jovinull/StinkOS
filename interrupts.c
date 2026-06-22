@@ -17,6 +17,7 @@ extern void irq0(void),  irq1(void),  irq2(void),  irq3(void),  irq4(void);
 extern void irq5(void),  irq6(void),  irq7(void),  irq8(void),  irq9(void);
 extern void irq10(void), irq11(void), irq12(void), irq13(void), irq14(void);
 extern void irq15(void);
+extern void isr128(void);                 /* int 0x80 syscall entry */
 
 /* ---- IDT ---- */
 struct idt_entry {
@@ -120,6 +121,9 @@ void interrupts_init(void)
 	set_gate(46, (unsigned int)irq14, 0x08, 0x8E);
 	set_gate(47, (unsigned int)irq15, 0x08, 0x8E);
 
+	/* syscall gate: DPL 3 so ring-3 code may invoke int 0x80 */
+	set_gate(0x80, (unsigned int)isr128, 0x08, 0xEE);
+
 	idt_load((unsigned int)&idtp);
 }
 
@@ -134,8 +138,29 @@ void pit_init(unsigned int hz)
 
 /* ---- C handlers (called from the stubs) ---- */
 
+/* System calls: eax = number, ebx = arg. Result returned in eax. */
+static void syscall_dispatch(struct regs *r)
+{
+	switch (r->eax) {
+	case 1:                                    /* SYS_LOG: ebx = string */
+		serial_write("ring3: ");
+		serial_write((const char *)r->ebx);
+		serial_putc('\n');
+		r->eax = 0;
+		break;
+	default:
+		r->eax = (unsigned int)-1;
+		break;
+	}
+}
+
 void isr_handler(struct regs *r)
 {
+	if (r->int_no == 128) {                    /* int 0x80 syscall */
+		syscall_dispatch(r);
+		return;
+	}
+
 	serial_write("StinkOS: CPU exception ");
 	serial_write_dec(r->int_no);
 	serial_write(" - halted\n");

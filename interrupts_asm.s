@@ -90,6 +90,15 @@ irq\num:
 	IRQ 14, 46
 	IRQ 15, 47
 
+# Syscall entry (int 0x80) -- routed through the exception common path, which
+# dispatches vector 128 to the syscall handler instead of halting.
+.global isr128
+isr128:
+	cli
+	push $0
+	push $128
+	jmp isr_common
+
 .extern isr_handler
 .extern irq_handler
 

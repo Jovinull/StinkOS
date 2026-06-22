@@ -12,7 +12,7 @@ IMG_MIN = 20992
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c pmm.c paging.c gdt.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
-LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(C_OBJS)
+LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
 
 all: os
 
