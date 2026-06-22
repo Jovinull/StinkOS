@@ -142,6 +142,8 @@ void pit_init(unsigned int hz)
 
 /* ---- C handlers (called from the stubs) ---- */
 
+static volatile unsigned int ticks = 0;        /* PIT ticks since boot */
+
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 static void syscall_dispatch(struct regs *r)
 {
@@ -164,6 +166,9 @@ static void syscall_dispatch(struct regs *r)
 		break;
 	case 5:                                    /* SYS_EXIT: return to the menu */
 		menu_exit();                       /* does not return */
+		break;
+	case 6:                                    /* SYS_TICKS: -> PIT ticks */
+		r->eax = ticks;
 		break;
 	default:
 		r->eax = (unsigned int)-1;
@@ -192,8 +197,6 @@ void isr_handler(struct regs *r)
 	for (;;)
 		__asm__ volatile ("cli; hlt");
 }
-
-static volatile unsigned int ticks = 0;
 
 void irq_handler(struct regs *r)
 {

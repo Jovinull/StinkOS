@@ -132,6 +132,14 @@ time.sleep(0.3)
 sock.sendall(b"sendkey z\n")                      # let the C app's getkey return
 time.sleep(0.4)
 
+# Back at the menu (cursor on HIC): move to "6 ANIM" (C app using SYS_TICKS).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.7)                                   # let it log time-flow and animate
+sock.sendall(b"sendkey z\n")                      # exit anim -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -168,6 +176,7 @@ checks = {
     "fault killed":    "app: fault, killed" in out,
     "game block":      game_block,
     "c app ran":       "hi from c app" in out,
+    "sys_ticks":       "anim: time flows" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -176,4 +185,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: menu -> isolated ring3 apps (asm + C); syscalls; faulting app killed; keyboard game; all return to menu")
+print("PASS: menu -> isolated ring3 apps (asm + C); 6 syscalls incl ticks; faulting app killed; game + time-anim; all return to menu")

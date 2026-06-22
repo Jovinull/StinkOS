@@ -19,5 +19,6 @@ static inline void sys_draw(int x, int y, unsigned int rgb)
 static inline int  sys_getkey(void)              { return __syscall(3, 0, 0, 0); }
 static inline unsigned int sys_alloc(void)       { return (unsigned int)__syscall(4, 0, 0, 0); }
 static inline void sys_exit(void)                { __syscall(5, 0, 0, 0); }
+static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 
 #endif
