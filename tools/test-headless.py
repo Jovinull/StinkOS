@@ -233,6 +233,7 @@ checks = {
     "sys_sound":       "beep: start" in out and "beep: done" in out,
     "persistence":     "fs: wrote counter" in out and "save: persisted ok" in out,
     "stinkfs file":    "stinkfs ok" in out and "files: read back ok" in out,
+    "stinkfs append":  "fs: appended note.txt" in out,
     "stinkfs list":    "fs: info note.txt" in out and "ls: done" in out,
     "stinkfs delete":  "fs: deleted a.txt" in out and "del: compaction ok" in out,
     "game hiscore":    "game over" in out and "game: new high" in out and "fs: wrote hiscore" in out,
@@ -244,4 +245,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 12 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/read/list/delete+compaction); collector game saves a high score; back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 13 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/append/read/list/delete+compaction); collector game saves a high score; back to menu")

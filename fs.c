@@ -206,6 +206,74 @@ int fs_file_delete(const char *name)
 	return 0;
 }
 
+/* Appends 'size' bytes to file 'name' (creating it if absent). Grows the last
+ * file in place when possible, otherwise relocates it to a region with room.
+ * Returns 0 on success, -1 if the data region is full or on overflow. */
+int fs_file_append(const char *name, const void *buf, unsigned int size)
+{
+	int i = fs_find(name);
+	if (i < 0)
+		return fs_file_write(name, buf, size);
+	if (size == 0)
+		return 0;
+
+	unsigned int old_size = dir->files[i].size;
+	unsigned int new_size = old_size + size;
+	if (new_size < old_size)                           /* size overflow */
+		return -1;
+
+	unsigned int start    = dir->files[i].start;
+	unsigned int old_sect = need_sectors(old_size);
+	unsigned int new_sect = need_sectors(new_size);
+
+	if (new_sect > old_sect) {
+		if (start + old_sect == dir->next_free) {  /* last file: extend */
+			if (start + new_sect > FS_DATA_END)
+				return -1;
+			dir->next_free = start + new_sect;
+		} else {                                   /* relocate with room */
+			if (dir->next_free + new_sect > FS_DATA_END)
+				return -1;
+			unsigned int dst = dir->next_free;
+			for (unsigned int s = 0; s < old_sect; s++) {
+				ata_read(start + s, 1, io_buf);
+				ata_write(dst + s, 1, io_buf);
+			}
+			dir->next_free += new_sect;
+			start = dst;
+			dir->files[i].start = dst;
+		}
+	}
+
+	/* write the new bytes starting at the old end-of-file, merging the tail
+	 * sector that already holds part of the file */
+	unsigned int pos = old_size;
+	unsigned int remaining = size;
+	const unsigned char *src = (const unsigned char *)buf;
+	while (remaining > 0) {
+		unsigned int sec = start + pos / 512;
+		unsigned int off = pos % 512;
+		unsigned int chunk = 512 - off;
+		if (chunk > remaining)
+			chunk = remaining;
+		if (off != 0)
+			ata_read(sec, 1, io_buf);          /* keep bytes before off */
+		else
+			for (int k = 0; k < 512; k++)
+				io_buf[k] = 0;
+		for (unsigned int k = 0; k < chunk; k++)
+			io_buf[off + k] = src[k];
+		ata_write(sec, 1, io_buf);
+		pos += chunk;
+		remaining -= chunk;
+		src += chunk;
+	}
+
+	dir->files[i].size = new_size;
+	ata_write(FS_DIR_LBA, 1, dir_buf);
+	return 0;
+}
+
 int fs_file_count(void)
 {
 	return (int)dir->count;

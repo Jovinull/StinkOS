@@ -29,5 +29,7 @@ static inline int  sys_fcount(void)              { return __syscall(10, 0, 0, 0)
 static inline int  sys_finfo(int index, char *name)
                                                  { return __syscall(11, index, (int)name, 0); }
 static inline int  sys_fdelete(const char *name) { return __syscall(12, (int)name, 0, 0); }
+static inline int  sys_fappend(const char *name, const void *buf, unsigned int size)
+                                                 { return __syscall(13, (int)name, (int)buf, (int)size); }
 
 #endif

@@ -176,6 +176,22 @@ static int fs_syscall_write(unsigned int uname, unsigned int ubuf, unsigned int 
 	return r;
 }
 
+static int fs_syscall_append(unsigned int uname, unsigned int ubuf, unsigned int size)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	if (!paging_user_range_ok(ubuf, size))
+		return -1;
+	int r = fs_file_append(kname, (const void *)ubuf, size);
+	if (r == 0) {
+		serial_write("fs: appended ");
+		serial_write(kname);
+		serial_putc('\n');
+	}
+	return r;
+}
+
 static int fs_syscall_read(unsigned int uname, unsigned int ubuf, unsigned int maxsize)
 {
 	char kname[16];
@@ -259,6 +275,9 @@ static void syscall_dispatch(struct regs *r)
 		break;
 	case 12:                                   /* SYS_FDELETE: ebx=name */
 		r->eax = (unsigned int)fs_syscall_delete(r->ebx);
+		break;
+	case 13:                                   /* SYS_FAPPEND: ebx=name ecx=buf edx=size */
+		r->eax = (unsigned int)fs_syscall_append(r->ebx, r->ecx, r->edx);
 		break;
 	default:
 		r->eax = (unsigned int)-1;
