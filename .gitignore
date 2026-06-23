@@ -88,6 +88,9 @@ build/
 # Local study/scratch dir — not part of the project
 osdev-refs/
 
+# Local exported assistant memory — local only, not part of the project
+.memory/
+
 # Ignore .bin files
 *.bin
 
