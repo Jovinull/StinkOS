@@ -1,7 +1,7 @@
-/* On-disk storage for StinkOS. Holds three things, all matching the Makefile
- * layout: the read-only app table-of-contents (TOC) the menu boots from, a
- * single-value scratch sector, and StinkFS -- a small writable filesystem of
- * named files (a one-sector directory plus a contiguous data region). */
+/* On-disk storage for StinkOS. Holds two things, both matching the Makefile
+ * layout: the read-only app table-of-contents (TOC) the menu boots from, and
+ * StinkFS -- a small writable filesystem of named files (a one-sector directory
+ * plus a contiguous data region). All persistent userland state lives in files. */
 #include "fs.h"
 #include "ata.h"
 
@@ -9,14 +9,13 @@
  * (sixteen 8-sector slots) so new apps can be added without shifting metadata;
  * everything below lives above it. */
 #define TOC_LBA   192              /* app table-of-contents */
-#define SAVE_LBA  193              /* one sector of persistent userland storage */
 #define MAX_APPS  16
 
 /* StinkFS layout. */
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
-#define FS_DIR_LBA    194          /* directory sector */
-#define FS_DATA_LBA   195          /* first data sector */
-#define FS_DATA_END   227          /* one past the last data sector (32 sectors) */
+#define FS_DIR_LBA    193          /* directory sector */
+#define FS_DATA_LBA   194          /* first data sector */
+#define FS_DATA_END   226          /* one past the last data sector (32 sectors) */
 #define FS_MAX_FILES  16
 
 struct toc_entry {
@@ -74,22 +73,6 @@ int          fs_count(void)            { return count; }
 const char  *fs_name(int index)        { return entries[index].name; }
 unsigned int fs_lba(int index)         { return entries[index].lba; }
 unsigned int fs_sectors(int index)     { return entries[index].sectors; }
-
-/* Persistent storage: one disk sector holding a single 32-bit value, written
- * and read back through the ATA driver so it survives across app launches. */
-static unsigned char save_buf[512];
-
-unsigned int fs_load(void)
-{
-	ata_read(SAVE_LBA, 1, save_buf);
-	return *(unsigned int *)save_buf;
-}
-
-void fs_save(unsigned int value)
-{
-	*(unsigned int *)save_buf = value;
-	ata_write(SAVE_LBA, 1, save_buf);
-}
 
 /* ---- StinkFS named files ---- */
 

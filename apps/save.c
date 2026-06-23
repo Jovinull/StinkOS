@@ -1,15 +1,21 @@
-/* StinkOS userland C app: demonstrates persistent storage. Loads a counter from
- * disk (SYS_LOAD), increments it, writes it back (SYS_SAVE), then loads it again
- * to prove the value actually reached the medium. Press a key to return. */
+/* StinkOS userland C app: demonstrates persistence using an ordinary StinkFS
+ * file. Reads a counter from "counter", increments it, writes it back, then
+ * re-reads it to prove the value reached the disk. Each launch counts up. */
 #include "libstink.h"
 
 void main(void)
 {
-	unsigned int v = sys_load();
-	v = v + 1;
-	sys_save(v);
+	unsigned int v = 0;
+	char buf[4];
 
-	if (sys_load() == v)               /* re-read from disk: persisted? */
+	if (sys_fread("counter", buf, 4) == 4)
+		v = *(unsigned int *)buf;
+
+	v = v + 1;
+	*(unsigned int *)buf = v;
+	sys_fwrite("counter", buf, 4);
+
+	if (sys_fread("counter", buf, 4) == 4 && *(unsigned int *)buf == v)
 		sys_log("save: persisted ok");
 	else
 		sys_log("save: persist failed");

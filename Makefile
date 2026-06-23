@@ -29,11 +29,10 @@ APP11_LBA = 144
 APP12_LBA = 152
 
 # The app region spans LBA 64..191 (sixteen 8-sector slots). Metadata lives
-# above it: app TOC, single-value save sector, then StinkFS (a directory sector
-# at 194 and a 32-sector data region at 195..226).
+# above it: the app TOC, then StinkFS (a directory sector at 193 and a 32-sector
+# data region at 194..225). All persistent userland state lives in files.
 TOC_LBA  = 192
-SAVE_LBA = 193
-DISK_END = 116224         # (195 + 32) * 512: keep TOC, save and StinkFS present
+DISK_END = 115712         # (194 + 32) * 512: keep TOC and StinkFS present
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))

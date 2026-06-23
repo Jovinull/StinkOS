@@ -236,29 +236,16 @@ static void syscall_dispatch(struct regs *r)
 		speaker_play(r->ebx);
 		r->eax = 0;
 		break;
-	case 8:                                    /* SYS_SAVE: ebx = value -> disk */
-		fs_save(r->ebx);
-		serial_write("fs: saved ");
-		serial_write_dec(r->ebx);
-		serial_putc('\n');
-		r->eax = 0;
-		break;
-	case 9:                                    /* SYS_LOAD: -> persisted value */
-		r->eax = fs_load();
-		serial_write("fs: loaded ");
-		serial_write_dec(r->eax);
-		serial_putc('\n');
-		break;
-	case 10:                                   /* SYS_FWRITE: ebx=name ecx=buf edx=size */
+	case 8:                                    /* SYS_FWRITE: ebx=name ecx=buf edx=size */
 		r->eax = (unsigned int)fs_syscall_write(r->ebx, r->ecx, r->edx);
 		break;
-	case 11:                                   /* SYS_FREAD: ebx=name ecx=buf edx=max */
+	case 9:                                    /* SYS_FREAD: ebx=name ecx=buf edx=max */
 		r->eax = (unsigned int)fs_syscall_read(r->ebx, r->ecx, r->edx);
 		break;
-	case 12:                                   /* SYS_FCOUNT: -> number of files */
+	case 10:                                   /* SYS_FCOUNT: -> number of files */
 		r->eax = (unsigned int)fs_file_count();
 		break;
-	case 13:                                   /* SYS_FINFO: ebx=index ecx=name buf */
+	case 11:                                   /* SYS_FINFO: ebx=index ecx=name buf */
 		if (!paging_user_range_ok(r->ecx, 16)) {
 			r->eax = (unsigned int)-1;
 		} else {
@@ -270,7 +257,7 @@ static void syscall_dispatch(struct regs *r)
 			}
 		}
 		break;
-	case 14:                                   /* SYS_FDELETE: ebx=name */
+	case 12:                                   /* SYS_FDELETE: ebx=name */
 		r->eax = (unsigned int)fs_syscall_delete(r->ebx);
 		break;
 	default:
