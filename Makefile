@@ -6,7 +6,9 @@ LD = i386-elf-ld
 CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 # App link flags: omagic (-N) packs the loadable segment with no page-alignment
 # gap, and -s strips the symbol tables, keeping each app ELF down to one sector.
-APP_LDFLAGS = -T apps/app.ld -N -s
+# Apps are a single flat code+data region (one set of user pages), so the load
+# segment is intentionally RWX; silence ld's advisory warning about that.
+APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments
 
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 40) * 512 = 20992.
@@ -19,12 +21,13 @@ APP3_LBA = 80
 APP4_LBA = 88
 APP5_LBA = 96
 APP6_LBA = 104
+APP7_LBA = 112
 
 # App table-of-contents (mini-filesystem) sector and final image size.
 TOC_LBA  = 120
 TOC_END  = 61952          # (TOC_LBA + 1) * 512: keep the TOC sector present
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c fs.c menu.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
@@ -69,7 +72,12 @@ $(BUILD)/anim.elf: apps/crt0.s apps/anim.c apps/libstink.h apps/app.ld | $(BUILD
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/anim.elf $(BUILD)/crt0.o $(BUILD)/anim_app.o
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf
+$(BUILD)/beep.elf: apps/crt0.s apps/beep.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/beep.c -o $(BUILD)/beep_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/beep.elf $(BUILD)/crt0.o $(BUILD)/beep_app.o
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	dd if=$(BUILD)/hello.elf of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
@@ -78,13 +86,15 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/game.elf  of=os.bin bs=512 seek=$(APP4_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/hi.elf    of=os.bin bs=512 seek=$(APP5_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/anim.elf  of=os.bin bs=512 seek=$(APP6_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/beep.elf  of=os.bin bs=512 seek=$(APP7_LBA) conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
 		"3 FAULT:$(APP3_LBA):$(BUILD)/fault.elf" \
 		"4 GAME:$(APP4_LBA):$(BUILD)/game.elf" \
 		"5 HIC:$(APP5_LBA):$(BUILD)/hi.elf" \
-		"6 ANIM:$(APP6_LBA):$(BUILD)/anim.elf"
+		"6 ANIM:$(APP6_LBA):$(BUILD)/anim.elf" \
+		"7 BEEP:$(APP7_LBA):$(BUILD)/beep.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(TOC_END) ]; then truncate -s $(TOC_END) os.bin; fi
 

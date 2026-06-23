@@ -6,6 +6,7 @@
 #include "pmm.h"
 #include "paging.h"
 #include "menu.h"
+#include "speaker.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -169,6 +170,10 @@ static void syscall_dispatch(struct regs *r)
 		break;
 	case 6:                                    /* SYS_TICKS: -> PIT ticks */
 		r->eax = ticks;
+		break;
+	case 7:                                    /* SYS_SOUND: ebx = freq (0=off) */
+		speaker_play(r->ebx);
+		r->eax = 0;
 		break;
 	default:
 		r->eax = (unsigned int)-1;

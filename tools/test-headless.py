@@ -140,6 +140,14 @@ time.sleep(0.7)                                   # let it log time-flow and ani
 sock.sendall(b"sendkey z\n")                      # exit anim -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on ANIM): move to "7 BEEP" (C app using SYS_SOUND).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.7)                                   # let it play the three-note tune
+sock.sendall(b"sendkey z\n")                      # exit beep -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -177,6 +185,7 @@ checks = {
     "game block":      game_block,
     "c app ran":       "hi from c app" in out,
     "sys_ticks":       "anim: time flows" in out,
+    "sys_sound":       "beep: start" in out and "beep: done" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
