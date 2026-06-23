@@ -80,6 +80,8 @@ int elf_load(const void *image, unsigned int size, unsigned int *entry)
 	if (eh->e_entry < code_lo || eh->e_entry >= code_hi)
 		return 1;
 
+	int entry_loaded = 0;            /* a PT_LOAD must back the entry point */
+
 	for (u16 i = 0; i < eh->e_phnum; i++) {
 		u32 off = eh->e_phoff + (u32)i * eh->e_phentsize;
 		/* Subtraction form throughout: never add two u32 that could wrap. */
@@ -104,10 +106,17 @@ int elf_load(const void *image, unsigned int size, unsigned int *entry)
 		if (ph->p_memsz > code_hi - ph->p_vaddr)
 			return 1;
 
+		if (eh->e_entry >= ph->p_vaddr &&
+		    eh->e_entry < ph->p_vaddr + ph->p_memsz)
+			entry_loaded = 1;
+
 		u8 *dst = (u8 *)ph->p_vaddr;
 		copy(dst, base + ph->p_offset, ph->p_filesz);
 		zero(dst + ph->p_filesz, ph->p_memsz - ph->p_filesz);
 	}
+
+	if (!entry_loaded)               /* no segment covers the entry point */
+		return 1;
 
 	*entry = eh->e_entry;
 	return 0;
