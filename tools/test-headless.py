@@ -193,6 +193,14 @@ time.sleep(0.4)                                   # let it persist the high scor
 sock.sendall(b"sendkey z\n")                      # leave the game -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on PLAY): move to "13 SEEK" (offset reads).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.5)                                   # let it write and slice-read
+sock.sendall(b"sendkey z\n")                      # exit seek -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -237,6 +245,7 @@ checks = {
     "stinkfs list":    "fs: info note.txt" in out and "ls: done" in out,
     "stinkfs delete":  "fs: deleted a.txt" in out and "del: compaction ok" in out,
     "game hiscore":    "game over" in out and "game: new high" in out and "fs: wrote hiscore" in out,
+    "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -245,4 +254,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 13 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/append/read/list/delete+compaction); collector game saves a high score; back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 14 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/append/read/read-at/list/delete+compaction); collector game saves a high score; back to menu")

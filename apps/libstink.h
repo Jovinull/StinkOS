@@ -13,6 +13,17 @@ static inline int __syscall(int n, int a, int b, int c)
 	return ret;
 }
 
+/* Four-argument variant: the fourth argument travels in esi. */
+static inline int __syscall4(int n, int a, int b, int c, int d)
+{
+	int ret;
+	__asm__ volatile ("int $0x80"
+	                  : "=a"(ret)
+	                  : "a"(n), "b"(a), "c"(b), "d"(c), "S"(d)
+	                  : "memory");
+	return ret;
+}
+
 static inline void sys_log(const char *s)        { __syscall(1, (int)s, 0, 0); }
 static inline void sys_draw(int x, int y, unsigned int rgb)
                                                  { __syscall(2, x, y, (int)rgb); }
@@ -31,5 +42,7 @@ static inline int  sys_finfo(int index, char *name)
 static inline int  sys_fdelete(const char *name) { return __syscall(12, (int)name, 0, 0); }
 static inline int  sys_fappend(const char *name, const void *buf, unsigned int size)
                                                  { return __syscall(13, (int)name, (int)buf, (int)size); }
+static inline int  sys_fread_at(const char *name, void *buf, unsigned int max, unsigned int off)
+                                                 { return __syscall4(14, (int)name, (int)buf, (int)max, (int)off); }
 
 #endif

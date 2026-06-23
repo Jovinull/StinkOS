@@ -149,29 +149,45 @@ int fs_file_write(const char *name, const void *buf, unsigned int size)
 
 /* Reads up to 'maxsize' bytes of file 'name' into 'buf'. Returns the number of
  * bytes copied, or -1 if the file does not exist. */
-int fs_file_read(const char *name, void *buf, unsigned int maxsize)
+/* Reads up to 'maxsize' bytes of file 'name' starting at byte 'offset'. Returns
+ * the number of bytes copied (0 if offset is at/after EOF), or -1 if the file
+ * does not exist. */
+int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,
+                    unsigned int offset)
 {
 	int i = fs_find(name);
 	if (i < 0)
 		return -1;
 
-	unsigned int n = dir->files[i].size;
-	if (n > maxsize)
-		n = maxsize;
+	unsigned int size = dir->files[i].size;
+	if (offset >= size)
+		return 0;
+
+	unsigned int avail = size - offset;
+	unsigned int n = avail < maxsize ? avail : maxsize;
 
 	unsigned int remaining = n;
-	unsigned int lba = dir->files[i].start;
+	unsigned int pos = offset;
 	unsigned char *dst = (unsigned char *)buf;
 	while (remaining > 0) {
-		ata_read(lba, 1, io_buf);
-		unsigned int chunk = remaining < 512 ? remaining : 512;
+		unsigned int sec = dir->files[i].start + pos / 512;
+		unsigned int off = pos % 512;
+		unsigned int chunk = 512 - off;
+		if (chunk > remaining)
+			chunk = remaining;
+		ata_read(sec, 1, io_buf);
 		for (unsigned int k = 0; k < chunk; k++)
-			dst[k] = io_buf[k];
+			dst[k] = io_buf[off + k];
 		dst += chunk;
 		remaining -= chunk;
-		lba++;
+		pos += chunk;
 	}
 	return (int)n;
+}
+
+int fs_file_read(const char *name, void *buf, unsigned int maxsize)
+{
+	return fs_file_read_at(name, buf, maxsize, 0);
 }
 
 /* Deletes file 'name', compacting the data region so no space is leaked: every

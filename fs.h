@@ -12,6 +12,8 @@ unsigned int fs_sectors(int index);
 int fs_file_write(const char *name, const void *buf, unsigned int size);
 int fs_file_append(const char *name, const void *buf, unsigned int size);
 int fs_file_read(const char *name, void *buf, unsigned int maxsize);
+int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,
+                    unsigned int offset);
 
 int fs_file_delete(const char *name);          /* remove a file, reclaim space */
 int fs_file_count(void);                       /* number of files in StinkFS */
