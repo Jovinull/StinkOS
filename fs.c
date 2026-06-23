@@ -191,6 +191,38 @@ int fs_file_read(const char *name, void *buf, unsigned int maxsize)
 	return (int)n;
 }
 
+/* Deletes file 'name', compacting the data region so no space is leaked: every
+ * file stored after the hole is shifted down over it, its start sector fixed up,
+ * and the bump pointer rewound. Returns 0 on success, -1 if not found. */
+int fs_file_delete(const char *name)
+{
+	int i = fs_find(name);
+	if (i < 0)
+		return -1;
+
+	unsigned int freed = need_sectors(dir->files[i].size);
+	unsigned int hole  = dir->files[i].start;
+
+	/* Slide the data of every later file down over the freed sectors. Source
+	 * sits above the destination, so an ascending copy never self-overwrites. */
+	for (unsigned int lba = hole + freed; lba < dir->next_free; lba++) {
+		ata_read(lba, 1, io_buf);
+		ata_write(lba - freed, 1, io_buf);
+	}
+
+	for (unsigned int j = 0; j < dir->count; j++)
+		if (dir->files[j].start > hole)
+			dir->files[j].start -= freed;
+
+	for (unsigned int j = (unsigned int)i; j + 1 < dir->count; j++)
+		dir->files[j] = dir->files[j + 1];
+	dir->count--;
+	dir->next_free -= freed;
+
+	ata_write(FS_DIR_LBA, 1, dir_buf);
+	return 0;
+}
+
 int fs_file_count(void)
 {
 	return (int)dir->count;

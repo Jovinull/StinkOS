@@ -15,6 +15,7 @@ void         fs_save(unsigned int value);  /* persist a 32-bit value to disk */
 int fs_file_write(const char *name, const void *buf, unsigned int size);
 int fs_file_read(const char *name, void *buf, unsigned int maxsize);
 
+int fs_file_delete(const char *name);          /* remove a file, reclaim space */
 int fs_file_count(void);                       /* number of files in StinkFS */
 int fs_file_info(int index, char *name_out);   /* name (16B) + size, or -1 */
 

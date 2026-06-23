@@ -172,6 +172,14 @@ time.sleep(0.5)                                   # let it enumerate the files
 sock.sendall(b"sendkey z\n")                      # exit ls -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on LS): move to "11 DEL" (delete + data compaction).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.5)                                   # let it create, delete and verify
+sock.sendall(b"sendkey z\n")                      # exit del -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -214,6 +222,7 @@ checks = {
     "persistence":     "save: persisted ok" in out,
     "stinkfs file":    "stinkfs ok" in out and "files: read back ok" in out,
     "stinkfs list":    "fs: info note.txt" in out and "ls: done" in out,
+    "stinkfs delete":  "fs: deleted a.txt" in out and "del: compaction ok" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -222,4 +231,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 13 syscalls; faulting app killed; game + time-anim; PC speaker; persistent value + StinkFS named files + listing; back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 14 syscalls; faulting app killed; game + time-anim; PC speaker; persistent value + StinkFS files (write/read/list/delete+compaction); back to menu")

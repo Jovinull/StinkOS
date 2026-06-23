@@ -30,5 +30,6 @@ static inline int  sys_fread(const char *name, void *buf, unsigned int max)
 static inline int  sys_fcount(void)              { return __syscall(12, 0, 0, 0); }
 static inline int  sys_finfo(int index, char *name)
                                                  { return __syscall(13, index, (int)name, 0); }
+static inline int  sys_fdelete(const char *name) { return __syscall(14, (int)name, 0, 0); }
 
 #endif

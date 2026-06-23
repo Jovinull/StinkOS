@@ -192,6 +192,20 @@ static int fs_syscall_read(unsigned int uname, unsigned int ubuf, unsigned int m
 	return n;
 }
 
+static int fs_syscall_delete(unsigned int uname)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	int r = fs_file_delete(kname);
+	if (r == 0) {
+		serial_write("fs: deleted ");
+		serial_write(kname);
+		serial_putc('\n');
+	}
+	return r;
+}
+
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 static void syscall_dispatch(struct regs *r)
 {
@@ -255,6 +269,9 @@ static void syscall_dispatch(struct regs *r)
 				serial_putc('\n');
 			}
 		}
+		break;
+	case 14:                                   /* SYS_FDELETE: ebx=name */
+		r->eax = (unsigned int)fs_syscall_delete(r->ebx);
 		break;
 	default:
 		r->eax = (unsigned int)-1;
