@@ -44,5 +44,7 @@ static inline int  sys_fappend(const char *name, const void *buf, unsigned int s
                                                  { return __syscall(13, (int)name, (int)buf, (int)size); }
 static inline int  sys_fread_at(const char *name, void *buf, unsigned int max, unsigned int off)
                                                  { return __syscall4(14, (int)name, (int)buf, (int)max, (int)off); }
+static inline int  sys_fwrite_at(const char *name, const void *buf, unsigned int size, unsigned int off)
+                                                 { return __syscall4(15, (int)name, (int)buf, (int)size, (int)off); }
 
 #endif

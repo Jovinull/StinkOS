@@ -246,6 +246,7 @@ checks = {
     "stinkfs delete":  "fs: deleted a.txt" in out and "del: compaction ok" in out,
     "game hiscore":    "game over" in out and "game: new high" in out and "fs: wrote hiscore" in out,
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
+    "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -254,4 +255,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 14 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/append/read/read-at/list/delete+compaction); collector game saves a high score; back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 15 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/append/read + offset read/write/list/delete+compaction); collector game saves a high score; back to menu")

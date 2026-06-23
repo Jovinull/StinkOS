@@ -10,6 +10,8 @@ unsigned int fs_sectors(int index);
 
 /* StinkFS named files. 'name' is a NUL-padded 16-byte canonical name. */
 int fs_file_write(const char *name, const void *buf, unsigned int size);
+int fs_file_write_at(const char *name, const void *buf, unsigned int size,
+                     unsigned int offset);
 int fs_file_append(const char *name, const void *buf, unsigned int size);
 int fs_file_read(const char *name, void *buf, unsigned int maxsize);
 int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,

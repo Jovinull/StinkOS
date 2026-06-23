@@ -192,6 +192,23 @@ static int fs_syscall_append(unsigned int uname, unsigned int ubuf, unsigned int
 	return r;
 }
 
+static int fs_syscall_write_at(unsigned int uname, unsigned int ubuf,
+                               unsigned int size, unsigned int offset)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	if (!paging_user_range_ok(ubuf, size))
+		return -1;
+	int r = fs_file_write_at(kname, (const void *)ubuf, size, offset);
+	if (r == 0) {
+		serial_write("fs: wrote@ ");
+		serial_write(kname);
+		serial_putc('\n');
+	}
+	return r;
+}
+
 static int fs_syscall_read(unsigned int uname, unsigned int ubuf, unsigned int maxsize)
 {
 	char kname[16];
@@ -298,6 +315,9 @@ static void syscall_dispatch(struct regs *r)
 		break;
 	case 14:                                   /* SYS_FREAD_AT: ebx=name ecx=buf edx=max esi=offset */
 		r->eax = (unsigned int)fs_syscall_read_at(r->ebx, r->ecx, r->edx, r->esi);
+		break;
+	case 15:                                   /* SYS_FWRITE_AT: ebx=name ecx=buf edx=size esi=offset */
+		r->eax = (unsigned int)fs_syscall_write_at(r->ebx, r->ecx, r->edx, r->esi);
 		break;
 	default:
 		r->eax = (unsigned int)-1;
