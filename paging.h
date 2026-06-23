@@ -6,6 +6,7 @@ void paging_init(void);            /* identity-map 4 GiB (4 MiB pages), enable P
 void paging_init_user(void);       /* build the userland 4 KiB address space */
 
 unsigned int paging_user_code(void);       /* app load/run virtual address */
+unsigned int paging_user_code_end(void);   /* end of the mapped code region */
 unsigned int paging_user_stack_top(void);  /* top of the user stack */
 unsigned int paging_user_alloc(void);      /* next pre-mapped user heap page, or 0 */
 void paging_reset_user_heap(void);         /* reset the heap for a new app */

@@ -79,6 +79,7 @@ void paging_init_user(void)
 }
 
 unsigned int paging_user_code(void)       { return USER_CODE; }
+unsigned int paging_user_code_end(void)   { return USER_CODE + USER_CODE_PAGES * PAGE_4KB; }
 unsigned int paging_user_stack_top(void)  { return USER_STACK + PAGE_4KB; }
 
 void paging_reset_user_heap(void)
