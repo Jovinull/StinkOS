@@ -21,5 +21,7 @@ static inline unsigned int sys_alloc(void)       { return (unsigned int)__syscal
 static inline void sys_exit(void)                { __syscall(5, 0, 0, 0); }
 static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
+static inline void sys_save(unsigned int value)  { __syscall(8, (int)value, 0, 0); }
+static inline unsigned int sys_load(void)        { return (unsigned int)__syscall(9, 0, 0, 0); }
 
 #endif

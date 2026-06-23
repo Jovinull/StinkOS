@@ -8,4 +8,7 @@ const char  *fs_name(int index);
 unsigned int fs_lba(int index);
 unsigned int fs_sectors(int index);
 
+unsigned int fs_load(void);                /* read the persisted 32-bit value */
+void         fs_save(unsigned int value);  /* persist a 32-bit value to disk */
+
 #endif

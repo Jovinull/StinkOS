@@ -14,7 +14,9 @@
 #define ST_BSY 0x80
 #define ST_DRQ 0x08
 
-#define CMD_READ_SECTORS 0x20
+#define CMD_READ_SECTORS  0x20
+#define CMD_WRITE_SECTORS 0x30
+#define CMD_FLUSH_CACHE   0xE7
 
 static void ata_poll(void)
 {
@@ -24,10 +26,8 @@ static void ata_poll(void)
 		;
 }
 
-void ata_read(unsigned int lba, unsigned int count, void *buffer)
+static void ata_select(unsigned int lba, unsigned int count, unsigned char cmd)
 {
-	unsigned short *buf = (unsigned short *)buffer;
-
 	while (inb(ATA_CMD) & ST_BSY)
 		;
 
@@ -36,7 +36,14 @@ void ata_read(unsigned int lba, unsigned int count, void *buffer)
 	outb(ATA_LBA_LO, lba & 0xFF);
 	outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
 	outb(ATA_LBA_HI, (lba >> 16) & 0xFF);
-	outb(ATA_CMD, CMD_READ_SECTORS);
+	outb(ATA_CMD, cmd);
+}
+
+void ata_read(unsigned int lba, unsigned int count, void *buffer)
+{
+	unsigned short *buf = (unsigned short *)buffer;
+
+	ata_select(lba, count, CMD_READ_SECTORS);
 
 	for (unsigned int s = 0; s < count; s++) {
 		ata_poll();
@@ -44,4 +51,22 @@ void ata_read(unsigned int lba, unsigned int count, void *buffer)
 			buf[i] = inw(ATA_DATA);
 		buf += 256;
 	}
+}
+
+void ata_write(unsigned int lba, unsigned int count, const void *buffer)
+{
+	const unsigned short *buf = (const unsigned short *)buffer;
+
+	ata_select(lba, count, CMD_WRITE_SECTORS);
+
+	for (unsigned int s = 0; s < count; s++) {
+		ata_poll();
+		for (int i = 0; i < 256; i++)           /* 256 words = 512 bytes */
+			outw(ATA_DATA, buf[i]);
+		buf += 256;
+	}
+
+	outb(ATA_CMD, CMD_FLUSH_CACHE);                 /* commit to the medium */
+	while (inb(ATA_CMD) & ST_BSY)
+		;
 }

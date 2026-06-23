@@ -7,6 +7,7 @@
 #include "paging.h"
 #include "menu.h"
 #include "speaker.h"
+#include "fs.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -174,6 +175,19 @@ static void syscall_dispatch(struct regs *r)
 	case 7:                                    /* SYS_SOUND: ebx = freq (0=off) */
 		speaker_play(r->ebx);
 		r->eax = 0;
+		break;
+	case 8:                                    /* SYS_SAVE: ebx = value -> disk */
+		fs_save(r->ebx);
+		serial_write("fs: saved ");
+		serial_write_dec(r->ebx);
+		serial_putc('\n');
+		r->eax = 0;
+		break;
+	case 9:                                    /* SYS_LOAD: -> persisted value */
+		r->eax = fs_load();
+		serial_write("fs: loaded ");
+		serial_write_dec(r->eax);
+		serial_putc('\n');
 		break;
 	default:
 		r->eax = (unsigned int)-1;

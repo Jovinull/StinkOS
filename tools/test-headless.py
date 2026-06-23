@@ -148,6 +148,14 @@ time.sleep(0.7)                                   # let it play the three-note t
 sock.sendall(b"sendkey z\n")                      # exit beep -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on BEEP): move to "8 SAVE" (persists a counter to disk).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.5)                                   # let it load, save and re-read
+sock.sendall(b"sendkey z\n")                      # exit save -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -186,6 +194,8 @@ checks = {
     "c app ran":       "hi from c app" in out,
     "sys_ticks":       "anim: time flows" in out,
     "sys_sound":       "beep: start" in out and "beep: done" in out,
+    "disk write":      "fs: saved 1" in out,
+    "persistence":     "save: persisted ok" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:

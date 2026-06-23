@@ -3,5 +3,6 @@
 #define ATA_H
 
 void ata_read(unsigned int lba, unsigned int count, void *buffer);
+void ata_write(unsigned int lba, unsigned int count, const void *buffer);
 
 #endif
