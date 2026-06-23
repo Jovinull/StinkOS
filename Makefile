@@ -23,11 +23,13 @@ APP5_LBA = 96
 APP6_LBA = 104
 APP7_LBA = 112
 APP8_LBA = 120
+APP9_LBA = 128
 
-# App table-of-contents (mini-filesystem), persistent-storage sector, image size.
-TOC_LBA  = 128
-SAVE_LBA = 129
-DISK_END = 66560          # (SAVE_LBA + 1) * 512: keep TOC and save sectors present
+# Metadata after the apps: app TOC, single-value save sector, then StinkFS
+# (a directory sector at 138 and a 32-sector data region at 139..170).
+TOC_LBA  = 136
+SAVE_LBA = 137
+DISK_END = 87552          # (139 + 32) * 512: keep TOC, save and StinkFS present
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
@@ -84,7 +86,12 @@ $(BUILD)/save.elf: apps/crt0.s apps/save.c apps/libstink.h apps/app.ld | $(BUILD
 	$(CC) $(CFLAGS) -c apps/save.c -o $(BUILD)/save_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/save.elf $(BUILD)/crt0.o $(BUILD)/save_app.o
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf
+$(BUILD)/files.elf: apps/crt0.s apps/files.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/files.c -o $(BUILD)/files_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/files.elf $(BUILD)/crt0.o $(BUILD)/files_app.o
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	dd if=$(BUILD)/hello.elf of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
@@ -95,6 +102,7 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/anim.elf  of=os.bin bs=512 seek=$(APP6_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/beep.elf  of=os.bin bs=512 seek=$(APP7_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/save.elf  of=os.bin bs=512 seek=$(APP8_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/files.elf of=os.bin bs=512 seek=$(APP9_LBA) conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
@@ -103,7 +111,8 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"5 HIC:$(APP5_LBA):$(BUILD)/hi.elf" \
 		"6 ANIM:$(APP6_LBA):$(BUILD)/anim.elf" \
 		"7 BEEP:$(APP7_LBA):$(BUILD)/beep.elf" \
-		"8 SAVE:$(APP8_LBA):$(BUILD)/save.elf"
+		"8 SAVE:$(APP8_LBA):$(BUILD)/save.elf" \
+		"9 FILES:$(APP9_LBA):$(BUILD)/files.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 

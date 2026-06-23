@@ -96,3 +96,26 @@ unsigned int paging_user_alloc(void)
 	user_heap_next += PAGE_4KB;
 	return v;
 }
+
+/* Validate a userland buffer before the kernel dereferences it: the range must
+ * sit wholly inside one mapped span -- code+stack (contiguous) or the heap.
+ * Prevents a ring-3 app from steering kernel reads/writes at kernel memory. */
+int paging_user_range_ok(unsigned int addr, unsigned int len)
+{
+	if (len == 0)
+		return 1;
+	if (addr + len < addr)                              /* address overflow */
+		return 0;
+
+	unsigned int end = addr + len;
+	unsigned int cs_lo = USER_CODE;                     /* code + stack span */
+	unsigned int cs_hi = USER_STACK + PAGE_4KB;
+	unsigned int hp_lo = USER_HEAP;                     /* heap span */
+	unsigned int hp_hi = USER_HEAP + USER_HEAP_PAGES * PAGE_4KB;
+
+	if (addr >= cs_lo && end <= cs_hi)
+		return 1;
+	if (addr >= hp_lo && end <= hp_hi)
+		return 1;
+	return 0;
+}

@@ -146,6 +146,52 @@ void pit_init(unsigned int hz)
 
 static volatile unsigned int ticks = 0;        /* PIT ticks since boot */
 
+/* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
+ * that the source pointer lies in the app's mapped memory first. */
+static int copy_user_name(unsigned int uname, char *kname)
+{
+	if (!paging_user_range_ok(uname, 16))
+		return -1;
+	const char *un = (const char *)uname;
+	for (int k = 0; k < 16; k++)
+		kname[k] = 0;
+	for (int k = 0; k < 15 && un[k]; k++)
+		kname[k] = un[k];
+	return 0;
+}
+
+static int fs_syscall_write(unsigned int uname, unsigned int ubuf, unsigned int size)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	if (!paging_user_range_ok(ubuf, size))
+		return -1;
+	int r = fs_file_write(kname, (const void *)ubuf, size);
+	if (r == 0) {
+		serial_write("fs: wrote ");
+		serial_write(kname);
+		serial_putc('\n');
+	}
+	return r;
+}
+
+static int fs_syscall_read(unsigned int uname, unsigned int ubuf, unsigned int maxsize)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	if (!paging_user_range_ok(ubuf, maxsize))
+		return -1;
+	int n = fs_file_read(kname, (void *)ubuf, maxsize);
+	if (n >= 0) {
+		serial_write("fs: read ");
+		serial_write(kname);
+		serial_putc('\n');
+	}
+	return n;
+}
+
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 static void syscall_dispatch(struct regs *r)
 {
@@ -188,6 +234,12 @@ static void syscall_dispatch(struct regs *r)
 		serial_write("fs: loaded ");
 		serial_write_dec(r->eax);
 		serial_putc('\n');
+		break;
+	case 10:                                   /* SYS_FWRITE: ebx=name ecx=buf edx=size */
+		r->eax = (unsigned int)fs_syscall_write(r->ebx, r->ecx, r->edx);
+		break;
+	case 11:                                   /* SYS_FREAD: ebx=name ecx=buf edx=max */
+		r->eax = (unsigned int)fs_syscall_read(r->ebx, r->ecx, r->edx);
 		break;
 	default:
 		r->eax = (unsigned int)-1;

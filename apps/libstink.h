@@ -23,5 +23,9 @@ static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscal
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
 static inline void sys_save(unsigned int value)  { __syscall(8, (int)value, 0, 0); }
 static inline unsigned int sys_load(void)        { return (unsigned int)__syscall(9, 0, 0, 0); }
+static inline int  sys_fwrite(const char *name, const void *buf, unsigned int size)
+                                                 { return __syscall(10, (int)name, (int)buf, (int)size); }
+static inline int  sys_fread(const char *name, void *buf, unsigned int max)
+                                                 { return __syscall(11, (int)name, (int)buf, (int)max); }
 
 #endif

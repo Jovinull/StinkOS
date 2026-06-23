@@ -156,6 +156,14 @@ time.sleep(0.5)                                   # let it load, save and re-rea
 sock.sendall(b"sendkey z\n")                      # exit save -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on SAVE): move to "9 FILES" (StinkFS named files).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.5)                                   # let it write and read back a file
+sock.sendall(b"sendkey z\n")                      # exit files -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -196,6 +204,7 @@ checks = {
     "sys_sound":       "beep: start" in out and "beep: done" in out,
     "disk write":      "fs: saved 1" in out,
     "persistence":     "save: persisted ok" in out,
+    "stinkfs file":    "stinkfs ok" in out and "files: read back ok" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -204,4 +213,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 6 syscalls; faulting app killed; game + time-anim; back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 11 syscalls; faulting app killed; game + time-anim; PC speaker; persistent value + StinkFS named files; back to menu")
