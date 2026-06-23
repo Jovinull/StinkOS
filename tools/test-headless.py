@@ -180,6 +180,19 @@ time.sleep(0.5)                                   # let it create, delete and ve
 sock.sendall(b"sendkey z\n")                      # exit del -> menu
 time.sleep(0.4)
 
+# Back at the menu (cursor on DEL): move to "12 PLAY" (collector game + hiscore).
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.3)
+# d,s,a walk the player onto the three foods (score 3); q ends the game.
+for key in ("d", "s", "a", "q"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(0.4)                                   # let it persist the high score
+sock.sendall(b"sendkey z\n")                      # leave the game -> menu
+time.sleep(0.4)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -223,6 +236,7 @@ checks = {
     "stinkfs file":    "stinkfs ok" in out and "files: read back ok" in out,
     "stinkfs list":    "fs: info note.txt" in out and "ls: done" in out,
     "stinkfs delete":  "fs: deleted a.txt" in out and "del: compaction ok" in out,
+    "game hiscore":    "game over" in out and "game: new high" in out and "fs: wrote hiscore" in out,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -231,4 +245,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 14 syscalls; faulting app killed; game + time-anim; PC speaker; persistent value + StinkFS files (write/read/list/delete+compaction); back to menu")
+print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 14 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files (write/read/list/delete+compaction); collector game saves a high score; back to menu")
