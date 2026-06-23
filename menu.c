@@ -32,6 +32,62 @@ static void draw(int selected)
 		if (i == selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
+
+	fb_text(120, 440, "press f for files", 0xA0A0A0);
+}
+
+/* Decimal text for a file size; buf must hold at least 11 bytes. */
+static void size_to_text(unsigned int v, char *buf)
+{
+	char tmp[10];
+	int n = 0;
+
+	if (v == 0) {
+		buf[0] = '0';
+		buf[1] = '\0';
+		return;
+	}
+	while (v > 0 && n < 10) {
+		tmp[n++] = '0' + (v % 10);
+		v /= 10;
+	}
+	for (int i = 0; i < n; i++)
+		buf[i] = tmp[n - 1 - i];
+	buf[n] = '\0';
+}
+
+static void draw_files(void)
+{
+	fb_fill(0x001022);
+	fb_rect(112, 84, 800, 400, 0x3050C0);
+	fb_text(120, 90, "FILES", 0xFFFFFF);
+
+	int count = fs_file_count();
+	for (int i = 0; i < count; i++) {
+		char name[16];
+		int size = fs_file_info(i, name);
+		if (size < 0)
+			continue;
+		name[15] = '\0';
+
+		char line[32];
+		int p = 0;
+		for (int j = 0; name[j] != '\0' && p < 20; j++)
+			line[p++] = name[j];
+		line[p++] = ' ';
+		char num[11];
+		size_to_text((unsigned int)size, num);
+		for (int j = 0; num[j] != '\0' && p < 31; j++)
+			line[p++] = num[j];
+		line[p] = '\0';
+
+		fb_text(140, 120 + i * 20, line, 0xFFFFFF);
+	}
+
+	if (count == 0)
+		fb_text(140, 120, "no files", 0xA0A0A0);
+
+	fb_text(120, 440, "press q to return", 0xA0A0A0);
 }
 
 void menu_exit(void)
@@ -86,6 +142,17 @@ void menu_run(void)
 			launch(selected);          /* returns here when the app exits */
 			__asm__ volatile ("sti");  /* longjmp skipped the syscall's iret */
 			serial_write("menu: back\n");
+			draw(selected);
+		} else if (c == 'f') {
+			serial_write("menu: files view\n");
+			draw_files();
+			for (;;) {
+				char fc = keyboard_getchar();
+				if (fc == 'q')
+					break;
+				if (fc == 0)
+					__asm__ volatile ("hlt");
+			}
 			draw(selected);
 		}
 	}
