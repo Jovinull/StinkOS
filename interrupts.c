@@ -241,6 +241,21 @@ static void syscall_dispatch(struct regs *r)
 	case 11:                                   /* SYS_FREAD: ebx=name ecx=buf edx=max */
 		r->eax = (unsigned int)fs_syscall_read(r->ebx, r->ecx, r->edx);
 		break;
+	case 12:                                   /* SYS_FCOUNT: -> number of files */
+		r->eax = (unsigned int)fs_file_count();
+		break;
+	case 13:                                   /* SYS_FINFO: ebx=index ecx=name buf */
+		if (!paging_user_range_ok(r->ecx, 16)) {
+			r->eax = (unsigned int)-1;
+		} else {
+			r->eax = (unsigned int)fs_file_info((int)r->ebx, (char *)r->ecx);
+			if ((int)r->eax >= 0) {
+				serial_write("fs: info ");
+				serial_write((const char *)r->ecx);
+				serial_putc('\n');
+			}
+		}
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;

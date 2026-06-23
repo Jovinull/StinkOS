@@ -190,3 +190,19 @@ int fs_file_read(const char *name, void *buf, unsigned int maxsize)
 	}
 	return (int)n;
 }
+
+int fs_file_count(void)
+{
+	return (int)dir->count;
+}
+
+/* Copies the 16-byte name of file 'index' into 'name_out' and returns its size
+ * in bytes, or -1 if the index is out of range. */
+int fs_file_info(int index, char *name_out)
+{
+	if (index < 0 || (unsigned int)index >= dir->count)
+		return -1;
+	for (int k = 0; k < 16; k++)
+		name_out[k] = dir->files[index].name[k];
+	return (int)dir->files[index].size;
+}

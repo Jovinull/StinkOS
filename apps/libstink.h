@@ -27,5 +27,8 @@ static inline int  sys_fwrite(const char *name, const void *buf, unsigned int si
                                                  { return __syscall(10, (int)name, (int)buf, (int)size); }
 static inline int  sys_fread(const char *name, void *buf, unsigned int max)
                                                  { return __syscall(11, (int)name, (int)buf, (int)max); }
+static inline int  sys_fcount(void)              { return __syscall(12, 0, 0, 0); }
+static inline int  sys_finfo(int index, char *name)
+                                                 { return __syscall(13, index, (int)name, 0); }
 
 #endif
