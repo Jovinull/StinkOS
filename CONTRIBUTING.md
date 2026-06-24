@@ -78,6 +78,17 @@ Because we rebase instead of squashing, **every commit you push survives on `mas
 
 This is great when commits are clean. It's bad when they're not. Which is why commit hygiene matters more here than in a squash-based repo.
 
+### "Squash" means two different things — don't confuse them
+
+The word "squash" shows up in two unrelated contexts. We use one, not the other:
+
+| Where | What it does | Status here |
+|---|---|---|
+| **GitHub's "Squash and merge" button** | Collapses *all* your PR commits into one commit at merge time, on the server. You don't control it. | ❌ **Disabled** at the repo level. Whatever you push is what lands on `master`. |
+| **`git rebase -i`'s `squash` / `fixup` actions** | A local tool for *you* to fold your own messy commits (typo fixes, wip, fixups) into the real commits they belong to, before pushing. | ✅ **What you should use** for cleanup. |
+
+So when this doc says "squash the fixups into the commit they belong to", it means the *local* operation. GitHub never squashes anything for you.
+
 ## Commit hygiene
 
 Write each commit as if someone six months from now will read it alone, with no context about your PR.
@@ -85,7 +96,7 @@ Write each commit as if someone six months from now will read it alone, with no 
 - **Conventional Commits prefix.** `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `ci:`, `test:`. Skim `git log` for the existing patterns.
 - **Imperative, short subject.** `add VBE cursor blink`, not `Added VBE cursor blinking feature`.
 - **Each commit should compile and tests should pass.** This is the rebase contract. If commit 5-of-10 breaks the build, `git bisect` will land there and the next person will curse you.
-- **No "wip", "asdf", "fix typo from prev commit", "actually now it works".** Clean these up *before* requesting review. The tool is `git rebase -i HEAD~N` — squash the fixups into the commit they belong to.
+- **Drop the local development artifacts before pushing.** Commits like `wip`, `asdf`, `fix typo from prev commit`, `actually now it works` belong in your local history while you're working, not in `master`. Fold them into the real commit they belong to with `git rebase -i HEAD~N` (use the `fixup` or `squash` action). **To be explicit: this is not about reducing your PR to one commit.** If your work is genuinely 5 logical steps, ship 5 commits. If it's 12, ship 12. The goal is removing trash, not collapsing meaningful history.
 - **Body usually unnecessary.** If you need to explain *why*, do it in the PR description. The PR sticks around as the long-form context; commits stay short.
 
 If a PR shows up with messy commits, a maintainer will ask you to clean it up before merging. Don't take it personally — the alternative is messy commits living in `master` forever.
