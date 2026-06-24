@@ -180,6 +180,10 @@ PRs welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) — it's short. For a
 
 By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security issue? See [SECURITY.md](SECURITY.md).
 
+## Acknowledgments
+
+StinkOS exists because [@suwateru](https://github.com/suwateru) got me into low-level back in mid-2024 — my first C, my first segfaults, my first time the stack pointer actually made sense. The project is based on her original [StinkOS](https://github.com/suwateru/StinkOS); what's here now is two years of self-study built on what she started.
+
 ## License
 
 [GPLv3](LICENSE). Use it, fork it, learn from it, run it on weird hardware, write a thesis about it — but if you distribute something derived from this code, the source has to stay open. That's the deal.
