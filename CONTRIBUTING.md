@@ -40,6 +40,56 @@ That boots the image in QEMU, watches the serial log, and asserts the core path 
 
 For things the headless test can't see (graphics, sound, new apps, weird key sequences), say in your PR **what you ran and what you saw**. A screenshot, a short QEMU recording, even a copy-pasted serial log — pick whatever convinces a reviewer. "It works on my machine" doesn't count.
 
+## How changes land on master
+
+There are two ways something gets onto `master`. Which one applies to you depends on your repo role.
+
+### Direct push — admin only
+
+The repo owner (currently `@jovinull`) can push to `master` directly:
+
+```bash
+git push origin master
+```
+
+This bypasses branch protection. CI still runs on the push, but it's **post-hoc** — it surfaces breakage after the fact, it doesn't gate the push. Used for quick fixes, small refactors, docs typos — anything where a PR is more ceremony than value.
+
+Nobody else can do this. Force pushes and branch deletions on `master` are blocked for everyone, admins included.
+
+### Pull request — everyone else
+
+Every other contributor goes through a PR. That's anyone with `Write` / `Maintain` / `Triage` roles on the repo, plus anyone working from a fork. The flow:
+
+1. **Branch from `master`.** Naming convention: `feat/...`, `fix/...`, `docs/...`, `ci/...`, `chore/...`, `refactor/...`.
+2. **Commit.** Each commit lands on `master` as-is — see "Commit hygiene" below.
+3. **Push and open the PR.** `gh pr create --title "feat: ..."` works fine; the GitHub web UI works fine too.
+4. **CI runs `make test-headless`.** It's a **required status check** — your PR can't merge until it's green.
+5. **Merge is rebase-only.** Squash and merge-commit are disabled at the repo level. Your commits land on `master` one-by-one, in order, preserved verbatim.
+
+Admins also use PRs when they want a second pair of eyes, want to see CI run, or just feel like it.
+
+### Why rebase-only (and what it means for you)
+
+Because we rebase instead of squashing, **every commit you push survives on `master` permanently**. There's no "GitHub squashes my mess for me" safety net. That means:
+
+- `git log master` shows every commit, with its original author and message.
+- `git blame` points back to the actual commit that introduced the line — not to a generic "PR #14" squash commit.
+- `git bisect` works at single-commit granularity, which is great when chasing regressions.
+
+This is great when commits are clean. It's bad when they're not. Which is why commit hygiene matters more here than in a squash-based repo.
+
+## Commit hygiene
+
+Write each commit as if someone six months from now will read it alone, with no context about your PR.
+
+- **Conventional Commits prefix.** `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `ci:`, `test:`. Skim `git log` for the existing patterns.
+- **Imperative, short subject.** `add VBE cursor blink`, not `Added VBE cursor blinking feature`.
+- **Each commit should compile and tests should pass.** This is the rebase contract. If commit 5-of-10 breaks the build, `git bisect` will land there and the next person will curse you.
+- **No "wip", "asdf", "fix typo from prev commit", "actually now it works".** Clean these up *before* requesting review. The tool is `git rebase -i HEAD~N` — squash the fixups into the commit they belong to.
+- **Body usually unnecessary.** If you need to explain *why*, do it in the PR description. The PR sticks around as the long-form context; commits stay short.
+
+If a PR shows up with messy commits, a maintainer will ask you to clean it up before merging. Don't take it personally — the alternative is messy commits living in `master` forever.
+
 ## Pull requests
 
 - **One logical change per PR.** Don't sneak a refactor into a bug fix.
