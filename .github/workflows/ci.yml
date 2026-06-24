@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  test-headless:
+    name: test-headless
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex texinfo wget \
+            libgmp3-dev libmpc-dev libmpfr-dev libisl-dev \
+            qemu-system-x86 python3
+
+      - name: Restore i386-elf cross-toolchain cache
+        id: cache-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/opt/cross
+          key: cross-toolchain-${{ hashFiles('tools/build-cross-toolchain.sh') }}-v1
+
+      - name: Build cross-toolchain (cache miss only)
+        if: steps.cache-cross.outputs.cache-hit != 'true'
+        run: bash tools/build-cross-toolchain.sh
+
+      - name: Add toolchain to PATH
+        run: echo "$HOME/opt/cross/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain
+        run: |
+          i386-elf-gcc --version | head -1
+          i386-elf-as --version | head -1
+          i386-elf-ld --version | head -1
+
+      - name: Build OS image
+        run: make
+
+      - name: Run headless boot test
+        run: make test-headless
