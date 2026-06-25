@@ -173,11 +173,7 @@ void main(void)
 				sys_log("shell: append failed");
 		} else if (strcmp(line, "sound") == 0) {
 			int freq = atoi(rest);
-			sys_sound((unsigned int)freq);
-			unsigned int t0 = sys_ticks();
-			while (sys_ticks() - t0 < 20)
-				;                       /* let it ring for ~20 ticks */
-			sys_sound(0);
+			sys_tone((unsigned int)freq, 20);
 			sys_printf("shell: played %d Hz", freq);
 		} else {
 			sys_printf("shell: unknown command: %s", line);
