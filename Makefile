@@ -3,12 +3,16 @@ BUILD = build
 CC = i386-elf-gcc
 AS = i386-elf-as
 LD = i386-elf-ld
-CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
+CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
+         -ffunction-sections -fdata-sections
 # App link flags: omagic (-N) packs the loadable segment with no page-alignment
 # gap, and -s strips the symbol tables, keeping each app ELF down to one sector.
 # Apps are a single flat code+data region (one set of user pages), so the load
 # segment is intentionally RWX; silence ld's advisory warning about that.
-APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments
+# --gc-sections drops any function/data section the entry point can't reach,
+# which (paired with -ffunction-sections / -fdata-sections above) means an app
+# only pays the on-disk cost of the libstink helpers it actually calls.
+APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
 
 # Userland support library objects: malloc/free allocator + the snprintf family.
 # Linked into every C app, so they live in a variable to keep app rules tidy.
