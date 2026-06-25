@@ -73,6 +73,12 @@ static inline int  sys_close(int fd)                            { return __sysca
 static inline int  sys_read(int fd, void *buf, unsigned int n)  { return __syscall(18, fd, (int)buf, (int)n); }
 static inline int  sys_write(int fd, const void *buf, unsigned int n) { return __syscall(19, fd, (int)buf, (int)n); }
 static inline int  sys_seek(int fd, int offset, int whence)     { return __syscall(20, fd, offset, whence); }
+/* Renders a NUL-terminated string to the framebuffer at (x,y) using the
+ * kernel's built-in 8x8 font (fb_text).  Needs kernel syscall 21 (SYS_DRAWTEXT):
+ *   case 21: fb_text(r->ebx, r->ecx, (const char*)r->edx, r->esi); r->eax=0;
+ * Returns 0 on success, -1 if the syscall is not implemented. */
+static inline int  sys_drawtext(int x, int y, const char *s, unsigned int rgb)
+                                                 { return __syscall4(21, x, y, (int)s, (int)rgb); }
 
 /* Arrow keys have no ASCII code; the keyboard driver reports them as these
  * otherwise-unused C0 control codes, and sys_getkey() passes them through
