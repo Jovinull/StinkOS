@@ -2,7 +2,9 @@
 #ifndef ATA_H
 #define ATA_H
 
-void ata_read(unsigned int lba, unsigned int count, void *buffer);
-void ata_write(unsigned int lba, unsigned int count, const void *buffer);
+/* Both return 0 on success, -1 on a reported drive error or a timeout
+ * (instead of hanging forever in a busy-loop on a dead/faulty drive). */
+int ata_read(unsigned int lba, unsigned int count, void *buffer);
+int ata_write(unsigned int lba, unsigned int count, const void *buffer);
 
 #endif
