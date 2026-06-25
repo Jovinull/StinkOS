@@ -42,6 +42,16 @@ static int occupied(int x, int y)
 	return 0;
 }
 
+/* Three descending notes, distinct from the single up-tone played on eating
+ * food, so the player hears the difference between "scored" and "game over"
+ * without needing to look at the score text. */
+static void game_over_jingle(void)
+{
+	sys_tone(880, 6);
+	sys_tone(660, 6);
+	sys_tone(440, 10);
+}
+
 static int food_x, food_y;
 
 static void place_food(void)
@@ -102,6 +112,7 @@ void main(void)
 
 		if (nx < 0 || nx >= CELLS_W || ny < 0 || ny >= CELLS_H) {
 			sys_printf("snake: game over, score %d (hit wall)", score);
+			game_over_jingle();
 			return;
 		}
 		/* The tail cell is about to move away, so colliding with it is
@@ -112,6 +123,7 @@ void main(void)
 				hit_self = 1;
 		if (hit_self) {
 			sys_printf("snake: game over, score %d (hit self)", score);
+			game_over_jingle();
 			return;
 		}
 
@@ -131,11 +143,7 @@ void main(void)
 
 		if (ate) {
 			score++;
-			sys_sound(1200);
-			unsigned int t0 = sys_ticks();
-			while (sys_ticks() - t0 < 4)
-				;
-			sys_sound(0);
+			sys_tone(1200, 4);
 			place_food();
 		}
 	}

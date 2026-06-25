@@ -36,6 +36,18 @@ static inline unsigned int sys_alloc(void)       { return (unsigned int)__syscal
 static inline void sys_exit(void)                { __syscall(5, 0, 0, 0); }
 static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
+
+/* Plays freq for the given number of sys_ticks(), then silences the speaker.
+ * There is no sleep syscall, so this busy-waits -- fine for the short beeps
+ * apps use it for, not meant for anything long. */
+static inline void sys_tone(unsigned int freq, unsigned int ticks)
+{
+	sys_sound(freq);
+	unsigned int t0 = sys_ticks();
+	while (sys_ticks() - t0 < ticks)
+		;
+	sys_sound(0);
+}
 static inline int  sys_fwrite(const char *name, const void *buf, unsigned int size)
                                                  { return __syscall(8, (int)name, (int)buf, (int)size); }
 static inline int  sys_fread(const char *name, void *buf, unsigned int max)
