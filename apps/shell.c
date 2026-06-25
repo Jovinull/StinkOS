@@ -125,7 +125,7 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat head tail wc hexdump write append cp rm echo uptime sound history exit");
+			sys_log("shell: help ls cat head tail wc hexdump write append cp mv rm touch grep echo uptime sound history exit");
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				sys_log(history[i]);
@@ -281,6 +281,69 @@ void main(void)
 					sys_printf("shell: copied %d bytes to %s", n, dst);
 				} else {
 					sys_log("shell: write failed");
+				}
+			}
+		} else if (strcmp(line, "mv") == 0) {
+			/* mv <src> <dst>: copy then delete the source (max 127 bytes). */
+			char *dst = split(rest);
+			if (*rest == '\0' || *dst == '\0') {
+				sys_log("shell: usage: mv <src> <dst>");
+			} else {
+				char data[128];
+				int n = sys_fread(rest, data, sizeof(data) - 1);
+				if (n < 0) {
+					sys_log("shell: no such file");
+				} else if (sys_fwrite(dst, data, (unsigned int)n) != 0) {
+					sys_log("shell: write failed");
+				} else {
+					sys_fdelete(rest);
+					sys_printf("shell: moved %s -> %s", rest, dst);
+				}
+			}
+		} else if (strcmp(line, "touch") == 0) {
+			/* touch <file>: create the file if it does not exist. */
+			int fd = sys_open(rest, 0);
+			if (fd >= 0) {
+				sys_close(fd);
+				/* already exists, nothing to do */
+			} else {
+				char nul = '\0';
+				if (sys_fwrite(rest, &nul, 1) == 0)
+					sys_printf("shell: created %s", rest);
+				else
+					sys_log("shell: touch failed");
+			}
+		} else if (strcmp(line, "grep") == 0) {
+			/* grep <pattern> <file>: print lines containing pattern. */
+			char *fname = split(rest);
+			if (*rest == '\0' || *fname == '\0') {
+				sys_log("shell: usage: grep <pattern> <file>");
+			} else {
+				int fd = sys_open(fname, 0);
+				if (fd < 0) {
+					sys_log("shell: no such file");
+				} else {
+					int plen = (int)strlen(rest);
+					char lbuf[64]; int lp = 0;
+					char rbuf[64]; int rn;
+					while ((rn = sys_read(fd, rbuf, sizeof(rbuf))) > 0) {
+						for (int i = 0; i < rn; i++) {
+							char c = rbuf[i];
+							if (c == '\n' || lp == (int)sizeof(lbuf) - 1) {
+								lbuf[lp] = '\0';
+								for (int s = 0; s <= lp - plen; s++) {
+									int ok = 1;
+									for (int j = 0; j < plen; j++)
+										if (lbuf[s+j] != rest[j]) { ok=0; break; }
+									if (ok) { sys_log(lbuf); break; }
+								}
+								lp = 0;
+							} else {
+								lbuf[lp++] = c;
+							}
+						}
+					}
+					sys_close(fd);
 				}
 			}
 		} else if (strcmp(line, "sound") == 0) {
