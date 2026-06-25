@@ -79,6 +79,11 @@ static inline int  sys_seek(int fd, int offset, int whence)     { return __sysca
  * Returns 0 on success, -1 if the syscall is not implemented. */
 static inline int  sys_drawtext(int x, int y, const char *s, unsigned int rgb)
                                                  { return __syscall4(21, x, y, (int)s, (int)rgb); }
+/* Fills a rectangle with a solid colour. x,y,w,h must each fit in 16 bits
+ * (true for the 1024x768 framebuffer). Packed ABI: ebx=(x<<16|y), ecx=(w<<16|h). */
+static inline void sys_fillrect(int x, int y, int w, int h, unsigned int rgb)
+                                                 { __syscall(22, (x << 16) | (y & 0xFFFF),
+                                                              (w << 16) | (h & 0xFFFF), (int)rgb); }
 
 /* Arrow keys have no ASCII code; the keyboard driver reports them as these
  * otherwise-unused C0 control codes, and sys_getkey() passes them through
