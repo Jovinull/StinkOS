@@ -10,6 +10,10 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 # segment is intentionally RWX; silence ld's advisory warning about that.
 APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments
 
+# Userland support library object(s): currently the malloc/free allocator.
+# Linked into every C app, so it lives in a variable to keep app rules tidy.
+LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o
+
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
 IMG_MIN = 29184
@@ -58,6 +62,10 @@ $(BUILD)/%.o: %.c | $(BUILD)
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(AS) -O0 $< -o $@
 
+# Userland support library: compiled once, linked into every C app.
+$(BUILD)/libstink_alloc.o: apps/libstink_alloc.c apps/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c apps/libstink_alloc.c -o $(BUILD)/libstink_alloc.o
+
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
 $(BUILD)/hello.elf: apps/hello.s apps/app.ld | $(BUILD)
@@ -76,76 +84,77 @@ $(BUILD)/game.elf: apps/game.s apps/app.ld | $(BUILD)
 	$(AS) -O0 apps/game.s -o $(BUILD)/game.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/game.elf $(BUILD)/game.o
 
-# C userland apps: crt0 (entry) linked first, then the compiled C object.
-$(BUILD)/hi.elf: apps/crt0.s apps/hi.c apps/libstink.h apps/app.ld | $(BUILD)
+# C userland apps: crt0 (entry) linked first, then the compiled C object, then
+# the shared libstink support objects.
+$(BUILD)/hi.elf: apps/crt0.s apps/hi.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/hi.c -o $(BUILD)/hi_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/hi.elf $(BUILD)/crt0.o $(BUILD)/hi_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/hi.elf $(BUILD)/crt0.o $(BUILD)/hi_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/anim.elf: apps/crt0.s apps/anim.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/anim.elf: apps/crt0.s apps/anim.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/anim.elf $(BUILD)/crt0.o $(BUILD)/anim_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/anim.elf $(BUILD)/crt0.o $(BUILD)/anim_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/beep.elf: apps/crt0.s apps/beep.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/beep.elf: apps/crt0.s apps/beep.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/beep.c -o $(BUILD)/beep_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/beep.elf $(BUILD)/crt0.o $(BUILD)/beep_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/beep.elf $(BUILD)/crt0.o $(BUILD)/beep_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/save.elf: apps/crt0.s apps/save.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/save.elf: apps/crt0.s apps/save.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/save.c -o $(BUILD)/save_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/save.elf $(BUILD)/crt0.o $(BUILD)/save_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/save.elf $(BUILD)/crt0.o $(BUILD)/save_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/files.elf: apps/crt0.s apps/files.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/files.elf: apps/crt0.s apps/files.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/files.c -o $(BUILD)/files_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/files.elf $(BUILD)/crt0.o $(BUILD)/files_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/files.elf $(BUILD)/crt0.o $(BUILD)/files_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/ls.elf: apps/crt0.s apps/ls.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/ls.elf: apps/crt0.s apps/ls.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/ls.c -o $(BUILD)/ls_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ls.elf $(BUILD)/crt0.o $(BUILD)/ls_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ls.elf $(BUILD)/crt0.o $(BUILD)/ls_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/del.elf: apps/crt0.s apps/del.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/del.elf: apps/crt0.s apps/del.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/del.c -o $(BUILD)/del_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/del.elf $(BUILD)/crt0.o $(BUILD)/del_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/del.elf $(BUILD)/crt0.o $(BUILD)/del_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/play.elf: apps/crt0.s apps/play.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/play.elf: apps/crt0.s apps/play.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/play.c -o $(BUILD)/play_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/play.elf $(BUILD)/crt0.o $(BUILD)/play_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/play.elf $(BUILD)/crt0.o $(BUILD)/play_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/seek.elf: apps/crt0.s apps/seek.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/seek.elf: apps/crt0.s apps/seek.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/seek.c -o $(BUILD)/seek_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/seek.elf $(BUILD)/crt0.o $(BUILD)/seek_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/seek.elf $(BUILD)/crt0.o $(BUILD)/seek_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/fd.c -o $(BUILD)/fd_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fd.elf $(BUILD)/crt0.o $(BUILD)/fd_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fd.elf $(BUILD)/crt0.o $(BUILD)/fd_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/shell.elf: apps/crt0.s apps/shell.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/shell.elf: apps/crt0.s apps/shell.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/shell.c -o $(BUILD)/shell_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/shell.elf $(BUILD)/crt0.o $(BUILD)/shell_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/shell.elf $(BUILD)/crt0.o $(BUILD)/shell_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/arrows.elf: apps/crt0.s apps/arrows.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/arrows.elf: apps/crt0.s apps/arrows.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/arrows.c -o $(BUILD)/arrows_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/arrows.elf $(BUILD)/crt0.o $(BUILD)/arrows_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/arrows.elf $(BUILD)/crt0.o $(BUILD)/arrows_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/snake.elf: apps/crt0.s apps/snake.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/snake.elf: apps/crt0.s apps/snake.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/snake.c -o $(BUILD)/snake_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/snake.elf $(BUILD)/crt0.o $(BUILD)/snake_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/snake.elf $(BUILD)/crt0.o $(BUILD)/snake_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld | $(BUILD)
+$(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
 os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)

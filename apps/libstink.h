@@ -54,6 +54,15 @@ static inline void *sys_sbrk(int delta)
 	return (void *)(unsigned int)r;
 }
 
+/* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
+ * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
+ * file-scope state, so it must live in its own translation unit -- which is
+ * why these are real prototypes (linked in) rather than static inlines. */
+void *malloc(unsigned int nbytes);
+void  free(void *p);
+void *calloc(unsigned int n, unsigned int size);
+void *realloc(void *p, unsigned int new_size);
+
 /* Plays freq for the given number of sys_ticks(), then silences the speaker.
  * Sleeps via sys_sleep_ms (1 tick = 10 ms) instead of spinning on sys_ticks,
  * so the CPU can halt between PIT interrupts while the note plays. */
