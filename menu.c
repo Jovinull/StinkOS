@@ -37,6 +37,7 @@ static unsigned char app_image[APP_IMAGE_MAX];   /* ELF image staging buffer */
 enum { VIEW_MENU = 0, VIEW_FILES = 1 };
 static int view = VIEW_MENU;
 static int selected;
+static int files_selected;
 
 /* Mouse state from the previous frame, used to detect motion (so the cursor
  * is only redrawn when it actually moves) and left-button edge (a "click" is
@@ -110,12 +111,14 @@ static void draw_files(void)
 		line[p] = '\0';
 
 		fb_text(140, 120 + i * 20, line, 0xFFFFFF);
+		if (i == files_selected)
+			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
 
 	if (count == 0)
 		fb_text(140, 120, "no files", 0xA0A0A0);
 
-	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "press q to return", 0xA0A0A0);
+	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "q: return   d: delete selected", 0xA0A0A0);
 }
 
 /* Repaints whichever screen is current, then the mouse cursor on top of it.
@@ -193,9 +196,36 @@ void menu_run(void)
 		}
 
 		if (view == VIEW_FILES) {
+			int count = fs_file_count();
+
 			if (c == 'q' || (clicked && point_in_box(mx, my, FILES_BTN_X, FILES_BTN_Y, FILES_BTN_W, FILES_BTN_H))) {
 				view = VIEW_MENU;
 				redraw();
+			} else if (c == 's' && files_selected < count - 1) {
+				files_selected++;
+				redraw();
+			} else if (c == 'w' && files_selected > 0) {
+				files_selected--;
+				redraw();
+			} else if (c == 'd' && files_selected < count) {
+				char name[16];
+				if (fs_file_info(files_selected, name) >= 0) {
+					name[15] = '\0';
+					fs_file_delete(name);
+					serial_write("menu: deleted file\n");
+				}
+				if (files_selected >= fs_file_count() && files_selected > 0)
+					files_selected--;
+				redraw();
+			} else if (clicked) {
+				int hit = -1;
+				for (int i = 0; i < count; i++)
+					if (point_in_box(mx, my, ITEM_X, ITEM_Y(i), ITEM_W, ITEM_H))
+						hit = i;
+				if (hit >= 0) {
+					files_selected = hit;
+					redraw();
+				}
 			} else if (moved) {
 				/* Only the cursor changed: cheaper than a full repaint. */
 				mouse_undraw_cursor();
@@ -218,6 +248,7 @@ void menu_run(void)
 		} else if (c == 'f' || (clicked && point_in_box(mx, my, FILES_BTN_X, FILES_BTN_Y, FILES_BTN_W, FILES_BTN_H))) {
 			serial_write("menu: files view\n");
 			view = VIEW_FILES;
+			files_selected = 0;
 			redraw();
 		} else if (clicked) {
 			int hit = -1;
