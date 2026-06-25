@@ -119,7 +119,10 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat write append rm echo uptime sound exit");
+			sys_log("shell: help ls cat write append rm echo uptime sound history exit");
+		} else if (strcmp(line, "history") == 0) {
+			for (int i = 0; i < history_count; i++)
+				sys_log(history[i]);
 		} else if (strcmp(line, "echo") == 0) {
 			sys_log(rest);
 		} else if (strcmp(line, "uptime") == 0) {
