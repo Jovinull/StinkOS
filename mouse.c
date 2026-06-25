@@ -13,8 +13,9 @@
 #define PS2_CMD_WRITE_CONFIG 0x60
 #define PS2_CMD_WRITE_AUX    0xD4
 
-#define MOUSE_SET_DEFAULTS 0xF6
-#define MOUSE_ENABLE_DATA  0xF4
+#define MOUSE_SET_DEFAULTS  0xF6
+#define MOUSE_ENABLE_DATA   0xF4
+#define MOUSE_SET_RATE      0xF3
 
 static unsigned char packet[3];
 static int packet_cycle;
@@ -67,12 +68,23 @@ void mouse_init(unsigned int screen_w, unsigned int screen_h)
 	ps2_wait_write();
 	outb(PS2_CMD, PS2_CMD_ENABLE_AUX);
 
+	/* Drain any bytes queued by the aux-enable (QEMU may deliver the mouse's
+	 * self-test result immediately). If we don't flush these, the next
+	 * ps2_wait_read() returns instantly and we'd read a garbage config byte,
+	 * potentially clearing bit 0 (keyboard IRQ) and silencing the keyboard. */
+	for (unsigned int i = 0; i < 16; i++) {
+		if (!(inb(PS2_STATUS) & 0x01))
+			break;
+		inb(PS2_DATA);
+	}
+
 	ps2_wait_write();
 	outb(PS2_CMD, PS2_CMD_READ_CONFIG);
 	ps2_wait_read();
 	unsigned char config = inb(PS2_DATA);
-	config |= 0x02;          /* unmask the second port's IRQ line */
-	config &= ~0x20U;        /* make sure the aux port clock isn't disabled */
+	/* Force bit 0 (keyboard IRQ) on so a garbage read can never silence it. */
+	config |= 0x03;          /* enable both port-1 and port-2 IRQ lines */
+	config &= ~0x20U;        /* unfreeze the aux port clock */
 
 	ps2_wait_write();
 	outb(PS2_CMD, PS2_CMD_WRITE_CONFIG);
@@ -80,6 +92,9 @@ void mouse_init(unsigned int screen_w, unsigned int screen_h)
 	outb(PS2_DATA, config);
 
 	aux_send(MOUSE_SET_DEFAULTS);
+	/* Reduce from default 100 Hz to 40 Hz: 300 IRQ12/s → 120 IRQ12/s. */
+	aux_send(MOUSE_SET_RATE);
+	aux_send(40);
 	aux_send(MOUSE_ENABLE_DATA);
 }
 
