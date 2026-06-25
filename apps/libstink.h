@@ -1,7 +1,11 @@
-/* StinkOS userland library: C wrappers around the int 0x80 syscalls.
+/* StinkOS userland library: C wrappers around the int 0x80 syscalls, plus a
+ * small set of freestanding C primitives (no libc is linked into apps) so
+ * each app doesn't have to keep reinventing string/formatting helpers.
  * Syscall ABI: eax = number, ebx/ecx/edx = args, result in eax. */
 #ifndef LIBSTINK_H
 #define LIBSTINK_H
+
+#include <stdarg.h>
 
 static inline int __syscall(int n, int a, int b, int c)
 {
@@ -57,5 +61,133 @@ static inline int  sys_close(int fd)                            { return __sysca
 static inline int  sys_read(int fd, void *buf, unsigned int n)  { return __syscall(18, fd, (int)buf, (int)n); }
 static inline int  sys_write(int fd, const void *buf, unsigned int n) { return __syscall(19, fd, (int)buf, (int)n); }
 static inline int  sys_seek(int fd, int offset, int whence)     { return __syscall(20, fd, offset, whence); }
+
+/* ---- Freestanding C primitives ---- */
+
+static inline unsigned int strlen(const char *s)
+{
+	unsigned int n = 0;
+	while (s[n] != '\0')
+		n++;
+	return n;
+}
+
+static inline void *memset(void *dst, int v, unsigned int n)
+{
+	unsigned char *p = dst;
+	for (unsigned int i = 0; i < n; i++)
+		p[i] = (unsigned char)v;
+	return dst;
+}
+
+static inline void *memcpy(void *dst, const void *src, unsigned int n)
+{
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+	for (unsigned int i = 0; i < n; i++)
+		d[i] = s[i];
+	return dst;
+}
+
+static inline int strcmp(const char *a, const char *b)
+{
+	while (*a != '\0' && *a == *b) {
+		a++;
+		b++;
+	}
+	return (unsigned char)*a - (unsigned char)*b;
+}
+
+/* Writes the digits of v (in the given base, 2..16) into out, most
+ * significant digit first, and returns how many characters were written.
+ * out must have room for at least 32 digits. */
+static inline int uitoa(unsigned int v, unsigned int base, char *out)
+{
+	char tmp[32];
+	int n = 0;
+
+	if (v == 0) {
+		out[0] = '0';
+		return 1;
+	}
+	while (v > 0 && n < 32) {
+		unsigned int d = v % base;
+		tmp[n++] = (d < 10) ? (char)('0' + d) : (char)('a' + d - 10);
+		v /= base;
+	}
+	for (int i = 0; i < n; i++)
+		out[i] = tmp[n - 1 - i];
+	return n;
+}
+
+/* Minimal formatted logging: supports %s %c %d %u %x %%, no width/precision.
+ * Renders into a fixed buffer and sends it to sys_log in one call -- exactly
+ * the kind of primitive CONTRIBUTING.md asks for instead of one-off
+ * formatting code sprinkled across apps. */
+static inline void sys_printf(const char *fmt, ...)
+{
+	char buf[200];
+	unsigned int p = 0;
+	va_list args;
+
+	va_start(args, fmt);
+	for (const char *f = fmt; *f != '\0' && p < sizeof(buf) - 1; f++) {
+		if (*f != '%') {
+			buf[p++] = *f;
+			continue;
+		}
+		f++;
+		if (*f == '\0')
+			break;
+
+		char digits[32];
+		int n;
+		int v;
+
+		switch (*f) {
+		case 's': {
+			const char *s = va_arg(args, const char *);
+			while (*s != '\0' && p < sizeof(buf) - 1)
+				buf[p++] = *s++;
+			break;
+		}
+		case 'c':
+			buf[p++] = (char)va_arg(args, int);
+			break;
+		case 'd':
+			v = va_arg(args, int);
+			if (v < 0) {
+				buf[p++] = '-';
+				v = -v;
+			}
+			n = uitoa((unsigned int)v, 10, digits);
+			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
+				buf[p++] = digits[i];
+			break;
+		case 'u':
+			n = uitoa(va_arg(args, unsigned int), 10, digits);
+			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
+				buf[p++] = digits[i];
+			break;
+		case 'x':
+			n = uitoa(va_arg(args, unsigned int), 16, digits);
+			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
+				buf[p++] = digits[i];
+			break;
+		case '%':
+			buf[p++] = '%';
+			break;
+		default:
+			buf[p++] = '%';
+			if (p < sizeof(buf) - 1)
+				buf[p++] = *f;
+			break;
+		}
+	}
+	va_end(args);
+
+	buf[p] = '\0';
+	sys_log(buf);
+}
 
 #endif
