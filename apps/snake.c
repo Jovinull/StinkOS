@@ -52,6 +52,28 @@ static void game_over_jingle(void)
 	sys_tone(440, 10);
 }
 
+/* Persists the best score across runs in its own small StinkFS file, the
+ * same pattern the collector game (game.s) already uses for its high score
+ * file -- a 4-byte raw unsigned int, read at start and only rewritten when
+ * beaten. */
+static void report_game_over(int score, const char *reason)
+{
+	unsigned int high = 0;
+	char buf[4];
+
+	if (sys_fread("snakehi", buf, sizeof(buf)) == (int)sizeof(buf))
+		high = *(unsigned int *)buf;
+
+	if ((unsigned int)score > high) {
+		*(unsigned int *)buf = (unsigned int)score;
+		sys_fwrite("snakehi", buf, sizeof(buf));
+		sys_printf("snake: NEW HIGH SCORE %d (%s)", score, reason);
+	} else {
+		sys_printf("snake: game over, score %d, best %u (%s)", score, high, reason);
+	}
+	game_over_jingle();
+}
+
 static int food_x, food_y;
 
 static void place_food(void)
@@ -111,8 +133,7 @@ void main(void)
 		int ny = body[0].y + dy[dir];
 
 		if (nx < 0 || nx >= CELLS_W || ny < 0 || ny >= CELLS_H) {
-			sys_printf("snake: game over, score %d (hit wall)", score);
-			game_over_jingle();
+			report_game_over(score, "hit wall");
 			return;
 		}
 		/* The tail cell is about to move away, so colliding with it is
@@ -122,8 +143,7 @@ void main(void)
 			if (body[i].x == nx && body[i].y == ny)
 				hit_self = 1;
 		if (hit_self) {
-			sys_printf("snake: game over, score %d (hit self)", score);
-			game_over_jingle();
+			report_game_over(score, "hit self");
 			return;
 		}
 
