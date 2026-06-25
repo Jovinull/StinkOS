@@ -141,6 +141,22 @@ static inline int atoi(const char *s)
 	return v * sign;
 }
 
+/* Minimal pseudo-random generator (linear congruential, same constants as
+ * the classic glibc-style LCG). Good enough for game logic (food placement
+ * etc.), not for anything security-sensitive. */
+static unsigned int __rand_state = 1;
+
+static inline void srand(unsigned int seed)
+{
+	__rand_state = seed;
+}
+
+static inline int rand(void)
+{
+	__rand_state = __rand_state * 1103515245u + 12345u;
+	return (int)((__rand_state >> 16) & 0x7FFF);
+}
+
 /* Writes the digits of v (in the given base, 2..16) into out, most
  * significant digit first, and returns how many characters were written.
  * out must have room for at least 32 digits. */
