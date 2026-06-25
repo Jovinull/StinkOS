@@ -9,6 +9,13 @@
 #define SC_LSHIFT  0x2A
 #define SC_RSHIFT  0x36
 #define SC_RELEASE 0x80          /* bit 7 set => key release */
+#define SC_EXTENDED 0xE0         /* prefix byte: the next code is "extended"
+                                  * (arrows, Home/End, the numpad's siblings) */
+
+#define SC_ARROW_UP    0x48
+#define SC_ARROW_DOWN  0x50
+#define SC_ARROW_LEFT  0x4B
+#define SC_ARROW_RIGHT 0x4D
 
 /* Scancode set 1 -> ASCII (unshifted). 0 means "no printable char". */
 static const char map_normal[128] = {
@@ -31,6 +38,7 @@ static const char map_shift[128] = {
 };
 
 static int shift_down = 0;
+static int extended_prefix = 0;   /* set after seeing SC_EXTENDED, for one byte */
 
 /* Decoded-character ring buffer, drained by keyboard_getchar (the syscall). */
 #define KBUF_SIZE 128
@@ -65,6 +73,29 @@ void keyboard_init(void)
 void keyboard_handle(void)
 {
 	unsigned char sc = inb(KBD_DATA);
+
+	if (sc == SC_EXTENDED) {
+		extended_prefix = 1;
+		return;
+	}
+
+	if (extended_prefix) {
+		extended_prefix = 0;
+		if (sc & SC_RELEASE)
+			return;                 /* only act on the key going down */
+
+		char arrow;
+		switch (sc) {
+		case SC_ARROW_UP:    arrow = KEY_UP;    break;
+		case SC_ARROW_DOWN:  arrow = KEY_DOWN;  break;
+		case SC_ARROW_LEFT:  arrow = KEY_LEFT;  break;
+		case SC_ARROW_RIGHT: arrow = KEY_RIGHT; break;
+		default:             return;            /* other extended key: ignore */
+		}
+		serial_write("kbd: arrow\n");
+		kbuf_push(arrow);
+		return;
+	}
 
 	if (sc & SC_RELEASE) {
 		unsigned char code = sc & 0x7F;
