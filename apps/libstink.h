@@ -335,6 +335,93 @@ static inline int atoi(const char *s)
 	return v * sign;
 }
 
+/* General-purpose integer parser with the C library's strtol semantics:
+ *   - skips leading whitespace
+ *   - optional + / -
+ *   - if base == 0, auto-detects: 0x/0X = base 16, leading 0 = base 8,
+ *     otherwise base 10
+ *   - base 16 strips a 0x/0X prefix even when given explicitly
+ *   - stops at the first character that isn't a digit in the given base
+ *   - if 'end' is non-NULL, *end is set to the first unconsumed character
+ * Returns 0 when no digits could be read; overflow is not signalled. */
+static inline long strtol(const char *s, char **end, int base)
+{
+	while (isspace((unsigned char)*s))
+		s++;
+
+	int sign = 1;
+	if (*s == '-') { sign = -1; s++; }
+	else if (*s == '+')           s++;
+
+	if (base == 0) {
+		if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+		else if (*s == '0')                            { base = 8;  s += 1; }
+		else                                             base = 10;
+	} else if (base == 16 && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		s += 2;
+	}
+
+	long val = 0;
+	int  any = 0;
+	for (; *s != '\0'; s++) {
+		int d;
+		if (*s >= '0' && *s <= '9')      d = *s - '0';
+		else if (*s >= 'a' && *s <= 'z') d = *s - 'a' + 10;
+		else if (*s >= 'A' && *s <= 'Z') d = *s - 'A' + 10;
+		else                              break;
+		if (d >= base)
+			break;
+		val = val * base + d;
+		any = 1;
+	}
+
+	if (end)
+		*end = (char *)(any ? s : (const char *)0);   /* match glibc on no-digit */
+	return sign * val;
+}
+
+/* Same parsing rules as strtol(), but no sign is consumed and the result is
+ * unsigned. A leading '-' is rejected (returns 0) rather than wrapping. */
+static inline unsigned long strtoul(const char *s, char **end, int base)
+{
+	while (isspace((unsigned char)*s))
+		s++;
+	if (*s == '+')
+		s++;
+	else if (*s == '-') {
+		if (end) *end = (char *)s;
+		return 0;
+	}
+
+	if (base == 0) {
+		if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+		else if (*s == '0')                            { base = 8;  s += 1; }
+		else                                             base = 10;
+	} else if (base == 16 && *s == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		s += 2;
+	}
+
+	unsigned long val = 0;
+	int           any = 0;
+	for (; *s != '\0'; s++) {
+		int d;
+		if (*s >= '0' && *s <= '9')      d = *s - '0';
+		else if (*s >= 'a' && *s <= 'z') d = *s - 'a' + 10;
+		else if (*s >= 'A' && *s <= 'Z') d = *s - 'A' + 10;
+		else                              break;
+		if (d >= base)
+			break;
+		val = val * (unsigned long)base + (unsigned long)d;
+		any = 1;
+	}
+
+	if (end)
+		*end = (char *)(any ? s : (const char *)0);
+	return val;
+}
+
+static inline long atol(const char *s) { return strtol(s, (char **)0, 10); }
+
 /* Minimal pseudo-random generator (linear congruential, same constants as
  * the classic glibc-style LCG). Good enough for game logic (food placement
  * etc.), not for anything security-sensitive. */
