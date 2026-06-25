@@ -35,8 +35,16 @@ static void clear_rect(int x, int y, int w, int h)
 
 static void draw_score(int lscore, int rscore)
 {
-	/* Log to serial; on-screen number rendering needs sys_drawtext (pending). */
 	sys_printf("pong: %d - %d", lscore, rscore);
+
+	/* Render "L - R" centred on screen using the kernel font (8x8 glyphs). */
+	char buf[6];
+	buf[0] = '0' + (lscore % 10);
+	buf[1] = ' '; buf[2] = '-'; buf[3] = ' ';
+	buf[4] = '0' + (rscore % 10);
+	buf[5] = '\0';
+	/* 5 glyphs × 8px = 40px wide; centre at W/2 = 512 → x = 512 - 20 = 492 */
+	sys_drawtext(492, 8, buf, FG);
 }
 
 /* Clamps v to [lo, hi]. */
@@ -154,6 +162,7 @@ static int play_round(void)   /* returns 0 = quit, 1 = play again */
 			sys_tone(400, 8);
 			if (rscore >= WIN_SCORE) {
 				sys_log("pong: player wins!");
+				sys_drawtext(W / 2 - 48, H / 2 - 4, "PLAYER WINS!", FG);
 				sys_tone(1000, 15);
 				return 1;
 			}
@@ -167,6 +176,7 @@ static int play_round(void)   /* returns 0 = quit, 1 = play again */
 			sys_tone(300, 8);
 			if (lscore >= WIN_SCORE) {
 				sys_log("pong: AI wins!");
+				sys_drawtext(W / 2 - 36, H / 2 - 4, "AI WINS!", FG);
 				sys_tone(200, 15);
 				return 1;
 			}
