@@ -9,6 +9,7 @@
 #define SC_LSHIFT  0x2A
 #define SC_RSHIFT  0x36
 #define SC_CAPSLOCK 0x3A
+#define SC_CTRL    0x1D          /* left Ctrl unprefixed; right Ctrl is E0 1D */
 #define SC_RELEASE 0x80          /* bit 7 set => key release */
 #define SC_EXTENDED 0xE0         /* prefix byte: the next code is "extended"
                                   * (arrows, Home/End, the numpad's siblings) */
@@ -40,6 +41,7 @@ static const char map_shift[128] = {
 
 static int shift_down = 0;
 static int capslock_on = 0;
+static int ctrl_down = 0;
 static int extended_prefix = 0;   /* set after seeing SC_EXTENDED, for one byte */
 
 /* Decoded-character ring buffer, drained by keyboard_getchar (the syscall). */
@@ -83,6 +85,11 @@ void keyboard_handle(void)
 
 	if (extended_prefix) {
 		extended_prefix = 0;
+
+		if ((sc & 0x7F) == SC_CTRL) {     /* E0 1D = right Ctrl */
+			ctrl_down = !(sc & SC_RELEASE);
+			return;
+		}
 		if (sc & SC_RELEASE)
 			return;                 /* only act on the key going down */
 
@@ -103,11 +110,18 @@ void keyboard_handle(void)
 		unsigned char code = sc & 0x7F;
 		if (code == SC_LSHIFT || code == SC_RSHIFT)
 			shift_down = 0;
+		else if (code == SC_CTRL)
+			ctrl_down = 0;
 		return;
 	}
 
 	if (sc == SC_LSHIFT || sc == SC_RSHIFT) {
 		shift_down = 1;
+		return;
+	}
+
+	if (sc == SC_CTRL) {
+		ctrl_down = 1;
 		return;
 	}
 
@@ -125,6 +139,16 @@ void keyboard_handle(void)
 	char c = use_shift_map ? map_shift[sc] : map_normal[sc];
 	if (c == 0)
 		return;
+
+	/* Ctrl+letter reports the standard ASCII control code (Ctrl+A=1 ...
+	 * Ctrl+Z=26), same convention real terminals use -- Shift/Caps Lock
+	 * don't affect it, so only the unshifted letter map matters here. */
+	if (ctrl_down) {
+		char base = map_normal[sc];
+		if (base < 'a' || base > 'z')
+			return;                 /* no Ctrl+digit/symbol support yet */
+		c = base - 'a' + 1;
+	}
 
 	serial_write("kbd: ");
 	serial_putc(c);

@@ -71,6 +71,12 @@ static int read_line(char *buf)
 				len--;
 			continue;
 		}
+		if (c == KEY_CTRL('c')) {
+			sys_log("^C");
+			len = 0;
+			history_pos = 0;
+			continue;
+		}
 		if (c == KEY_UP) {
 			if (history_pos < history_count) {
 				history_pos++;
