@@ -28,6 +28,7 @@ APP10_LBA = 136
 APP11_LBA = 144
 APP12_LBA = 152
 APP13_LBA = 160
+APP14_LBA = 168
 
 # The app region spans LBA 64..191 (sixteen 8-sector slots). Metadata lives
 # above it: the app TOC, then StinkFS (a directory sector at 193 and a 32-sector
@@ -35,7 +36,7 @@ APP13_LBA = 160
 TOC_LBA  = 192
 DISK_END = 115712         # (194 + 32) * 512: keep TOC and StinkFS present
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c menu.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
@@ -115,7 +116,12 @@ $(BUILD)/seek.elf: apps/crt0.s apps/seek.c apps/libstink.h apps/app.ld | $(BUILD
 	$(CC) $(CFLAGS) -c apps/seek.c -o $(BUILD)/seek_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/seek.elf $(BUILD)/crt0.o $(BUILD)/seek_app.o
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf
+$(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/fd.c -o $(BUILD)/fd_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fd.elf $(BUILD)/crt0.o $(BUILD)/fd_app.o
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	dd if=$(BUILD)/hello.elf of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
@@ -131,6 +137,7 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/del.elf   of=os.bin bs=512 seek=$(APP11_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/play.elf  of=os.bin bs=512 seek=$(APP12_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/seek.elf  of=os.bin bs=512 seek=$(APP13_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/fd.elf    of=os.bin bs=512 seek=$(APP14_LBA) conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
@@ -144,7 +151,8 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"10 LS:$(APP10_LBA):$(BUILD)/ls.elf" \
 		"11 DEL:$(APP11_LBA):$(BUILD)/del.elf" \
 		"12 PLAY:$(APP12_LBA):$(BUILD)/play.elf" \
-		"13 SEEK:$(APP13_LBA):$(BUILD)/seek.elf"
+		"13 SEEK:$(APP13_LBA):$(BUILD)/seek.elf" \
+		"14 FD:$(APP14_LBA):$(BUILD)/fd.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 
