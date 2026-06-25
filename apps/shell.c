@@ -1,33 +1,101 @@
-/* StinkOS userland C app: a minimal interactive command shell. Reads a line
- * from the keyboard (with backspace editing), parses a command + argument(s),
- * and drives StinkFS through the existing file syscalls. Output goes to the
- * serial log via sys_log/sys_printf -- there is no text-on-screen syscall yet,
- * so this is a serial console for now, not a graphical terminal.
- *
- * NOT YET ON THE BOOT MENU: needs a disk slot + TOC entry in the Makefile,
- * which is Core's (Equipe 1's) jurisdiction. See the pending request in
- * TASKS.md. */
+/* StinkOS graphical terminal shell. All input and output is rendered on screen
+ * via sys_drawtext / sys_fillrect. The prompt echoes keystrokes in real time;
+ * backspace and command history (arrow keys) update the line in place. */
 #include "libstink.h"
 
-#define LINE_MAX 64
-#define HISTORY_MAX 8
+/* ---- terminal layer ---- */
+#define TERM_W     1024
+#define TERM_H     768
+#define TERM_GLYPH 8
+#define TERM_COLS  (TERM_W / TERM_GLYPH)   /* 128 columns */
+#define TERM_ROWS  (TERM_H / TERM_GLYPH)   /* 96 rows     */
+#define TERM_BG    0x001022u
+#define TERM_FG    0xC8D8FFu   /* normal output: light blue-white */
+#define TERM_IN    0xFFFFFFu   /* committed input line: white     */
+#define TERM_PR    0x00FF88u   /* prompt + live input: green      */
+#define TERM_ERR   0xFF5050u   /* error messages: light red       */
+#define TERM_HEAD  0x6090FFu   /* header / info lines: medium blue */
 
-/* A small ring of past command lines. history_pos counts how far back the
- * arrow keys have currently scrolled (0 = not recalling anything, editing a
- * fresh line). */
+static int term_row = 0;
+
+static void term_clear(void)
+{
+	sys_fillrect(0, 0, TERM_W, TERM_H, TERM_BG);
+	term_row = 0;
+}
+
+static void term_erase(int row)
+{
+	sys_fillrect(0, row * TERM_GLYPH, TERM_W, TERM_GLYPH, TERM_BG);
+}
+
+static void term_print(const char *s, unsigned int col)
+{
+	if (term_row >= TERM_ROWS)
+		term_clear();
+	term_erase(term_row);
+	sys_drawtext(0, term_row * TERM_GLYPH, s, col);
+	term_row++;
+}
+
+/* Minimal printf-to-screen: %s %c %d %u %x %% — same spec as sys_printf. */
+static void tprintf(const char *fmt, ...)
+{
+	char buf[TERM_COLS + 1];
+	unsigned int p = 0;
+	va_list args;
+	va_start(args, fmt);
+	for (const char *f = fmt; *f != '\0' && p < (unsigned int)(TERM_COLS); f++) {
+		if (*f != '%') { buf[p++] = *f; continue; }
+		f++;
+		if (*f == '\0') break;
+		char digs[32]; int n; int v;
+		switch (*f) {
+		case 's': {
+			const char *s = va_arg(args, const char *);
+			while (*s != '\0' && p < (unsigned int)(TERM_COLS)) buf[p++] = *s++;
+			break;
+		}
+		case 'c': buf[p++] = (char)va_arg(args, int); break;
+		case 'd':
+			v = va_arg(args, int);
+			if (v < 0 && p < (unsigned int)(TERM_COLS)) { buf[p++] = '-'; v = -v; }
+			n = uitoa((unsigned int)v, 10, digs);
+			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
+			break;
+		case 'u':
+			n = uitoa(va_arg(args, unsigned int), 10, digs);
+			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
+			break;
+		case 'x':
+			n = uitoa(va_arg(args, unsigned int), 16, digs);
+			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
+			break;
+		case '%': buf[p++] = '%'; break;
+		default: buf[p++] = '%';
+			if (p < (unsigned int)(TERM_COLS)) buf[p++] = *f;
+			break;
+		}
+	}
+	va_end(args);
+	buf[p] = '\0';
+	term_print(buf, TERM_FG);
+}
+
+/* ---- command history ---- */
+#define LINE_MAX     64
+#define HISTORY_MAX  8
+
 static char history[HISTORY_MAX][LINE_MAX];
-static int history_count;
-static int history_pos;
+static int  history_count;
+static int  history_pos;
 
 static void history_push(const char *line)
 {
 	if (line[0] == '\0')
 		return;
-
 	unsigned int n = strlen(line);
-	if (n > LINE_MAX - 1)
-		n = LINE_MAX - 1;
-
+	if (n > LINE_MAX - 1) n = LINE_MAX - 1;
 	if (history_count == HISTORY_MAX) {
 		for (int i = 1; i < HISTORY_MAX; i++)
 			memcpy(history[i - 1], history[i], LINE_MAX);
@@ -38,14 +106,9 @@ static void history_push(const char *line)
 	history_count++;
 }
 
-/* Loads the recalled line (history_pos steps back from the newest, or the
- * empty string at history_pos == 0) into buf and returns its length. */
 static int history_load(char *buf)
 {
-	if (history_pos == 0) {
-		buf[0] = '\0';
-		return 0;
-	}
+	if (history_pos == 0) { buf[0] = '\0'; return 0; }
 	const char *line = history[history_count - history_pos];
 	unsigned int n = strlen(line);
 	memcpy(buf, line, n);
@@ -53,34 +116,61 @@ static int history_load(char *buf)
 	return (int)n;
 }
 
+/* ---- input line rendering ---- */
+static void render_input(const char *buf, int len, int with_cursor)
+{
+	char display[TERM_COLS + 1];
+	int p = 0;
+	display[p++] = '>';
+	display[p++] = ' ';
+	for (int i = 0; i < len && p < TERM_COLS - 1; i++)
+		display[p++] = buf[i];
+	if (with_cursor && p < TERM_COLS)
+		display[p++] = '_';
+	display[p] = '\0';
+	term_erase(term_row);
+	sys_drawtext(0, term_row * TERM_GLYPH, display, with_cursor ? TERM_PR : TERM_IN);
+}
+
 static int read_line(char *buf)
 {
 	int len = 0;
 	history_pos = 0;
+	if (term_row >= TERM_ROWS)
+		term_clear();
+	render_input(buf, len, 1);
 
 	for (;;) {
 		int c = sys_getkey();
-		if (c == 0)
-			continue;               /* busy-poll: no yield/sleep syscall */
+		if (c == 0) continue;
+
 		if (c == '\n') {
 			buf[len] = '\0';
+			render_input(buf, len, 0);   /* freeze without cursor */
+			term_row++;
+			if (term_row >= TERM_ROWS) term_clear();
 			return len;
 		}
 		if (c == '\b') {
-			if (len > 0)
-				len--;
+			if (len > 0) { len--; render_input(buf, len, 1); }
 			continue;
 		}
 		if (c == KEY_CTRL('c')) {
-			sys_log("^C");
-			len = 0;
-			history_pos = 0;
+			len = 0; buf[0] = '\0'; history_pos = 0;
+			/* Show ^C on the current line then open a fresh prompt. */
+			char ctrlc[5] = {'>',  ' ', '^', 'C', '\0'};
+			term_erase(term_row);
+			sys_drawtext(0, term_row * TERM_GLYPH, ctrlc, TERM_ERR);
+			term_row++;
+			if (term_row >= TERM_ROWS) term_clear();
+			render_input(buf, 0, 1);
 			continue;
 		}
 		if (c == KEY_UP) {
 			if (history_pos < history_count) {
 				history_pos++;
 				len = history_load(buf);
+				render_input(buf, len, 1);
 			}
 			continue;
 		}
@@ -88,32 +178,47 @@ static int read_line(char *buf)
 			if (history_pos > 0) {
 				history_pos--;
 				len = history_load(buf);
+				render_input(buf, len, 1);
 			}
 			continue;
 		}
 		if (c == KEY_LEFT || c == KEY_RIGHT)
-			continue;               /* no cursor-position editing yet */
-		if (len < LINE_MAX - 1)
+			continue;
+		if (c >= 32 && c < 127 && len < LINE_MAX - 1) {
 			buf[len++] = (char)c;
+			render_input(buf, len, 1);
+		}
 	}
 }
 
-/* Splits 'line' at the first space, NUL-terminating the command word and
- * returning a pointer to whatever comes after it (or "" if there's none). */
+/* ---- helpers ---- */
 static char *split(char *line)
 {
 	for (char *p = line; *p != '\0'; p++) {
-		if (*p == ' ') {
-			*p = '\0';
-			return p + 1;
-		}
+		if (*p == ' ') { *p = '\0'; return p + 1; }
 	}
 	return line + strlen(line);
 }
 
+/* Write a padded filename + size line: "name             1234 B". */
+static void print_fileinfo(const char *name, int size)
+{
+	char line[TERM_COLS + 1];
+	int p = 0;
+	for (int j = 0; name[j] != '\0' && p < 16; j++) line[p++] = name[j];
+	while (p < 17) line[p++] = ' ';
+	char num[12]; int n = uitoa((unsigned int)size, 10, num);
+	for (int i = 0; i < n; i++) line[p++] = num[i];
+	line[p++] = ' '; line[p++] = 'B'; line[p] = '\0';
+	term_print(line, TERM_FG);
+}
+
+/* ---- main ---- */
 void main(void)
 {
-	sys_log("shell: ready");
+	term_clear();
+	term_print("STINKOS SHELL  (type 'help', 'exit' to quit)", TERM_HEAD);
+	term_row++;   /* blank line after header */
 
 	for (;;) {
 		char line[LINE_MAX];
@@ -122,209 +227,150 @@ void main(void)
 
 		char *rest = split(line);
 
-		if (strcmp(line, "") == 0) {
+		if (line[0] == '\0') {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat head tail wc hexdump write append cp mv rm touch grep echo uptime sound history exit");
+			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
+			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
+			term_print("history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
-				sys_log(history[i]);
+				term_print(history[i], TERM_FG);
 		} else if (strcmp(line, "echo") == 0) {
-			sys_log(rest);
+			term_print(rest, TERM_FG);
 		} else if (strcmp(line, "uptime") == 0) {
-			sys_printf("shell: %u ticks", sys_ticks());
+			tprintf("%u ticks since boot", sys_ticks());
 		} else if (strcmp(line, "exit") == 0) {
-			sys_log("shell: bye");
+			term_print("bye", TERM_HEAD);
 			sys_exit();
 		} else if (strcmp(line, "ls") == 0) {
 			int n = sys_fcount();
 			char name[16];
 			for (int i = 0; i < n; i++) {
 				int sz = sys_finfo(i, name);
-				if (sz >= 0) {
-					name[15] = '\0';
-					sys_printf("shell: %-15s  %d B", name, sz);
-				}
+				if (sz >= 0) { name[15] = '\0'; print_fileinfo(name, sz); }
 			}
-			sys_printf("shell: %d file(s)", n);
+			tprintf("%d file(s)", n);
 		} else if (strcmp(line, "cat") == 0) {
-			char data[128];
+			char data[LINE_MAX];
 			int n = sys_fread(rest, data, sizeof(data) - 1);
-			if (n < 0) {
-				sys_log("shell: no such file");
-			} else {
-				data[n] = '\0';
-				sys_log(data);
-			}
+			if (n < 0) term_print("no such file", TERM_ERR);
+			else { data[n] = '\0'; term_print(data, TERM_FG); }
 		} else if (strcmp(line, "tail") == 0) {
-			/* Last up to 64 bytes of the file, via the fd API (open/seek/
-			 * read/close) instead of the one-shot named-file syscalls --
-			 * exercises the VFS descriptor path the other commands don't. */
 			int fd = sys_open(rest, 0);
-			if (fd < 0) {
-				sys_log("shell: no such file");
-			} else {
-				int size = sys_seek(fd, 0, SYS_SEEK_END);
+			if (fd < 0) { term_print("no such file", TERM_ERR); }
+			else {
+				int size  = sys_seek(fd, 0, SYS_SEEK_END);
 				int start = size > 64 ? size - 64 : 0;
 				sys_seek(fd, start, SYS_SEEK_SET);
 				char data[65];
 				int n = sys_read(fd, data, sizeof(data) - 1);
 				sys_close(fd);
-				if (n < 0) {
-					sys_log("shell: read failed");
-				} else {
-					data[n] = '\0';
-					sys_log(data);
-				}
+				if (n < 0) term_print("read failed", TERM_ERR);
+				else { data[n] = '\0'; term_print(data, TERM_FG); }
 			}
-		} else if (strcmp(line, "rm") == 0) {
-			if (sys_fdelete(rest) == 0)
-				sys_log("shell: removed");
-			else
-				sys_log("shell: no such file");
-		} else if (strcmp(line, "write") == 0) {
-			char *text = split(rest);
-			if (sys_fwrite(rest, text, strlen(text)) == 0)
-				sys_log("shell: written");
-			else
-				sys_log("shell: write failed");
-		} else if (strcmp(line, "append") == 0) {
-			char *text = split(rest);
-			if (sys_fappend(rest, text, strlen(text)) == 0)
-				sys_log("shell: appended");
-			else
-				sys_log("shell: append failed");
 		} else if (strcmp(line, "head") == 0) {
-			/* First up to 64 bytes of the file, mirror image of tail. */
 			int fd = sys_open(rest, 0);
-			if (fd < 0) {
-				sys_log("shell: no such file");
-			} else {
+			if (fd < 0) { term_print("no such file", TERM_ERR); }
+			else {
 				char data[65];
 				int n = sys_read(fd, data, sizeof(data) - 1);
 				sys_close(fd);
-				if (n < 0) {
-					sys_log("shell: read failed");
-				} else {
-					data[n] = '\0';
-					sys_log(data);
-				}
+				if (n < 0) term_print("read failed", TERM_ERR);
+				else { data[n] = '\0'; term_print(data, TERM_FG); }
 			}
 		} else if (strcmp(line, "wc") == 0) {
-			/* Byte count and newline count (lines = newlines, like wc -lc). */
 			int fd = sys_open(rest, 0);
-			if (fd < 0) {
-				sys_log("shell: no such file");
-			} else {
+			if (fd < 0) { term_print("no such file", TERM_ERR); }
+			else {
 				int bytes = 0, lines = 0;
-				char chunk[64];
-				int n;
+				char chunk[64]; int n;
 				while ((n = sys_read(fd, chunk, sizeof(chunk))) > 0) {
 					bytes += n;
-					for (int i = 0; i < n; i++)
-						if (chunk[i] == '\n')
-							lines++;
+					for (int i = 0; i < n; i++) if (chunk[i] == '\n') lines++;
 				}
 				sys_close(fd);
-				sys_printf("shell: %d lines  %d bytes  %s", lines, bytes, rest);
+				tprintf("%d lines  %d bytes  %s", lines, bytes, rest);
 			}
 		} else if (strcmp(line, "hexdump") == 0) {
-			/* Classic hex + ASCII dump, 16 bytes per row. */
 			int fd = sys_open(rest, 0);
-			if (fd < 0) {
-				sys_log("shell: no such file");
-			} else {
-				unsigned char row[16];
-				int offset = 0;
-				int n;
+			if (fd < 0) { term_print("no such file", TERM_ERR); }
+			else {
+				unsigned char row[16]; int offset = 0, n;
 				while ((n = sys_read(fd, row, sizeof(row))) > 0) {
-					/* Build "OOOO: HH HH .. HH  ASCII" into buf. */
-					char buf[80];
-					int p = 0;
-					/* offset (4 hex digits) */
-					char tmp[8];
-					int tn = uitoa((unsigned int)offset, 16, tmp);
+					char buf[80]; int p = 0;
+					char tmp[8]; int tn = uitoa((unsigned int)offset, 16, tmp);
 					for (int z = tn; z < 4; z++) buf[p++] = '0';
 					for (int z = 0; z < tn; z++) buf[p++] = tmp[z];
 					buf[p++] = ':'; buf[p++] = ' ';
-					/* hex bytes */
 					for (int i = 0; i < 16; i++) {
 						if (i < n) {
-							char h[4];
-							int hn = uitoa(row[i], 16, h);
+							char h[4]; int hn = uitoa(row[i], 16, h);
 							if (hn < 2) buf[p++] = '0';
 							for (int z = 0; z < hn; z++) buf[p++] = h[z];
-						} else {
-							buf[p++] = ' '; buf[p++] = ' ';
-						}
+						} else { buf[p++] = ' '; buf[p++] = ' '; }
 						buf[p++] = ' ';
 					}
 					buf[p++] = ' ';
-					/* ASCII */
 					for (int i = 0; i < n; i++)
 						buf[p++] = (row[i] >= 0x20 && row[i] < 0x7F) ? (char)row[i] : '.';
 					buf[p] = '\0';
-					sys_log(buf);
+					term_print(buf, TERM_FG);
 					offset += n;
 				}
 				sys_close(fd);
 			}
+		} else if (strcmp(line, "write") == 0) {
+			char *text = split(rest);
+			if (sys_fwrite(rest, text, strlen(text)) == 0) term_print("written", TERM_FG);
+			else term_print("write failed", TERM_ERR);
+		} else if (strcmp(line, "append") == 0) {
+			char *text = split(rest);
+			if (sys_fappend(rest, text, strlen(text)) == 0) term_print("appended", TERM_FG);
+			else term_print("append failed", TERM_ERR);
+		} else if (strcmp(line, "rm") == 0) {
+			if (sys_fdelete(rest) == 0) term_print("removed", TERM_FG);
+			else term_print("no such file", TERM_ERR);
 		} else if (strcmp(line, "cp") == 0) {
-			/* cp <src> <dst>: copy all bytes from one StinkFS file to another. */
 			char *dst = split(rest);
 			if (*rest == '\0' || *dst == '\0') {
-				sys_log("shell: usage: cp <src> <dst>");
+				term_print("usage: cp <src> <dst>", TERM_ERR);
 			} else {
 				char data[128];
 				int n = sys_fread(rest, data, sizeof(data) - 1);
-				if (n < 0) {
-					sys_log("shell: no such file");
-				} else if (sys_fwrite(dst, data, (unsigned int)n) == 0) {
-					sys_printf("shell: copied %d bytes to %s", n, dst);
-				} else {
-					sys_log("shell: write failed");
-				}
+				if (n < 0) term_print("no such file", TERM_ERR);
+				else if (sys_fwrite(dst, data, (unsigned int)n) == 0)
+					tprintf("copied %d bytes -> %s", n, dst);
+				else term_print("write failed", TERM_ERR);
 			}
 		} else if (strcmp(line, "mv") == 0) {
-			/* mv <src> <dst>: copy then delete the source (max 127 bytes). */
 			char *dst = split(rest);
 			if (*rest == '\0' || *dst == '\0') {
-				sys_log("shell: usage: mv <src> <dst>");
+				term_print("usage: mv <src> <dst>", TERM_ERR);
 			} else {
 				char data[128];
 				int n = sys_fread(rest, data, sizeof(data) - 1);
-				if (n < 0) {
-					sys_log("shell: no such file");
-				} else if (sys_fwrite(dst, data, (unsigned int)n) != 0) {
-					sys_log("shell: write failed");
-				} else {
-					sys_fdelete(rest);
-					sys_printf("shell: moved %s -> %s", rest, dst);
-				}
+				if (n < 0) term_print("no such file", TERM_ERR);
+				else if (sys_fwrite(dst, data, (unsigned int)n) != 0)
+					term_print("write failed", TERM_ERR);
+				else { sys_fdelete(rest); tprintf("moved -> %s", dst); }
 			}
 		} else if (strcmp(line, "touch") == 0) {
-			/* touch <file>: create the file if it does not exist. */
 			int fd = sys_open(rest, 0);
-			if (fd >= 0) {
-				sys_close(fd);
-				/* already exists, nothing to do */
-			} else {
+			if (fd >= 0) { sys_close(fd); }
+			else {
 				char nul = '\0';
-				if (sys_fwrite(rest, &nul, 1) == 0)
-					sys_printf("shell: created %s", rest);
-				else
-					sys_log("shell: touch failed");
+				if (sys_fwrite(rest, &nul, 1) == 0) tprintf("created %s", rest);
+				else term_print("touch failed", TERM_ERR);
 			}
 		} else if (strcmp(line, "grep") == 0) {
-			/* grep <pattern> <file>: print lines containing pattern. */
 			char *fname = split(rest);
 			if (*rest == '\0' || *fname == '\0') {
-				sys_log("shell: usage: grep <pattern> <file>");
+				term_print("usage: grep <pattern> <file>", TERM_ERR);
 			} else {
 				int fd = sys_open(fname, 0);
-				if (fd < 0) {
-					sys_log("shell: no such file");
-				} else {
+				if (fd < 0) { term_print("no such file", TERM_ERR); }
+				else {
 					char lbuf[64]; int lp = 0;
 					char rbuf[64]; int rn;
 					while ((rn = sys_read(fd, rbuf, sizeof(rbuf))) > 0) {
@@ -332,12 +378,9 @@ void main(void)
 							char c = rbuf[i];
 							if (c == '\n' || lp == (int)sizeof(lbuf) - 1) {
 								lbuf[lp] = '\0';
-								if (strstr(lbuf, rest))
-									sys_log(lbuf);
+								if (strstr(lbuf, rest)) term_print(lbuf, TERM_FG);
 								lp = 0;
-							} else {
-								lbuf[lp++] = c;
-							}
+							} else { lbuf[lp++] = c; }
 						}
 					}
 					sys_close(fd);
@@ -346,9 +389,9 @@ void main(void)
 		} else if (strcmp(line, "sound") == 0) {
 			int freq = atoi(rest);
 			sys_tone((unsigned int)freq, 20);
-			sys_printf("shell: played %d Hz", freq);
+			tprintf("played %d Hz", freq);
 		} else {
-			sys_printf("shell: unknown command: %s", line);
+			tprintf("unknown command: %s", line);
 		}
 	}
 }
