@@ -150,6 +150,47 @@ static inline void *memcpy(void *dst, const void *src, unsigned int n)
 	return dst;
 }
 
+/* Like memcpy but copes when src and dst overlap: picks the copy direction
+ * based on relative order so each byte is read before its destination slot
+ * gets overwritten. memcpy() above does NOT do this -- callers who can't
+ * prove the regions are disjoint must reach for memmove. */
+static inline void *memmove(void *dst, const void *src, unsigned int n)
+{
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+	if (d == s || n == 0)
+		return dst;
+	if (d < s) {
+		for (unsigned int i = 0; i < n; i++)
+			d[i] = s[i];
+	} else {
+		for (unsigned int i = n; i > 0; i--)
+			d[i - 1] = s[i - 1];
+	}
+	return dst;
+}
+
+static inline int memcmp(const void *a, const void *b, unsigned int n)
+{
+	const unsigned char *pa = a;
+	const unsigned char *pb = b;
+	for (unsigned int i = 0; i < n; i++) {
+		if (pa[i] != pb[i])
+			return (int)pa[i] - (int)pb[i];
+	}
+	return 0;
+}
+
+static inline void *memchr(const void *p, int c, unsigned int n)
+{
+	const unsigned char *s = p;
+	unsigned char needle = (unsigned char)c;
+	for (unsigned int i = 0; i < n; i++)
+		if (s[i] == needle)
+			return (void *)(s + i);
+	return (void *)0;
+}
+
 static inline int strcmp(const char *a, const char *b)
 {
 	while (*a != '\0' && *a == *b) {
@@ -158,6 +199,98 @@ static inline int strcmp(const char *a, const char *b)
 	}
 	return (unsigned char)*a - (unsigned char)*b;
 }
+
+static inline char *strcpy(char *dst, const char *src)
+{
+	char *d = dst;
+	while ((*d++ = *src++) != '\0')
+		;
+	return dst;
+}
+
+/* Copies up to n characters from src into dst. If src is shorter than n the
+ * remainder of dst is NUL-padded; if it is longer no terminator is written --
+ * the historic POSIX behaviour callers need to be aware of. */
+static inline char *strncpy(char *dst, const char *src, unsigned int n)
+{
+	unsigned int i;
+	for (i = 0; i < n && src[i] != '\0'; i++)
+		dst[i] = src[i];
+	for (; i < n; i++)
+		dst[i] = '\0';
+	return dst;
+}
+
+static inline char *strcat(char *dst, const char *src)
+{
+	char *d = dst;
+	while (*d != '\0')
+		d++;
+	while ((*d++ = *src++) != '\0')
+		;
+	return dst;
+}
+
+static inline char *strncat(char *dst, const char *src, unsigned int n)
+{
+	char *d = dst;
+	while (*d != '\0')
+		d++;
+	for (unsigned int i = 0; i < n && src[i] != '\0'; i++)
+		*d++ = src[i];
+	*d = '\0';
+	return dst;
+}
+
+static inline char *strchr(const char *s, int c)
+{
+	char needle = (char)c;
+	for (; *s != '\0'; s++)
+		if (*s == needle)
+			return (char *)s;
+	return needle == '\0' ? (char *)s : (char *)0;
+}
+
+static inline char *strrchr(const char *s, int c)
+{
+	char needle = (char)c;
+	const char *last = (const char *)0;
+	for (; *s != '\0'; s++)
+		if (*s == needle)
+			last = s;
+	if (needle == '\0')
+		return (char *)s;
+	return (char *)last;
+}
+
+/* Duplicates a NUL-terminated string into a fresh malloc'd buffer, or returns
+ * NULL when out of memory. Caller frees with free(). */
+static inline char *strdup(const char *s)
+{
+	unsigned int n = strlen(s) + 1;
+	char *p = malloc(n);
+	if (!p)
+		return (char *)0;
+	memcpy(p, s, n);
+	return p;
+}
+
+/* ctype-style classifiers (ASCII only, the C locale). */
+static inline int isspace(int c) { return c == ' ' || (c >= '\t' && c <= '\r'); }
+static inline int isdigit(int c) { return c >= '0' && c <= '9'; }
+static inline int isxdigit(int c) { return isdigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+static inline int isupper(int c) { return c >= 'A' && c <= 'Z'; }
+static inline int islower(int c) { return c >= 'a' && c <= 'z'; }
+static inline int isalpha(int c) { return isupper(c) || islower(c); }
+static inline int isalnum(int c) { return isalpha(c) || isdigit(c); }
+static inline int iscntrl(int c) { return (c >= 0 && c < 32) || c == 127; }
+static inline int isprint(int c) { return c >= 32 && c < 127; }
+static inline int isgraph(int c) { return c > 32 && c < 127; }
+static inline int ispunct(int c) { return isgraph(c) && !isalnum(c); }
+static inline int toupper(int c) { return islower(c) ? c - 'a' + 'A' : c; }
+static inline int tolower(int c) { return isupper(c) ? c - 'A' + 'a' : c; }
+
+static inline int abs(int v) { return v < 0 ? -v : v; }
 
 /* Returns pointer to first occurrence of needle in haystack, or NULL. */
 static inline const char *strstr(const char *h, const char *n)
