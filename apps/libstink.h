@@ -386,4 +386,42 @@ int sprintf(char *out, const char *fmt, ...);
  * any directive snprintf supports is available here too. */
 void sys_printf(const char *fmt, ...);
 
+/* ---- C-style stdio (apps/libstink_stdio.c) ---- */
+
+typedef struct __file FILE;
+
+#define EOF      (-1)
+#define BUFSIZ   1024
+
+/* The same numbers as the kernel's SYS_SEEK_* and POSIX SEEK_*. Aliased here
+ * so stdio code looks like portable C, even though kernel-side they pass
+ * through sys_seek unchanged. */
+#define SEEK_SET SYS_SEEK_SET
+#define SEEK_CUR SYS_SEEK_CUR
+#define SEEK_END SYS_SEEK_END
+
+extern FILE *stdin;        /* not implemented -- always NULL */
+extern FILE *stdout;       /* writes go to the kernel debug serial */
+extern FILE *stderr;       /* same destination as stdout */
+
+FILE        *fopen(const char *name, const char *mode);
+int          fclose(FILE *fp);
+unsigned int fread(void *buf, unsigned int size, unsigned int n, FILE *fp);
+unsigned int fwrite(const void *buf, unsigned int size, unsigned int n, FILE *fp);
+int          fseek(FILE *fp, long offset, int whence);
+long         ftell(FILE *fp);
+void         rewind(FILE *fp);
+int          feof(FILE *fp);
+int          ferror(FILE *fp);
+void         clearerr(FILE *fp);
+int          fgetc(FILE *fp);
+int          fputc(int c, FILE *fp);
+char        *fgets(char *s, int n, FILE *fp);
+int          fputs(const char *s, FILE *fp);
+int          fprintf(FILE *fp, const char *fmt, ...);
+int          vfprintf(FILE *fp, const char *fmt, va_list args);
+int          puts(const char *s);
+int          putchar(int c);
+int          getchar(void);
+
 #endif
