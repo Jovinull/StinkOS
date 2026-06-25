@@ -6,6 +6,7 @@
 #include "pmm.h"
 #include "paging.h"
 #include "menu.h"
+#include "mouse.h"
 #include "speaker.h"
 #include "fs.h"
 #include "vfs.h"
@@ -395,6 +396,8 @@ void irq_handler(struct regs *r)
 			serial_write("StinkOS: timer tick\n");
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
+	} else if (r->int_no == 44) {              /* IRQ12: PS/2 mouse */
+		mouse_handle(inb(0x60));
 	}
 
 	if (r->int_no >= 40)                        /* from the slave PIC */
