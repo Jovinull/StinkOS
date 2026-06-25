@@ -12,8 +12,6 @@
 #include "fs.h"
 #include "rtc.h"
 
-#define APP_IMAGE_MAX 16384            /* staging buffer for an app's ELF image */
-
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
 struct kctx { unsigned int esp, ebp, ebx, esi, edi, eip; };
@@ -21,7 +19,6 @@ extern int  ksetjmp(struct kctx *ctx);
 extern void klongjmp(struct kctx *ctx, int val);
 
 static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT */
-static unsigned char app_image[APP_IMAGE_MAX];   /* ELF image staging buffer */
 
 /* Clickable area for the "press f for files" / "press q to return" line. */
 #define FILES_BTN_X 112
@@ -220,20 +217,10 @@ static void launch(int index)
 	if (ksetjmp(&exit_ctx) != 0)
 		return;                         /* app called SYS_EXIT: back to menu */
 
-	unsigned int sectors = fs_sectors(index);
-	if (sectors * 512 > APP_IMAGE_MAX) {
-		serial_write("loader: app image too large\n");
-		return;
-	}
-
 	paging_reset_user_heap();
-	if (ata_read(fs_lba(index), sectors, app_image) != 0) {
-		serial_write("loader: disk read failed\n");
-		return;
-	}
 
 	unsigned int entry;
-	if (elf_load(app_image, sectors * 512, &entry) != 0) {
+	if (elf_load(fs_lba(index), fs_sectors(index), &entry) != 0) {
 		serial_write("loader: bad ELF image\n");
 		return;
 	}
