@@ -9,6 +9,8 @@ unsigned int paging_user_code(void);       /* app load/run virtual address */
 unsigned int paging_user_code_end(void);   /* end of the mapped code region */
 unsigned int paging_user_stack_top(void);  /* top of the user stack */
 unsigned int paging_user_alloc(void);      /* next pre-mapped user heap page, or 0 */
+unsigned int paging_user_brk(void);        /* current program break (heap end) */
+unsigned int paging_user_set_brk(unsigned int new_brk);  /* resize, returns new break */
 void paging_reset_user_heap(void);         /* reset the heap for a new app */
 
 /* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
