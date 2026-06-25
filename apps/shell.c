@@ -59,7 +59,11 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: commands: help ls cat write rm exit");
+			sys_log("shell: help ls cat write append rm echo uptime exit");
+		} else if (strcmp(line, "echo") == 0) {
+			sys_log(rest);
+		} else if (strcmp(line, "uptime") == 0) {
+			sys_printf("shell: %u ticks", sys_ticks());
 		} else if (strcmp(line, "exit") == 0) {
 			sys_log("shell: bye");
 			sys_exit();
@@ -92,6 +96,12 @@ void main(void)
 				sys_log("shell: written");
 			else
 				sys_log("shell: write failed");
+		} else if (strcmp(line, "append") == 0) {
+			char *text = split(rest);
+			if (sys_fappend(rest, text, strlen(text)) == 0)
+				sys_log("shell: appended");
+			else
+				sys_log("shell: append failed");
 		} else {
 			sys_printf("shell: unknown command: %s", line);
 		}
