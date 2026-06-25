@@ -124,6 +124,20 @@ static inline int strcmp(const char *a, const char *b)
 	return (unsigned char)*a - (unsigned char)*b;
 }
 
+/* Returns pointer to first occurrence of needle in haystack, or NULL. */
+static inline const char *strstr(const char *h, const char *n)
+{
+	if (*n == '\0')
+		return h;
+	for (; *h != '\0'; h++) {
+		const char *p = h, *q = n;
+		while (*p != '\0' && *p == *q) { p++; q++; }
+		if (*q == '\0')
+			return h;
+	}
+	return (const char *)0;
+}
+
 static inline int strncmp(const char *a, const char *b, unsigned int n)
 {
 	for (unsigned int i = 0; i < n; i++) {

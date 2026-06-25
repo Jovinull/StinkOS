@@ -139,11 +139,13 @@ void main(void)
 		} else if (strcmp(line, "ls") == 0) {
 			int n = sys_fcount();
 			char name[16];
-			for (int i = 0; i < n; i++)
-				if (sys_finfo(i, name) >= 0) {
+			for (int i = 0; i < n; i++) {
+				int sz = sys_finfo(i, name);
+				if (sz >= 0) {
 					name[15] = '\0';
-					sys_log(name);
+					sys_printf("shell: %-15s  %d B", name, sz);
 				}
+			}
 			sys_printf("shell: %d file(s)", n);
 		} else if (strcmp(line, "cat") == 0) {
 			char data[128];
@@ -323,7 +325,6 @@ void main(void)
 				if (fd < 0) {
 					sys_log("shell: no such file");
 				} else {
-					int plen = (int)strlen(rest);
 					char lbuf[64]; int lp = 0;
 					char rbuf[64]; int rn;
 					while ((rn = sys_read(fd, rbuf, sizeof(rbuf))) > 0) {
@@ -331,12 +332,8 @@ void main(void)
 							char c = rbuf[i];
 							if (c == '\n' || lp == (int)sizeof(lbuf) - 1) {
 								lbuf[lp] = '\0';
-								for (int s = 0; s <= lp - plen; s++) {
-									int ok = 1;
-									for (int j = 0; j < plen; j++)
-										if (lbuf[s+j] != rest[j]) { ok=0; break; }
-									if (ok) { sys_log(lbuf); break; }
-								}
+								if (strstr(lbuf, rest))
+									sys_log(lbuf);
 								lp = 0;
 							} else {
 								lbuf[lp++] = c;
