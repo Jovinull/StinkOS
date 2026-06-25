@@ -41,6 +41,17 @@ Everything in this repo was written from a blank disk image. The bootloader. The
 
 Yeah, the name is a joke. The code isn't.
 
+## Screenshots
+
+<p align="center">
+  <img src="images/menu.png" width="48%" alt="StinkOS Main Menu with RTC and Mouse">
+  <img src="images/shell.png" width="48%" alt="StinkOS Graphical Shell">
+</p>
+<p align="center">
+  <img src="images/pong.png" width="48%" alt="Pong Game (AI vs Player)">
+  <img src="images/snake.png" width="48%" alt="Snake Game">
+</p>
+
 ## What it does today
 
 On boot, StinkOS will:
