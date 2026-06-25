@@ -4,6 +4,7 @@
 #include "menu.h"
 #include "fb.h"
 #include "keyboard.h"
+#include "mouse.h"
 #include "serial.h"
 #include "ata.h"
 #include "paging.h"
@@ -21,6 +22,33 @@ extern void klongjmp(struct kctx *ctx, int val);
 static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT */
 static unsigned char app_image[APP_IMAGE_MAX];   /* ELF image staging buffer */
 
+/* Clickable area for the "press f for files" / "press q to return" line. */
+#define FILES_BTN_X 112
+#define FILES_BTN_Y 436
+#define FILES_BTN_W 300
+#define FILES_BTN_H 16
+
+/* Clickable area for menu item i: a horizontal band over its text + arrow. */
+#define ITEM_X 120
+#define ITEM_Y(i) (120 + (i) * 20 - 2)
+#define ITEM_W 760
+#define ITEM_H 20
+
+enum { VIEW_MENU = 0, VIEW_FILES = 1 };
+static int view = VIEW_MENU;
+static int selected;
+
+/* Mouse state from the previous frame, used to detect motion (so the cursor
+ * is only redrawn when it actually moves) and left-button edge (a "click" is
+ * the transition from released to pressed, not the held-down state). */
+static int last_mouse_x = -1, last_mouse_y = -1;
+static unsigned char last_mouse_buttons;
+
+static int point_in_box(int x, int y, int bx, int by, int bw, int bh)
+{
+	return x >= bx && x < bx + bw && y >= by && y < by + bh;
+}
+
 static void draw(int selected)
 {
 	fb_fill(0x001022);
@@ -33,7 +61,7 @@ static void draw(int selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
 
-	fb_text(120, 440, "press f for files", 0xA0A0A0);
+	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "press f for files", 0xA0A0A0);
 }
 
 /* Decimal text for a file size; buf must hold at least 11 bytes. */
@@ -87,7 +115,21 @@ static void draw_files(void)
 	if (count == 0)
 		fb_text(140, 120, "no files", 0xA0A0A0);
 
-	fb_text(120, 440, "press q to return", 0xA0A0A0);
+	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "press q to return", 0xA0A0A0);
+}
+
+/* Repaints whichever screen is current, then the mouse cursor on top of it.
+ * Since there is no back buffer, "erasing" the old cursor position just
+ * means repainting the whole screen before drawing the cursor at the new
+ * spot -- the same approach the rest of the menu already uses on every
+ * keypress, so this adds no new flicker behaviour. */
+static void redraw(void)
+{
+	if (view == VIEW_FILES)
+		draw_files();
+	else
+		draw(selected);
+	mouse_draw_cursor(0xFFFF00);
 }
 
 void menu_exit(void)
@@ -120,40 +162,73 @@ static void launch(int index)
 
 void menu_run(void)
 {
-	int selected = 0;
+	selected = 0;
+	view = VIEW_MENU;
 
 	fs_init();
-	draw(selected);
+	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
+	redraw();
 	serial_write("menu: ready\n");
 
 	for (;;) {
 		char c = keyboard_getchar();
-		if (c == 0) {
+
+		int mx, my;
+		unsigned char mb;
+		mouse_get_state(&mx, &my, &mb);
+		int moved = (mx != last_mouse_x || my != last_mouse_y);
+		/* A "click" is the release->press edge, not the held-down level,
+		 * so dragging across the menu doesn't fire one action per frame. */
+		int clicked = (mb & MOUSE_LEFT_BTN) && !(last_mouse_buttons & MOUSE_LEFT_BTN);
+		last_mouse_x = mx;
+		last_mouse_y = my;
+		last_mouse_buttons = mb;
+
+		if (c == 0 && !moved && !clicked) {
 			__asm__ volatile ("hlt");
 			continue;
 		}
+
+		if (view == VIEW_FILES) {
+			if (c == 'q' || (clicked && point_in_box(mx, my, FILES_BTN_X, FILES_BTN_Y, FILES_BTN_W, FILES_BTN_H))) {
+				view = VIEW_MENU;
+				redraw();
+			} else if (moved) {
+				redraw();
+			}
+			continue;
+		}
+
 		if (c == 's' && selected < fs_count() - 1) {
 			selected++;
-			draw(selected);
+			redraw();
 		} else if (c == 'w' && selected > 0) {
 			selected--;
-			draw(selected);
+			redraw();
 		} else if (c == '\n') {
 			launch(selected);          /* returns here when the app exits */
 			__asm__ volatile ("sti");  /* longjmp skipped the syscall's iret */
 			serial_write("menu: back\n");
-			draw(selected);
-		} else if (c == 'f') {
+			redraw();
+		} else if (c == 'f' || (clicked && point_in_box(mx, my, FILES_BTN_X, FILES_BTN_Y, FILES_BTN_W, FILES_BTN_H))) {
 			serial_write("menu: files view\n");
-			draw_files();
-			for (;;) {
-				char fc = keyboard_getchar();
-				if (fc == 'q')
-					break;
-				if (fc == 0)
-					__asm__ volatile ("hlt");
+			view = VIEW_FILES;
+			redraw();
+		} else if (clicked) {
+			int hit = -1;
+			for (int i = 0; i < fs_count(); i++)
+				if (point_in_box(mx, my, ITEM_X, ITEM_Y(i), ITEM_W, ITEM_H))
+					hit = i;
+			if (hit >= 0) {
+				selected = hit;
+				redraw();
+				launch(selected);
+				__asm__ volatile ("sti");
+				serial_write("menu: back\n");
+				redraw();
 			}
-			draw(selected);
+		} else if (moved) {
+			redraw();
 		}
 	}
 }
