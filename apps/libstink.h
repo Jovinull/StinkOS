@@ -373,74 +373,17 @@ static inline int uitoa(unsigned int v, unsigned int base, char *out)
 	return n;
 }
 
-/* Minimal formatted logging: supports %s %c %d %u %x %%, no width/precision.
- * Renders into a fixed buffer and sends it to sys_log in one call -- exactly
- * the kind of primitive CONTRIBUTING.md asks for instead of one-off
- * formatting code sprinkled across apps. */
-static inline void sys_printf(const char *fmt, ...)
-{
-	char buf[200];
-	unsigned int p = 0;
-	va_list args;
+/* Formatted output (apps/libstink_printf.c). Full snprintf family supporting
+ * %d %i %u %x %X %o %s %c %p %% with flags ('-', '0', '#', '+', ' '), width
+ * (literal or '*'), precision and the 'l'/'ll' length modifiers (treated as
+ * int on this 32-bit target). No floats -- Doom is fixed-point. */
+int vsnprintf(char *out, unsigned int cap, const char *fmt, va_list args);
+int snprintf(char *out, unsigned int cap, const char *fmt, ...);
+int vsprintf(char *out, const char *fmt, va_list args);
+int sprintf(char *out, const char *fmt, ...);
 
-	va_start(args, fmt);
-	for (const char *f = fmt; *f != '\0' && p < sizeof(buf) - 1; f++) {
-		if (*f != '%') {
-			buf[p++] = *f;
-			continue;
-		}
-		f++;
-		if (*f == '\0')
-			break;
-
-		char digits[32];
-		int n;
-		int v;
-
-		switch (*f) {
-		case 's': {
-			const char *s = va_arg(args, const char *);
-			while (*s != '\0' && p < sizeof(buf) - 1)
-				buf[p++] = *s++;
-			break;
-		}
-		case 'c':
-			buf[p++] = (char)va_arg(args, int);
-			break;
-		case 'd':
-			v = va_arg(args, int);
-			if (v < 0) {
-				buf[p++] = '-';
-				v = -v;
-			}
-			n = uitoa((unsigned int)v, 10, digits);
-			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
-				buf[p++] = digits[i];
-			break;
-		case 'u':
-			n = uitoa(va_arg(args, unsigned int), 10, digits);
-			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
-				buf[p++] = digits[i];
-			break;
-		case 'x':
-			n = uitoa(va_arg(args, unsigned int), 16, digits);
-			for (int i = 0; i < n && p < sizeof(buf) - 1; i++)
-				buf[p++] = digits[i];
-			break;
-		case '%':
-			buf[p++] = '%';
-			break;
-		default:
-			buf[p++] = '%';
-			if (p < sizeof(buf) - 1)
-				buf[p++] = *f;
-			break;
-		}
-	}
-	va_end(args);
-
-	buf[p] = '\0';
-	sys_log(buf);
-}
+/* Formatted line to the kernel debug serial. Format-side wraps snprintf, so
+ * any directive snprintf supports is available here too. */
+void sys_printf(const char *fmt, ...);
 
 #endif
