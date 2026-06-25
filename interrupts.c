@@ -368,6 +368,11 @@ static void syscall_dispatch(struct regs *r)
 			r->eax = 0;
 		}
 		break;
+	case 22:                                   /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
+		fb_rect(r->ebx >> 16, r->ebx & 0xFFFF,
+		        r->ecx >> 16, r->ecx & 0xFFFF, r->edx);
+		r->eax = 0;
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;
