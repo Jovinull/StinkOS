@@ -5,17 +5,17 @@
 #include "fs.h"
 #include "ata.h"
 
-/* Disk layout (must match the Makefile). The app region spans LBA 64..191
- * (sixteen 8-sector slots) so new apps can be added without shifting metadata;
- * everything below lives above it. */
-#define TOC_LBA   192              /* app table-of-contents */
-#define MAX_APPS  16
+/* Disk layout (must match the Makefile). The app region spans LBA 64..223;
+ * apps are placed at the LBAs recorded in the TOC (slot sizes need not be
+ * uniform), and all metadata lives above the region. */
+#define TOC_LBA   224              /* app table-of-contents */
+#define MAX_APPS  20
 
 /* StinkFS layout. */
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
-#define FS_DIR_LBA    193          /* directory sector */
-#define FS_DATA_LBA   194          /* first data sector */
-#define FS_DATA_END   226          /* one past the last data sector (32 sectors) */
+#define FS_DIR_LBA    225          /* directory sector */
+#define FS_DATA_LBA   226          /* first data sector */
+#define FS_DATA_END   258          /* one past the last data sector (32 sectors) */
 #define FS_MAX_FILES  16
 
 struct toc_entry {
