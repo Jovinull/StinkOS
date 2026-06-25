@@ -7,4 +7,10 @@
 int ata_read(unsigned int lba, unsigned int count, void *buffer);
 int ata_write(unsigned int lba, unsigned int count, const void *buffer);
 
+/* IDENTIFY DEVICE: fills model_out (caller-provided, at least 41 bytes) with
+ * the drive's model string (trimmed of trailing padding spaces, NUL
+ * terminated) and *sectors_out with the LBA28 total sector count. Returns 0
+ * on success, -1 on error/timeout. */
+int ata_identify(char *model_out, unsigned int *sectors_out);
+
 #endif

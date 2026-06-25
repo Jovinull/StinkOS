@@ -18,6 +18,7 @@
 #define CMD_READ_SECTORS  0x20
 #define CMD_WRITE_SECTORS 0x30
 #define CMD_FLUSH_CACHE   0xE7
+#define CMD_IDENTIFY      0xEC
 
 /* A real drive answers in microseconds; this many spins is already a very
  * generous upper bound. Without it, a missing/faulty drive would hang the
@@ -101,4 +102,30 @@ int ata_write(unsigned int lba, unsigned int count, const void *buffer)
 
 	outb(ATA_CMD, CMD_FLUSH_CACHE);                 /* commit to the medium */
 	return ata_wait_ready();
+}
+
+int ata_identify(char *model_out, unsigned int *sectors_out)
+{
+	if (ata_select(0, 0, CMD_IDENTIFY) != 0)
+		return -1;
+	if (ata_poll() != 0)
+		return -1;
+
+	unsigned short data[256];
+	for (int i = 0; i < 256; i++)
+		data[i] = inw(ATA_DATA);
+
+	/* Words 27-46 hold the model string, but each word stores its two
+	 * characters byte-swapped relative to normal string order. */
+	for (int w = 0; w < 20; w++) {
+		unsigned short word = data[27 + w];
+		model_out[w * 2]     = (char)(word >> 8);
+		model_out[w * 2 + 1] = (char)(word & 0xFF);
+	}
+	model_out[40] = '\0';
+	for (int i = 39; i >= 0 && model_out[i] == ' '; i--)
+		model_out[i] = '\0';
+
+	*sectors_out = ((unsigned int)data[61] << 16) | data[60];
+	return 0;
 }

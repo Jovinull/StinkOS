@@ -34,7 +34,7 @@ static unsigned char app_image[APP_IMAGE_MAX];   /* ELF image staging buffer */
 #define ITEM_W 760
 #define ITEM_H 20
 
-enum { VIEW_MENU = 0, VIEW_FILES = 1 };
+enum { VIEW_MENU = 0, VIEW_FILES = 1, VIEW_INFO = 2 };
 static int view = VIEW_MENU;
 static int selected;
 static int files_selected;
@@ -62,7 +62,7 @@ static void draw(int selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
 
-	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "press f for files", 0xA0A0A0);
+	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "f: files   i: disk info", 0xA0A0A0);
 }
 
 /* Decimal text for a file size; buf must hold at least 11 bytes. */
@@ -121,6 +121,51 @@ static void draw_files(void)
 	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "q: return   d: delete selected", 0xA0A0A0);
 }
 
+static void draw_info(void)
+{
+	fb_fill(0x001022);
+	fb_rect(112, 84, 800, 400, 0x3050C0);
+	fb_text(120, 90, "DISK INFO", 0xFFFFFF);
+
+	char model[41];
+	unsigned int sectors;
+	if (ata_identify(model, &sectors) != 0) {
+		fb_text(140, 130, "no drive detected", 0xA0A0A0);
+	} else {
+		if (model[0] == '\0') {
+			model[0] = '?';
+			model[1] = '\0';
+		}
+		fb_text(140, 130, "model:", 0xA0A0A0);
+		fb_text(140, 150, model, 0xFFFFFF);
+
+		char num[11];
+		size_to_text(sectors, num);
+		char line[32];
+		int p = 0;
+		for (int j = 0; num[j] != '\0'; j++)
+			line[p++] = num[j];
+		const char *suffix = " sectors";
+		for (int j = 0; suffix[j] != '\0'; j++)
+			line[p++] = suffix[j];
+		line[p] = '\0';
+		fb_text(140, 180, "size:", 0xA0A0A0);
+		fb_text(140, 200, line, 0xFFFFFF);
+
+		size_to_text(sectors / 2048, num);              /* 512B sectors -> MB */
+		p = 0;
+		for (int j = 0; num[j] != '\0'; j++)
+			line[p++] = num[j];
+		const char *mb = " MB";
+		for (int j = 0; mb[j] != '\0'; j++)
+			line[p++] = mb[j];
+		line[p] = '\0';
+		fb_text(140, 220, line, 0xFFFFFF);
+	}
+
+	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "q: return", 0xA0A0A0);
+}
+
 /* Repaints whichever screen is current, then the mouse cursor on top of it.
  * Since there is no back buffer, "erasing" the old cursor position just
  * means repainting the whole screen before drawing the cursor at the new
@@ -130,6 +175,8 @@ static void redraw(void)
 {
 	if (view == VIEW_FILES)
 		draw_files();
+	else if (view == VIEW_INFO)
+		draw_info();
 	else
 		draw(selected);
 	mouse_draw_cursor(0xFFFF00);
@@ -234,6 +281,17 @@ void menu_run(void)
 			continue;
 		}
 
+		if (view == VIEW_INFO) {
+			if (c == 'q' || (clicked && point_in_box(mx, my, FILES_BTN_X, FILES_BTN_Y, FILES_BTN_W, FILES_BTN_H))) {
+				view = VIEW_MENU;
+				redraw();
+			} else if (moved) {
+				mouse_undraw_cursor();
+				mouse_draw_cursor(0xFFFF00);
+			}
+			continue;
+		}
+
 		if (c == 's' && selected < fs_count() - 1) {
 			selected++;
 			redraw();
@@ -249,6 +307,10 @@ void menu_run(void)
 			serial_write("menu: files view\n");
 			view = VIEW_FILES;
 			files_selected = 0;
+			redraw();
+		} else if (c == 'i') {
+			serial_write("menu: info view\n");
+			view = VIEW_INFO;
 			redraw();
 		} else if (clicked) {
 			int hit = -1;
