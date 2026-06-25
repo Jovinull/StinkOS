@@ -8,6 +8,7 @@
 
 #define SC_LSHIFT  0x2A
 #define SC_RSHIFT  0x36
+#define SC_CAPSLOCK 0x3A
 #define SC_RELEASE 0x80          /* bit 7 set => key release */
 #define SC_EXTENDED 0xE0         /* prefix byte: the next code is "extended"
                                   * (arrows, Home/End, the numpad's siblings) */
@@ -38,6 +39,7 @@ static const char map_shift[128] = {
 };
 
 static int shift_down = 0;
+static int capslock_on = 0;
 static int extended_prefix = 0;   /* set after seeing SC_EXTENDED, for one byte */
 
 /* Decoded-character ring buffer, drained by keyboard_getchar (the syscall). */
@@ -109,7 +111,18 @@ void keyboard_handle(void)
 		return;
 	}
 
-	char c = shift_down ? map_shift[sc] : map_normal[sc];
+	if (sc == SC_CAPSLOCK) {
+		capslock_on = !capslock_on;
+		return;
+	}
+
+	/* Caps Lock only flips the case of letters, not digits/symbols -- so it
+	 * has to look at whether THIS scancode maps to a letter, not just XOR
+	 * the shift state unconditionally. */
+	int is_letter = map_normal[sc] >= 'a' && map_normal[sc] <= 'z';
+	int use_shift_map = is_letter ? (shift_down != capslock_on) : shift_down;
+
+	char c = use_shift_map ? map_shift[sc] : map_normal[sc];
 	if (c == 0)
 		return;
 
