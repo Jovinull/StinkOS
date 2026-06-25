@@ -1,21 +1,17 @@
-/* StinkOS userland C app: classic Snake. Move with the arrow keys, eat the
- * food to grow and score, avoid the walls and your own tail. 'q' quits back
- * to the menu. Exercises the keyboard's extended-scancode arrows, sys_draw,
- * sys_sound and sys_ticks together in one app.
- *
- * NOT YET ON THE BOOT MENU: needs a disk slot + TOC entry in the Makefile,
- * which is Core's (Equipe 1's) jurisdiction. See the pending request in
- * TASKS.md. */
+/* StinkOS userland app: classic Snake. Arrow keys to move, 'p' to pause,
+ * 'q' to quit, 'r' to restart after game over. Speed increases every 5 food
+ * eaten. Exercises arrows, sys_draw, sys_sound, sys_ticks, and StinkFS (high
+ * score persistence). */
 #include "libstink.h"
 
-#define CELL       16
-#define CELLS_W    64           /* 1024 / CELL */
-#define CELLS_H    48           /*  768 / CELL */
-#define MAX_LEN    200
-#define MOVE_TICKS 8             /* board steps once per this many sys_ticks */
-#define BG         0x001022
-#define SNAKE_RGB  0x00FF66
-#define FOOD_RGB   0xFF4040
+#define CELL        16
+#define CELLS_W     64           /* 1024 / CELL */
+#define CELLS_H     48           /*  768 / CELL */
+#define MAX_LEN     200
+#define MOVE_TICKS  8            /* initial ticks per step (decreases with score) */
+#define BG          0x001022
+#define SNAKE_RGB   0x00FF66
+#define FOOD_RGB    0xFF4040
 
 enum { DIR_UP = 0, DIR_DOWN, DIR_LEFT, DIR_RIGHT };
 static const int dx[4] = { 0,  0, -1, 1 };
@@ -24,6 +20,7 @@ static const int dy[4] = { -1, 1,  0, 0 };
 struct cell { unsigned char x, y; };
 static struct cell body[MAX_LEN];
 static int len;
+static int food_x, food_y;
 
 static void draw_cell(int cx, int cy, unsigned int rgb)
 {
@@ -42,9 +39,6 @@ static int occupied(int x, int y)
 	return 0;
 }
 
-/* Three descending notes, distinct from the single up-tone played on eating
- * food, so the player hears the difference between "scored" and "game over"
- * without needing to look at the score text. */
 static void game_over_jingle(void)
 {
 	sys_tone(880, 6);
@@ -52,10 +46,6 @@ static void game_over_jingle(void)
 	sys_tone(440, 10);
 }
 
-/* Persists the best score across runs in its own small StinkFS file, the
- * same pattern the collector game (game.s) already uses for its high score
- * file -- a 4-byte raw unsigned int, read at start and only rewritten when
- * beaten. */
 static void report_game_over(int score, const char *reason)
 {
 	unsigned int high = 0;
@@ -74,8 +64,6 @@ static void report_game_over(int score, const char *reason)
 	game_over_jingle();
 }
 
-static int food_x, food_y;
-
 static void place_food(void)
 {
 	do {
@@ -85,10 +73,17 @@ static void place_food(void)
 	draw_cell(food_x, food_y, FOOD_RGB);
 }
 
-void main(void)
+static void clear_screen(void)
 {
-	srand(sys_ticks());
+	for (int y = 0; y < 768; y++)
+		for (int x = 0; x < 1024; x++)
+			sys_draw(x, y, BG);
+}
 
+/* Returns the exit reason: 0 = player quit, 1 = hit wall, 2 = hit self.
+ * Sets *score_out to the final score. */
+static int play_game(int *score_out)
+{
 	len = 3;
 	body[0].x = CELLS_W / 2;
 	body[0].y = CELLS_H / 2;
@@ -100,31 +95,45 @@ void main(void)
 	int dir = DIR_RIGHT;
 	int pending = DIR_RIGHT;
 	int score = 0;
+	int paused = 0;
 
+	clear_screen();
 	for (int i = 0; i < len; i++)
 		draw_cell(body[i].x, body[i].y, SNAKE_RGB);
 	place_food();
 
-	sys_log("snake: running");
+	sys_log("snake: running (p=pause q=quit)");
 	unsigned int last_move = sys_ticks();
 
 	for (;;) {
 		int c = sys_getkey();
+
 		if (c == 'q') {
-			sys_log("snake: quit");
-			return;
+			*score_out = score;
+			return 0;
 		}
-		if (c == KEY_UP && dir != DIR_DOWN)
-			pending = DIR_UP;
-		else if (c == KEY_DOWN && dir != DIR_UP)
-			pending = DIR_DOWN;
-		else if (c == KEY_LEFT && dir != DIR_RIGHT)
-			pending = DIR_LEFT;
-		else if (c == KEY_RIGHT && dir != DIR_LEFT)
-			pending = DIR_RIGHT;
+		if (c == 'p') {
+			paused = !paused;
+			sys_log(paused ? "snake: paused" : "snake: resumed");
+		}
+		if (paused)
+			continue;
+
+		if (c == KEY_UP    && dir != DIR_DOWN)  pending = DIR_UP;
+		else if (c == KEY_DOWN  && dir != DIR_UP)   pending = DIR_DOWN;
+		else if (c == KEY_LEFT  && dir != DIR_RIGHT) pending = DIR_LEFT;
+		else if (c == KEY_RIGHT && dir != DIR_LEFT)  pending = DIR_RIGHT;
+
+		/* Speed scales with score: faster every 5 food eaten, min 2 ticks. */
+		unsigned int move_ticks = (unsigned int)MOVE_TICKS;
+		unsigned int boost = (unsigned int)(score / 5);
+		if (boost + 2 < move_ticks)
+			move_ticks -= boost;
+		else
+			move_ticks = 2;
 
 		unsigned int now = sys_ticks();
-		if (now - last_move < MOVE_TICKS)
+		if (now - last_move < move_ticks)
 			continue;
 		last_move = now;
 		dir = pending;
@@ -133,18 +142,16 @@ void main(void)
 		int ny = body[0].y + dy[dir];
 
 		if (nx < 0 || nx >= CELLS_W || ny < 0 || ny >= CELLS_H) {
-			report_game_over(score, "hit wall");
-			return;
+			*score_out = score;
+			return 1;
 		}
-		/* The tail cell is about to move away, so colliding with it is
-		 * fine -- only check the body excluding the current tail. */
 		int hit_self = 0;
 		for (int i = 0; i < len - 1; i++)
 			if (body[i].x == nx && body[i].y == ny)
 				hit_self = 1;
 		if (hit_self) {
-			report_game_over(score, "hit self");
-			return;
+			*score_out = score;
+			return 2;
 		}
 
 		int ate = (nx == food_x && ny == food_y);
@@ -165,6 +172,33 @@ void main(void)
 			score++;
 			sys_tone(1200, 4);
 			place_food();
+		}
+	}
+}
+
+void main(void)
+{
+	srand(sys_ticks());
+
+	for (;;) {
+		int score = 0;
+		int reason = play_game(&score);
+
+		if (reason == 0) {
+			sys_log("snake: quit");
+			return;
+		}
+
+		const char *why = (reason == 1) ? "hit wall" : "hit self";
+		report_game_over(score, why);
+
+		sys_log("snake: r=restart  q=quit");
+		for (;;) {
+			int c = sys_getkey();
+			if (c == 'q')
+				return;
+			if (c == 'r')
+				break;
 		}
 	}
 }
