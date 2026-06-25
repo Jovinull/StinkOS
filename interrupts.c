@@ -8,6 +8,7 @@
 #include "menu.h"
 #include "speaker.h"
 #include "fs.h"
+#include "vfs.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -256,6 +257,30 @@ static int fs_syscall_delete(unsigned int uname)
 	return r;
 }
 
+/* ---- VFS (file descriptor) syscalls ---- */
+
+static int vfs_syscall_open(unsigned int uname, int flags)
+{
+	char kname[16];
+	if (copy_user_name(uname, kname) != 0)
+		return -1;
+	return vfs_open(kname, flags);
+}
+
+static int vfs_syscall_read(int fd, unsigned int ubuf, unsigned int n)
+{
+	if (!paging_user_range_ok(ubuf, n))
+		return -1;
+	return vfs_read(fd, (void *)ubuf, n);
+}
+
+static int vfs_syscall_write(int fd, unsigned int ubuf, unsigned int n)
+{
+	if (!paging_user_range_ok(ubuf, n))
+		return -1;
+	return vfs_write(fd, (const void *)ubuf, n);
+}
+
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 static void syscall_dispatch(struct regs *r)
 {
@@ -318,6 +343,21 @@ static void syscall_dispatch(struct regs *r)
 		break;
 	case 15:                                   /* SYS_FWRITE_AT: ebx=name ecx=buf edx=size esi=offset */
 		r->eax = (unsigned int)fs_syscall_write_at(r->ebx, r->ecx, r->edx, r->esi);
+		break;
+	case 16:                                   /* SYS_OPEN: ebx=name ecx=flags -> fd */
+		r->eax = (unsigned int)vfs_syscall_open(r->ebx, (int)r->ecx);
+		break;
+	case 17:                                   /* SYS_CLOSE: ebx=fd */
+		r->eax = (unsigned int)vfs_close((int)r->ebx);
+		break;
+	case 18:                                   /* SYS_READ: ebx=fd ecx=buf edx=n */
+		r->eax = (unsigned int)vfs_syscall_read((int)r->ebx, r->ecx, r->edx);
+		break;
+	case 19:                                   /* SYS_WRITE: ebx=fd ecx=buf edx=n */
+		r->eax = (unsigned int)vfs_syscall_write((int)r->ebx, r->ecx, r->edx);
+		break;
+	case 20:                                   /* SYS_SEEK: ebx=fd ecx=offset edx=whence */
+		r->eax = (unsigned int)vfs_seek((int)r->ebx, (int)r->ecx, (int)r->edx);
 		break;
 	default:
 		r->eax = (unsigned int)-1;

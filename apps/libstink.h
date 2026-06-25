@@ -47,4 +47,15 @@ static inline int  sys_fread_at(const char *name, void *buf, unsigned int max, u
 static inline int  sys_fwrite_at(const char *name, const void *buf, unsigned int size, unsigned int off)
                                                  { return __syscall4(15, (int)name, (int)buf, (int)size, (int)off); }
 
+/* File descriptors (VFS). Flags for sys_open; whence values for sys_seek. */
+#define SYS_O_CREATE 1
+#define SYS_SEEK_SET 0
+#define SYS_SEEK_CUR 1
+#define SYS_SEEK_END 2
+static inline int  sys_open(const char *name, int flags)        { return __syscall(16, (int)name, flags, 0); }
+static inline int  sys_close(int fd)                            { return __syscall(17, fd, 0, 0); }
+static inline int  sys_read(int fd, void *buf, unsigned int n)  { return __syscall(18, fd, (int)buf, (int)n); }
+static inline int  sys_write(int fd, const void *buf, unsigned int n) { return __syscall(19, fd, (int)buf, (int)n); }
+static inline int  sys_seek(int fd, int offset, int whence)     { return __syscall(20, fd, offset, whence); }
+
 #endif

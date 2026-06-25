@@ -335,6 +335,13 @@ int fs_file_count(void)
 	return (int)dir->count;
 }
 
+/* Returns the size in bytes of file 'name', or -1 if it does not exist. */
+int fs_file_size(const char *name)
+{
+	int i = fs_find(name);
+	return i < 0 ? -1 : (int)dir->files[i].size;
+}
+
 /* Copies the 16-byte name of file 'index' into 'name_out' and returns its size
  * in bytes, or -1 if the index is out of range. */
 int fs_file_info(int index, char *name_out)
