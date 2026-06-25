@@ -360,6 +360,14 @@ static void syscall_dispatch(struct regs *r)
 	case 20:                                   /* SYS_SEEK: ebx=fd ecx=offset edx=whence */
 		r->eax = (unsigned int)vfs_seek((int)r->ebx, (int)r->ecx, (int)r->edx);
 		break;
+	case 21:                                   /* SYS_DRAWTEXT: ebx=x ecx=y edx=str esi=rgb */
+		if (!paging_user_range_ok(r->edx, 64)) {
+			r->eax = (unsigned int)-1;
+		} else {
+			fb_text((int)r->ebx, (int)r->ecx, (const char *)r->edx, r->esi);
+			r->eax = 0;
+		}
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;
