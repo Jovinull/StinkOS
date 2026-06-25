@@ -373,6 +373,20 @@ static void syscall_dispatch(struct regs *r)
 		        r->ecx >> 16, r->ecx & 0xFFFF, r->edx);
 		r->eax = 0;
 		break;
+	case 23: {                                 /* SYS_SLEEP_MS: ebx = milliseconds */
+		/* PIT runs at 100 Hz, so one tick is 10 ms. Round up so a request
+		 * for any non-zero number of ms always waits at least one tick.
+		 * The syscall arrived through an interrupt gate (IF cleared), so
+		 * the timer IRQ would never fire if we just spun on `ticks`. Open
+		 * a window with sti+hlt: the CPU guarantees IF stays clear for one
+		 * instruction after sti, making the pair atomic against IRQs. */
+		unsigned int delta = (r->ebx + 9) / 10;
+		unsigned int start = ticks;
+		while ((unsigned int)(ticks - start) < delta)
+			__asm__ volatile ("sti; hlt; cli");
+		r->eax = 0;
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;

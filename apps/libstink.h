@@ -37,15 +37,19 @@ static inline void sys_exit(void)                { __syscall(5, 0, 0, 0); }
 static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
 
+/* Blocks the calling app for at least `ms` milliseconds. The kernel uses a
+ * sti+hlt loop on the PIT (100 Hz), so the actual wakeup is rounded up to
+ * the next 10 ms boundary -- accurate enough for game timing, no busy-wait. */
+static inline void sys_sleep_ms(unsigned int ms)
+                                                 { __syscall(23, (int)ms, 0, 0); }
+
 /* Plays freq for the given number of sys_ticks(), then silences the speaker.
- * There is no sleep syscall, so this busy-waits -- fine for the short beeps
- * apps use it for, not meant for anything long. */
+ * Sleeps via sys_sleep_ms (1 tick = 10 ms) instead of spinning on sys_ticks,
+ * so the CPU can halt between PIT interrupts while the note plays. */
 static inline void sys_tone(unsigned int freq, unsigned int ticks)
 {
 	sys_sound(freq);
-	unsigned int t0 = sys_ticks();
-	while (sys_ticks() - t0 < ticks)
-		;
+	sys_sleep_ms(ticks * 10);
 	sys_sound(0);
 }
 static inline int  sys_fwrite(const char *name, const void *buf, unsigned int size)
