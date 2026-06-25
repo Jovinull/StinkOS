@@ -10,9 +10,9 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 # segment is intentionally RWX; silence ld's advisory warning about that.
 APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments
 
-# Userland support library object(s): currently the malloc/free allocator.
-# Linked into every C app, so it lives in a variable to keep app rules tidy.
-LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o
+# Userland support library objects: malloc/free allocator + the snprintf family.
+# Linked into every C app, so they live in a variable to keep app rules tidy.
+LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o
 
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
@@ -65,6 +65,9 @@ $(BUILD)/%.o: %.s | $(BUILD)
 # Userland support library: compiled once, linked into every C app.
 $(BUILD)/libstink_alloc.o: apps/libstink_alloc.c apps/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c apps/libstink_alloc.c -o $(BUILD)/libstink_alloc.o
+
+$(BUILD)/libstink_printf.o: apps/libstink_printf.c apps/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c apps/libstink_printf.c -o $(BUILD)/libstink_printf.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
