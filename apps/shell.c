@@ -125,7 +125,7 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat write append rm echo uptime sound history exit");
+			sys_log("shell: help ls cat tail write append rm echo uptime sound history exit");
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				sys_log(history[i]);
@@ -153,6 +153,27 @@ void main(void)
 			} else {
 				data[n] = '\0';
 				sys_log(data);
+			}
+		} else if (strcmp(line, "tail") == 0) {
+			/* Last up to 64 bytes of the file, via the fd API (open/seek/
+			 * read/close) instead of the one-shot named-file syscalls --
+			 * exercises the VFS descriptor path the other commands don't. */
+			int fd = sys_open(rest, 0);
+			if (fd < 0) {
+				sys_log("shell: no such file");
+			} else {
+				int size = sys_seek(fd, 0, SYS_SEEK_END);
+				int start = size > 64 ? size - 64 : 0;
+				sys_seek(fd, start, SYS_SEEK_SET);
+				char data[65];
+				int n = sys_read(fd, data, sizeof(data) - 1);
+				sys_close(fd);
+				if (n < 0) {
+					sys_log("shell: read failed");
+				} else {
+					data[n] = '\0';
+					sys_log(data);
+				}
 			}
 		} else if (strcmp(line, "rm") == 0) {
 			if (sys_fdelete(rest) == 0)
