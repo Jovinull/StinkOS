@@ -106,6 +106,35 @@ static inline int strcmp(const char *a, const char *b)
 	return (unsigned char)*a - (unsigned char)*b;
 }
 
+static inline int strncmp(const char *a, const char *b, unsigned int n)
+{
+	for (unsigned int i = 0; i < n; i++) {
+		if (a[i] != b[i] || a[i] == '\0')
+			return (unsigned char)a[i] - (unsigned char)b[i];
+	}
+	return 0;
+}
+
+/* Parses a (possibly negative) decimal integer at the start of s, stopping
+ * at the first non-digit. Returns 0 if there are no digits at all. */
+static inline int atoi(const char *s)
+{
+	int sign = 1;
+	int v = 0;
+
+	if (*s == '-') {
+		sign = -1;
+		s++;
+	} else if (*s == '+') {
+		s++;
+	}
+	while (*s >= '0' && *s <= '9') {
+		v = v * 10 + (*s - '0');
+		s++;
+	}
+	return v * sign;
+}
+
 /* Writes the digits of v (in the given base, 2..16) into out, most
  * significant digit first, and returns how many characters were written.
  * out must have room for at least 32 digits. */
