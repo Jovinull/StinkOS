@@ -387,6 +387,35 @@ static void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 24: {                                 /* SYS_SBRK: ebx = signed delta -> old break, or -1 */
+		int delta = (int)r->ebx;
+		unsigned int old = paging_user_brk();
+		unsigned int target;
+
+		if (delta >= 0) {
+			target = old + (unsigned int)delta;
+			if (target < old) {                /* address overflow */
+				r->eax = (unsigned int)-1;
+				break;
+			}
+		} else {
+			unsigned int abs_delta = (unsigned int)(-delta);
+			if (abs_delta > old) {             /* underflows below heap base */
+				r->eax = (unsigned int)-1;
+				break;
+			}
+			target = old - abs_delta;
+		}
+
+		unsigned int got = paging_user_set_brk(target);
+		if ((delta > 0 && got < target) ||
+		    (delta < 0 && got > target)) {
+			r->eax = (unsigned int)-1;         /* OOM or hit USER_HEAP_HI */
+		} else {
+			r->eax = old;
+		}
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;

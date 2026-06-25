@@ -43,6 +43,17 @@ static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0)
 static inline void sys_sleep_ms(unsigned int ms)
                                                  { __syscall(23, (int)ms, 0, 0); }
 
+/* Grow (delta > 0) or shrink (delta < 0) the program break by `delta` bytes
+ * and return the old break, or (void *)-1 on failure. The break is rounded up
+ * to the next 4 KiB boundary, so contiguous sbrk(N) for small N still expands
+ * page-at-a-time. The userland allocator (malloc/free below) sits on top of
+ * this; apps usually do not call sys_sbrk directly. */
+static inline void *sys_sbrk(int delta)
+{
+	int r = __syscall(24, delta, 0, 0);
+	return (void *)(unsigned int)r;
+}
+
 /* Plays freq for the given number of sys_ticks(), then silences the speaker.
  * Sleeps via sys_sleep_ms (1 tick = 10 ms) instead of spinning on sys_ticks,
  * so the CPU can halt between PIT interrupts while the note plays. */

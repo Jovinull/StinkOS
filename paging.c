@@ -149,6 +149,39 @@ unsigned int paging_user_alloc(void)
 	return v;
 }
 
+unsigned int paging_user_brk(void)
+{
+	return user_heap_next;
+}
+
+/* Resize the heap so the program break sits at (or just above) 'new_brk',
+ * mapping or unmapping pages as needed. Sub-page requests are rounded up so
+ * the break always sits on a 4 KiB boundary. Returns the resulting break --
+ * equal to the requested page-aligned target on success, or a smaller value
+ * if growth ran out of physical memory or hit USER_HEAP_HI. */
+unsigned int paging_user_set_brk(unsigned int new_brk)
+{
+	if (new_brk < USER_HEAP_LO)
+		new_brk = USER_HEAP_LO;
+	if (new_brk > USER_HEAP_HI)
+		new_brk = USER_HEAP_HI;
+
+	unsigned int aligned = (new_brk + PAGE_4KB - 1) & ~(PAGE_4KB - 1);
+
+	while (user_heap_next < aligned) {
+		unsigned int frame = pmm_alloc();
+		if (frame == 0)
+			return user_heap_next;          /* OOM: partial growth */
+		map_user_page(user_heap_next, frame);
+		user_heap_next += PAGE_4KB;
+	}
+	while (user_heap_next > aligned) {
+		user_heap_next -= PAGE_4KB;
+		unmap_user_page(user_heap_next);
+	}
+	return user_heap_next;
+}
+
 /* Validate a userland buffer before the kernel dereferences it: the range must
  * sit wholly inside one mapped span -- code+stack (contiguous) or the portion
  * of the heap that has actually been mapped so far. */
