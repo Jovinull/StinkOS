@@ -149,7 +149,10 @@ static void launch(int index)
 	}
 
 	paging_reset_user_heap();
-	ata_read(fs_lba(index), sectors, app_image);
+	if (ata_read(fs_lba(index), sectors, app_image) != 0) {
+		serial_write("loader: disk read failed\n");
+		return;
+	}
 
 	unsigned int entry;
 	if (elf_load(app_image, sectors * 512, &entry) != 0) {
