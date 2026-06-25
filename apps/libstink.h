@@ -64,11 +64,17 @@ static inline int  sys_seek(int fd, int offset, int whence)     { return __sysca
 
 /* Arrow keys have no ASCII code; the keyboard driver reports them as these
  * otherwise-unused C0 control codes, and sys_getkey() passes them through
- * unchanged. Keep in sync with KEY_* in keyboard.h on the kernel side. */
-#define KEY_UP    1
-#define KEY_DOWN  2
-#define KEY_LEFT  3
-#define KEY_RIGHT 4
+ * unchanged. Keep in sync with KEY_* in keyboard.h on the kernel side.
+ * Ctrl+letter combos come through as the standard ASCII control code
+ * instead (Ctrl+A=1 ... Ctrl+Z=26), which is why these live at 28-31
+ * instead of 1-4 -- that range would collide with Ctrl+A/B/C/D. */
+#define KEY_UP    28
+#define KEY_DOWN  29
+#define KEY_LEFT  30
+#define KEY_RIGHT 31
+
+/* Standard ASCII control code for Ctrl+<letter>, e.g. KEY_CTRL('c') == 3. */
+#define KEY_CTRL(c) ((c) - 'a' + 1)
 
 /* ---- Freestanding C primitives ---- */
 
