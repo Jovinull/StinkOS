@@ -62,6 +62,14 @@ static inline int  sys_read(int fd, void *buf, unsigned int n)  { return __sysca
 static inline int  sys_write(int fd, const void *buf, unsigned int n) { return __syscall(19, fd, (int)buf, (int)n); }
 static inline int  sys_seek(int fd, int offset, int whence)     { return __syscall(20, fd, offset, whence); }
 
+/* Arrow keys have no ASCII code; the keyboard driver reports them as these
+ * otherwise-unused C0 control codes, and sys_getkey() passes them through
+ * unchanged. Keep in sync with KEY_* in keyboard.h on the kernel side. */
+#define KEY_UP    1
+#define KEY_DOWN  2
+#define KEY_LEFT  3
+#define KEY_RIGHT 4
+
 /* ---- Freestanding C primitives ---- */
 
 static inline unsigned int strlen(const char *s)

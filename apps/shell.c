@@ -10,10 +10,53 @@
 #include "libstink.h"
 
 #define LINE_MAX 64
+#define HISTORY_MAX 8
+
+/* A small ring of past command lines. history_pos counts how far back the
+ * arrow keys have currently scrolled (0 = not recalling anything, editing a
+ * fresh line). */
+static char history[HISTORY_MAX][LINE_MAX];
+static int history_count;
+static int history_pos;
+
+static void history_push(const char *line)
+{
+	if (line[0] == '\0')
+		return;
+
+	unsigned int n = strlen(line);
+	if (n > LINE_MAX - 1)
+		n = LINE_MAX - 1;
+
+	if (history_count == HISTORY_MAX) {
+		for (int i = 1; i < HISTORY_MAX; i++)
+			memcpy(history[i - 1], history[i], LINE_MAX);
+		history_count--;
+	}
+	memcpy(history[history_count], line, n);
+	history[history_count][n] = '\0';
+	history_count++;
+}
+
+/* Loads the recalled line (history_pos steps back from the newest, or the
+ * empty string at history_pos == 0) into buf and returns its length. */
+static int history_load(char *buf)
+{
+	if (history_pos == 0) {
+		buf[0] = '\0';
+		return 0;
+	}
+	const char *line = history[history_count - history_pos];
+	unsigned int n = strlen(line);
+	memcpy(buf, line, n);
+	buf[n] = '\0';
+	return (int)n;
+}
 
 static int read_line(char *buf)
 {
 	int len = 0;
+	history_pos = 0;
 
 	for (;;) {
 		int c = sys_getkey();
@@ -28,6 +71,22 @@ static int read_line(char *buf)
 				len--;
 			continue;
 		}
+		if (c == KEY_UP) {
+			if (history_pos < history_count) {
+				history_pos++;
+				len = history_load(buf);
+			}
+			continue;
+		}
+		if (c == KEY_DOWN) {
+			if (history_pos > 0) {
+				history_pos--;
+				len = history_load(buf);
+			}
+			continue;
+		}
+		if (c == KEY_LEFT || c == KEY_RIGHT)
+			continue;               /* no cursor-position editing yet */
 		if (len < LINE_MAX - 1)
 			buf[len++] = (char)c;
 	}
@@ -53,6 +112,7 @@ void main(void)
 	for (;;) {
 		char line[LINE_MAX];
 		read_line(line);
+		history_push(line);
 
 		char *rest = split(line);
 
