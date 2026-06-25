@@ -3,7 +3,9 @@
 # load GDT, enter 32-bit protected mode, far-jump into the 32-bit entry.
 # Sector 2+ holds the 32-bit entry stub and the kernel.
 
-.equ KSECTORS, 40          # sectors to load from disk (kernel area, ~20 KiB)
+.equ KSECTORS, 56          # sectors to load from disk (kernel area, ~28 KiB);
+                           # must exceed the linked kernel image (boot+code+data,
+                           # up to __bss_start) and stay below APP1_LBA (64).
 .equ LOAD_ADDR, 0x7E00     # where the kernel area is loaded (right after boot)
 .equ STACK_TOP, 0x90000    # protected-mode stack (below 640 KiB)
 .equ VBE_INFO, 0x0500      # scratch VbeInfoBlock (real-mode, free low RAM)

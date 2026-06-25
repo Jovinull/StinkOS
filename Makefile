@@ -11,8 +11,11 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra
 APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments
 
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
-# Must cover the boot sector + KSECTORS (see boot.s): (1 + 40) * 512 = 20992.
-IMG_MIN = 20992
+# Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
+IMG_MIN = 29184
+# Bytes the bootloader loads (boot sector + KSECTORS). The linked kernel image
+# (boot + code + data, up to __bss_start) must fit here or it boots truncated.
+KERNEL_LOAD_MAX = 29184
 
 # Userland apps stored on raw disk slots, loaded by the kernel at runtime.
 APP1_LBA = 64
@@ -123,6 +126,9 @@ $(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld | $(BUILD)
 
 os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
+	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
+		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
+		exit 1; fi
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	dd if=$(BUILD)/hello.elf of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/box.elf   of=os.bin bs=512 seek=$(APP2_LBA) conv=notrunc status=none
