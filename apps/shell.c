@@ -119,7 +119,7 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat write append rm echo uptime exit");
+			sys_log("shell: help ls cat write append rm echo uptime sound exit");
 		} else if (strcmp(line, "echo") == 0) {
 			sys_log(rest);
 		} else if (strcmp(line, "uptime") == 0) {
@@ -162,6 +162,14 @@ void main(void)
 				sys_log("shell: appended");
 			else
 				sys_log("shell: append failed");
+		} else if (strcmp(line, "sound") == 0) {
+			int freq = atoi(rest);
+			sys_sound((unsigned int)freq);
+			unsigned int t0 = sys_ticks();
+			while (sys_ticks() - t0 < 20)
+				;                       /* let it ring for ~20 ticks */
+			sys_sound(0);
+			sys_printf("shell: played %d Hz", freq);
 		} else {
 			sys_printf("shell: unknown command: %s", line);
 		}
