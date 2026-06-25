@@ -16,4 +16,14 @@ void keyboard_init(void);     /* flush any pending byte from the controller */
 void keyboard_handle(void);   /* called from the IRQ1 handler */
 char keyboard_getchar(void);  /* dequeue a decoded char, or 0 if none */
 
+/* Raw key-event queue: every scancode byte (press AND release) is reported,
+ * regardless of whether it produces a decoded char. Returns 0 when empty,
+ * otherwise a 32-bit packed event with bit 31 set as a present-marker:
+ *   bit 15    : pressed (1) / released (0)
+ *   bit 8     : extended prefix saw (1) / regular scancode (0)
+ *   bits 7..0 : raw scancode byte with the release bit stripped
+ * Doom and similar apps consume these (via SYS_GETKEYEVENT) to track key
+ * state instead of just typed characters. */
+unsigned int keyboard_get_event(void);
+
 #endif

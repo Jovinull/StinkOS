@@ -416,6 +416,9 @@ static void syscall_dispatch(struct regs *r)
 		}
 		break;
 	}
+	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
+		r->eax = keyboard_get_event();
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;

@@ -54,6 +54,20 @@ static inline void *sys_sbrk(int delta)
 	return (void *)(unsigned int)r;
 }
 
+/* Returns the next raw PS/2 key event, or 0 if the queue is empty. The result
+ * has bit 31 set (so non-zero unambiguously means "got an event"), with:
+ *   bit 15    : pressed (1) / released (0)          -- KEY_EV_PRESSED below
+ *   bit 8     : extended prefix saw (1) / regular (0) -- KEY_EV_EXTENDED
+ *   bits 7..0 : raw scancode set 1 byte with release bit stripped
+ * Doom-style apps poll this each tick and translate to game keycodes. */
+static inline unsigned int sys_get_keyevent(void)
+                                                 { return (unsigned int)__syscall(25, 0, 0, 0); }
+
+#define KEY_EV_PRESENT   0x80000000u   /* always set on a returned event */
+#define KEY_EV_PRESSED   0x00008000u
+#define KEY_EV_EXTENDED  0x00000100u
+#define KEY_EV_SC_MASK   0x000000FFu
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is

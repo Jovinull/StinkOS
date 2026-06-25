@@ -1,5 +1,11 @@
 /* PS/2 keyboard driver: reads scancode set 1 from the i8042 data port (0x60),
- * tracks shift state, and reports decoded characters on the serial console. */
+ * tracks shift state, and exposes two parallel paths to userland:
+ *   - a decoded-character ring buffer (keyboard_getchar), which is what the
+ *     shell, menu and most simple apps already consume; and
+ *   - a raw key-event queue (keyboard_get_event), which reports BOTH press and
+ *     release for every scancode -- the model that Doom and other key-state-
+ *     driven apps need ("walking" must continue until W is released, not stop
+ *     after one tap). */
 #include "keyboard.h"
 #include "serial.h"
 #include "io.h"
@@ -50,12 +56,35 @@ static volatile char kbuf[KBUF_SIZE];
 static volatile int  kbuf_head;
 static volatile int  kbuf_tail;
 
+/* Raw key-event ring buffer. Each entry packs:
+ *   bit 15    : pressed (1) / released (0)
+ *   bit 8     : extended prefix saw (1) / regular scancode (0)
+ *   bits 7..0 : raw scancode byte with the release bit stripped
+ * keyboard_get_event() then re-packs this with bit 31 set so userland can
+ * distinguish "got an event" from "queue empty = 0". */
+#define KEVENT_BUF_SIZE 64
+static volatile unsigned short kevent_buf[KEVENT_BUF_SIZE];
+static volatile int            kevent_head;
+static volatile int            kevent_tail;
+
 static void kbuf_push(char c)
 {
 	int next = (kbuf_head + 1) % KBUF_SIZE;
 	if (next != kbuf_tail) {
 		kbuf[kbuf_head] = c;
 		kbuf_head = next;
+	}
+}
+
+static void kevent_push(int pressed, int extended, unsigned char sc7)
+{
+	int next = (kevent_head + 1) % KEVENT_BUF_SIZE;
+	if (next != kevent_tail) {
+		kevent_buf[kevent_head] = (unsigned short)(
+		    ((pressed ? 1 : 0) << 15) |
+		    ((extended ? 1 : 0) << 8) |
+		    (sc7 & 0x7F));
+		kevent_head = next;
 	}
 }
 
@@ -66,6 +95,17 @@ char keyboard_getchar(void)
 	char c = kbuf[kbuf_tail];
 	kbuf_tail = (kbuf_tail + 1) % KBUF_SIZE;
 	return c;
+}
+
+unsigned int keyboard_get_event(void)
+{
+	if (kevent_head == kevent_tail)
+		return 0;                          /* empty */
+	unsigned short ev = kevent_buf[kevent_tail];
+	kevent_tail = (kevent_tail + 1) % KEVENT_BUF_SIZE;
+	/* Bit 31 marks "event present"; the rest of the bits are the raw packed
+	 * fields described above. Userland sees 0 for empty, non-zero on data. */
+	return 0x80000000u | (unsigned int)ev;
 }
 
 void keyboard_init(void)
@@ -83,7 +123,12 @@ void keyboard_handle(void)
 		return;
 	}
 
-	if (extended_prefix) {
+	/* Snapshot before the decoded-char path below clears it. The raw event
+	 * queue records (extended, scancode, pressed) for every scancode byte. */
+	int is_extended = extended_prefix;
+	kevent_push(!(sc & SC_RELEASE), is_extended, sc & 0x7F);
+
+	if (is_extended) {
 		extended_prefix = 0;
 
 		if ((sc & 0x7F) == SC_CTRL) {     /* E0 1D = right Ctrl */
