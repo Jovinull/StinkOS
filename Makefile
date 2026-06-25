@@ -32,14 +32,17 @@ APP11_LBA = 144
 APP12_LBA = 152
 APP13_LBA = 160
 APP14_LBA = 168
+APP15_LBA = 176           # SHELL  — 16-sector slot (176..191)
+APP16_LBA = 192           # ARROWS — 8-sector slot  (192..199)
+APP17_LBA = 200           # SNAKE  — 8-sector slot  (200..207)
+APP18_LBA = 208           # PONG   — 8-sector slot  (208..215)
 
-# The app region spans LBA 64..191 (sixteen 8-sector slots). Metadata lives
-# above it: the app TOC, then StinkFS (a directory sector at 193 and a 32-sector
-# data region at 194..225). All persistent userland state lives in files.
-TOC_LBA  = 192
-DISK_END = 115712         # (194 + 32) * 512: keep TOC and StinkFS present
+# The app region spans LBA 64..223. Metadata lives above it: the app TOC at
+# LBA 224, then StinkFS (directory at 225, 32-sector data region at 226..257).
+TOC_LBA  = 224
+DISK_END = 132096         # 258 * 512: keep TOC and StinkFS present
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
@@ -124,7 +127,27 @@ $(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld | $(BUILD)
 	$(CC) $(CFLAGS) -c apps/fd.c -o $(BUILD)/fd_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fd.elf $(BUILD)/crt0.o $(BUILD)/fd_app.o
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf
+$(BUILD)/shell.elf: apps/crt0.s apps/shell.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/shell.c -o $(BUILD)/shell_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/shell.elf $(BUILD)/crt0.o $(BUILD)/shell_app.o
+
+$(BUILD)/arrows.elf: apps/crt0.s apps/arrows.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/arrows.c -o $(BUILD)/arrows_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/arrows.elf $(BUILD)/crt0.o $(BUILD)/arrows_app.o
+
+$(BUILD)/snake.elf: apps/crt0.s apps/snake.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/snake.c -o $(BUILD)/snake_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/snake.elf $(BUILD)/crt0.o $(BUILD)/snake_app.o
+
+$(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
@@ -144,6 +167,10 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/play.elf  of=os.bin bs=512 seek=$(APP12_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/seek.elf  of=os.bin bs=512 seek=$(APP13_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/fd.elf    of=os.bin bs=512 seek=$(APP14_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/shell.elf  of=os.bin bs=512 seek=$(APP15_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/arrows.elf of=os.bin bs=512 seek=$(APP16_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/pong.elf   of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
@@ -158,7 +185,11 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"11 DEL:$(APP11_LBA):$(BUILD)/del.elf" \
 		"12 PLAY:$(APP12_LBA):$(BUILD)/play.elf" \
 		"13 SEEK:$(APP13_LBA):$(BUILD)/seek.elf" \
-		"14 FD:$(APP14_LBA):$(BUILD)/fd.elf"
+		"14 FD:$(APP14_LBA):$(BUILD)/fd.elf" \
+		"15 SHELL:$(APP15_LBA):$(BUILD)/shell.elf" \
+		"16 ARROWS:$(APP16_LBA):$(BUILD)/arrows.elf" \
+		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
+		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 
