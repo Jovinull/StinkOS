@@ -32,6 +32,15 @@ void fb_putpixel(unsigned int x, unsigned int y, unsigned int rgb)
 		p[3] = 0;
 }
 
+unsigned int fb_getpixel(unsigned int x, unsigned int y)
+{
+	if (x >= width || y >= height)
+		return 0;
+
+	volatile unsigned char *p = fb + y * pitch + x * bytes_pp;
+	return ((unsigned int)p[2] << 16) | ((unsigned int)p[1] << 8) | p[0];
+}
+
 void fb_fill(unsigned int rgb)
 {
 	for (unsigned int y = 0; y < height; y++)

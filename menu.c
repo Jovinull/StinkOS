@@ -194,7 +194,9 @@ void menu_run(void)
 				view = VIEW_MENU;
 				redraw();
 			} else if (moved) {
-				redraw();
+				/* Only the cursor changed: cheaper than a full repaint. */
+				mouse_undraw_cursor();
+				mouse_draw_cursor(0xFFFF00);
 			}
 			continue;
 		}
@@ -228,7 +230,9 @@ void menu_run(void)
 				redraw();
 			}
 		} else if (moved) {
-			redraw();
+			/* Only the cursor changed: cheaper than a full repaint. */
+			mouse_undraw_cursor();
+			mouse_draw_cursor(0xFFFF00);
 		}
 	}
 }

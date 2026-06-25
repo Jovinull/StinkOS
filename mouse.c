@@ -23,6 +23,14 @@ static int cur_x, cur_y;
 static unsigned char cur_buttons;
 static unsigned int max_x, max_y;
 
+/* The cursor is a 7-pixel cross: a vertical arm (7 px) plus a horizontal arm
+ * (7 px) sharing the centre pixel, 13 pixels total. Saving exactly what was
+ * under those pixels lets us restore the background without a full repaint. */
+#define CURSOR_PIXELS 13
+static unsigned int cursor_save[CURSOR_PIXELS];
+static int cursor_saved_x, cursor_saved_y;
+static int cursor_is_drawn;
+
 static void ps2_wait_write(void)
 {
 	for (unsigned int spins = 0; spins < 100000; spins++)
@@ -127,8 +135,37 @@ void mouse_get_state(int *x, int *y, unsigned char *buttons)
 
 void mouse_draw_cursor(unsigned int rgb)
 {
+	int idx = 0;
+
+	for (int i = -3; i <= 3; i++)
+		cursor_save[idx++] = fb_getpixel((unsigned int)cur_x, (unsigned int)(cur_y + i));
 	for (int i = -3; i <= 3; i++) {
-		fb_putpixel((unsigned int)(cur_x + i), (unsigned int)cur_y, rgb);
-		fb_putpixel((unsigned int)cur_x, (unsigned int)(cur_y + i), rgb);
+		if (i == 0)
+			continue;       /* centre pixel already saved by the vertical pass */
+		cursor_save[idx++] = fb_getpixel((unsigned int)(cur_x + i), (unsigned int)cur_y);
 	}
+	cursor_saved_x = cur_x;
+	cursor_saved_y = cur_y;
+	cursor_is_drawn = 1;
+
+	for (int i = -3; i <= 3; i++) {
+		fb_putpixel((unsigned int)cur_x, (unsigned int)(cur_y + i), rgb);
+		fb_putpixel((unsigned int)(cur_x + i), (unsigned int)cur_y, rgb);
+	}
+}
+
+void mouse_undraw_cursor(void)
+{
+	if (!cursor_is_drawn)
+		return;
+
+	int idx = 0;
+	for (int i = -3; i <= 3; i++)
+		fb_putpixel((unsigned int)cursor_saved_x, (unsigned int)(cursor_saved_y + i), cursor_save[idx++]);
+	for (int i = -3; i <= 3; i++) {
+		if (i == 0)
+			continue;
+		fb_putpixel((unsigned int)(cursor_saved_x + i), (unsigned int)cursor_saved_y, cursor_save[idx++]);
+	}
+	cursor_is_drawn = 0;
 }
