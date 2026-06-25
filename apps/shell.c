@@ -125,7 +125,7 @@ void main(void)
 		if (strcmp(line, "") == 0) {
 			continue;
 		} else if (strcmp(line, "help") == 0) {
-			sys_log("shell: help ls cat tail write append rm echo uptime sound history exit");
+			sys_log("shell: help ls cat head tail wc hexdump write append cp rm echo uptime sound history exit");
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				sys_log(history[i]);
@@ -192,6 +192,97 @@ void main(void)
 				sys_log("shell: appended");
 			else
 				sys_log("shell: append failed");
+		} else if (strcmp(line, "head") == 0) {
+			/* First up to 64 bytes of the file, mirror image of tail. */
+			int fd = sys_open(rest, 0);
+			if (fd < 0) {
+				sys_log("shell: no such file");
+			} else {
+				char data[65];
+				int n = sys_read(fd, data, sizeof(data) - 1);
+				sys_close(fd);
+				if (n < 0) {
+					sys_log("shell: read failed");
+				} else {
+					data[n] = '\0';
+					sys_log(data);
+				}
+			}
+		} else if (strcmp(line, "wc") == 0) {
+			/* Byte count and newline count (lines = newlines, like wc -lc). */
+			int fd = sys_open(rest, 0);
+			if (fd < 0) {
+				sys_log("shell: no such file");
+			} else {
+				int bytes = 0, lines = 0;
+				char chunk[64];
+				int n;
+				while ((n = sys_read(fd, chunk, sizeof(chunk))) > 0) {
+					bytes += n;
+					for (int i = 0; i < n; i++)
+						if (chunk[i] == '\n')
+							lines++;
+				}
+				sys_close(fd);
+				sys_printf("shell: %d lines  %d bytes  %s", lines, bytes, rest);
+			}
+		} else if (strcmp(line, "hexdump") == 0) {
+			/* Classic hex + ASCII dump, 16 bytes per row. */
+			int fd = sys_open(rest, 0);
+			if (fd < 0) {
+				sys_log("shell: no such file");
+			} else {
+				unsigned char row[16];
+				int offset = 0;
+				int n;
+				while ((n = sys_read(fd, row, sizeof(row))) > 0) {
+					/* Build "OOOO: HH HH .. HH  ASCII" into buf. */
+					char buf[80];
+					int p = 0;
+					/* offset (4 hex digits) */
+					char tmp[8];
+					int tn = uitoa((unsigned int)offset, 16, tmp);
+					for (int z = tn; z < 4; z++) buf[p++] = '0';
+					for (int z = 0; z < tn; z++) buf[p++] = tmp[z];
+					buf[p++] = ':'; buf[p++] = ' ';
+					/* hex bytes */
+					for (int i = 0; i < 16; i++) {
+						if (i < n) {
+							char h[4];
+							int hn = uitoa(row[i], 16, h);
+							if (hn < 2) buf[p++] = '0';
+							for (int z = 0; z < hn; z++) buf[p++] = h[z];
+						} else {
+							buf[p++] = ' '; buf[p++] = ' ';
+						}
+						buf[p++] = ' ';
+					}
+					buf[p++] = ' ';
+					/* ASCII */
+					for (int i = 0; i < n; i++)
+						buf[p++] = (row[i] >= 0x20 && row[i] < 0x7F) ? (char)row[i] : '.';
+					buf[p] = '\0';
+					sys_log(buf);
+					offset += n;
+				}
+				sys_close(fd);
+			}
+		} else if (strcmp(line, "cp") == 0) {
+			/* cp <src> <dst>: copy all bytes from one StinkFS file to another. */
+			char *dst = split(rest);
+			if (*rest == '\0' || *dst == '\0') {
+				sys_log("shell: usage: cp <src> <dst>");
+			} else {
+				char data[128];
+				int n = sys_fread(rest, data, sizeof(data) - 1);
+				if (n < 0) {
+					sys_log("shell: no such file");
+				} else if (sys_fwrite(dst, data, (unsigned int)n) == 0) {
+					sys_printf("shell: copied %d bytes to %s", n, dst);
+				} else {
+					sys_log("shell: write failed");
+				}
+			}
 		} else if (strcmp(line, "sound") == 0) {
 			int freq = atoi(rest);
 			sys_tone((unsigned int)freq, 20);
