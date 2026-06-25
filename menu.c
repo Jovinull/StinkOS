@@ -10,6 +10,7 @@
 #include "paging.h"
 #include "elf.h"
 #include "fs.h"
+#include "rtc.h"
 
 #define APP_IMAGE_MAX 16384            /* staging buffer for an app's ELF image */
 
@@ -45,6 +46,28 @@ static int files_selected;
 static int last_mouse_x = -1, last_mouse_y = -1;
 static unsigned char last_mouse_buttons;
 
+
+/* Formats two-digit decimal n into buf[0..1], no NUL (caller handles it). */
+static void fmt2(unsigned int n, char *buf)
+{
+	buf[0] = '0' + (n / 10) % 10;
+	buf[1] = '0' + n % 10;
+}
+
+static void draw_clock_from(const struct rtc_time *t)
+{
+	/* "HH:MM:SS" — 8 chars × 8px wide, anchored to the right of the header */
+	char s[9];
+	fmt2(t->hour,   s + 0); s[2] = ':';
+	fmt2(t->minute, s + 3); s[5] = ':';
+	fmt2(t->second, s + 6); s[8] = '\0';
+
+	/* 1024 - 8*8 - 8px margin = 944 */
+	fb_text(944, 90, s, 0x80B0FF);
+}
+
+static unsigned int last_rtc_second = 0xFF;   /* sentinel: invalid second */
+
 static int point_in_box(int x, int y, int bx, int by, int bw, int bh)
 {
 	return x >= bx && x < bx + bw && y >= by && y < by + bh;
@@ -63,6 +86,11 @@ static void draw(int selected)
 	}
 
 	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "f: files   i: disk info", 0xA0A0A0);
+
+	struct rtc_time t;
+	rtc_read(&t);
+	last_rtc_second = t.second;
+	draw_clock_from(&t);
 }
 
 /* Decimal text for a file size; buf must hold at least 11 bytes. */
@@ -237,7 +265,23 @@ void menu_run(void)
 		last_mouse_y = my;
 		last_mouse_buttons = mb;
 
-		if (c == 0 && !moved && !clicked) {
+		/* Refresh clock once per second without a full repaint. Reading
+		 * rtc_read() here is cheap (fast path: chip not updating → returns
+		 * immediately), and comparing seconds is the natural 1 Hz heartbeat. */
+		int clock_tick = 0;
+		if (view == VIEW_MENU) {
+			struct rtc_time t;
+			rtc_read(&t);
+			if (t.second != last_rtc_second) {
+				last_rtc_second = t.second;
+				mouse_undraw_cursor();
+				draw_clock_from(&t);
+				mouse_draw_cursor(0xFFFF00);
+				clock_tick = 1;
+			}
+		}
+
+		if (c == 0 && !moved && !clicked && !clock_tick) {
 			__asm__ volatile ("hlt");
 			continue;
 		}
