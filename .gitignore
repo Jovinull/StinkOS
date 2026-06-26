@@ -98,6 +98,7 @@ osdev-refs/
 
 CLAUDE.md
 TASKS.md
+TODO.md
 history.txt
 
 # Doom WAD assets: user-supplied (downloaded via tools/fetch-wads.sh from
