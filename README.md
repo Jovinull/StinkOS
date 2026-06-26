@@ -201,7 +201,7 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 **Up next** (in no particular order):
 
 - [ ] Preemptive multitasking — multiple concurrent Ring 3 processes
-- [ ] Doom audio glue (SB16 driver exists; needs wiring to the sound engine)
+- [ ] Doom music (needs an OPL/MIDI synth; sound effects already play via the SB16 mixer)
 
 ## Doom
 
@@ -244,9 +244,9 @@ The boot menu picks up three new entries — `DOOM1`, `DOOM2`, `FREEDM`. Pick on
 | Tab | automap |
 | Esc | menu |
 
-**What works:** all 36 Doom 1 maps, all 32 Doom 2 maps, all monsters, weapons, power-ups, save/load (via StinkFS), automap, intermissions, cheats (`IDDQD`, `IDKFA`, etc.).
+**What works:** all 36 Doom 1 maps, all 32 Doom 2 maps, all monsters, weapons, power-ups, save/load (via StinkFS), automap, intermissions, cheats (`IDDQD`, `IDKFA`, etc.), and sound effects through the Sound Blaster 16 mixer.
 
-**What doesn't (yet):** music and sound effects (the Sound Blaster 16 driver exists but isn't wired to the Doom sound engine), and network multiplayer (the stack exists; the engine's netgame layer isn't wired).
+**What doesn't (yet):** music (needs an OPL/MIDI synth backend StinkOS doesn't have yet), and network multiplayer (the stack exists; the engine's netgame layer isn't wired).
 
 **How the port works under the hood:** vendored doomgeneric (Chocolate Doom derivative) lives in `apps/doom/`; `apps/doom-shims/` provides the POSIX headers Doom expects, and `lib/libstink_{alloc,stdio,printf,posix,setjmp}` are the corresponding runtime backends. The platform layer is `apps/doom/doomgeneric_stink.c` (~200 lines). One source tree, three ELFs — each compiled with a different `-DSTINKDOOM_IWAD` so the `DOOM1` / `DOOM2` / `FREEDM` menu entries auto-load the right WAD.
 
