@@ -58,6 +58,11 @@ static struct tcb conns[TCP_MAX_CONNS];
 static unsigned short  next_ephemeral = EPHEMERAL_BASE;
 static unsigned int    initial_seq    = 0x4B4E5453u;   /* "STNK" */
 
+static unsigned int tx_pending(const struct tcb *t)
+{
+	return (t->tx_tail + TCP_BUFFER_SIZE - t->tx_head) % TCP_BUFFER_SIZE;
+}
+
 /* Pseudo-header for TCP checksum (RFC 793 section 3.1): prepended to the
  * segment for the one's-complement sum but not actually transmitted. */
 struct pseudo_hdr {
@@ -160,6 +165,40 @@ static void tcp_emit(struct tcb *t, unsigned char flags,
 	ipv4_send(t->remote_ip, IP_PROTO_TCP, buf, sizeof(*h) + data_len);
 }
 
+/* Push whatever is queued in the tx buffer onto the wire. Stop-and-wait:
+ * only ships one MSS-sized segment at a time and waits for the ACK before
+ * sending the next. This caps throughput but keeps the code tiny -- congestion
+ * control + sliding window come in a follow-up commit. The bytes stay in
+ * tx_buf until ACK'd so we can retransmit if needed. */
+static void tcp_drain_tx(struct tcb *t)
+{
+	if (t->state != TCP_ESTABLISHED && t->state != TCP_CLOSE_WAIT)
+		return;
+
+	unsigned int in_flight = t->snd_nxt - t->snd_una;
+	if (in_flight > 0)
+		return;
+
+	unsigned int avail = tx_pending(t);
+	if (avail == 0)
+		return;
+
+	unsigned int chunk = avail;
+	if (chunk > TCP_MSS)
+		chunk = TCP_MSS;
+	if (t->snd_wnd != 0 && chunk > t->snd_wnd)
+		chunk = t->snd_wnd;
+
+	/* Copy bytes out of the wrapping tx ring into a linear scratch buffer
+	 * for emit -- the segment builder wants contiguous data. */
+	unsigned char linear[TCP_MSS];
+	for (unsigned int i = 0; i < chunk; i++)
+		linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
+
+	tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
+	t->snd_nxt += chunk;
+}
+
 /* Bare RST to an unsolicited segment (RFC 793 reset generation). */
 static void tcp_emit_rst(ipv4_t src_ip, const struct tcp_hdr *in_hdr)
 {
@@ -229,8 +268,7 @@ int tcp_send(tcp_handle_t h, const void *buf, unsigned int len)
 		t->tx_buf[t->tx_tail] = src[put++];
 		t->tx_tail = next;
 	}
-	/* Actually pushing the bytes onto the wire happens in the future
-	 * tcp_drain helper that the upcoming retransmit/timer commit adds. */
+	tcp_drain_tx(t);          /* try to push it now */
 	return (int)put;
 }
 
@@ -319,14 +357,48 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		break;
 
 	case TCP_ESTABLISHED:
-		if (h->flags & TCP_ACK)
-			t->snd_una = seg_ack;
-		if (h->flags & TCP_FIN) {
-			t->rcv_nxt = seg_seq + 1;
-			t->state = TCP_CLOSE_WAIT;
+	case TCP_CLOSE_WAIT: {
+		/* Advance snd_una if the ACK covers new ground, then free that
+		 * many bytes from the tx ring so the next drain can move on. */
+		if (h->flags & TCP_ACK) {
+			unsigned int acked = seg_ack - t->snd_una;
+			unsigned int inflight = t->snd_nxt - t->snd_una;
+			if (acked > 0 && acked <= inflight) {
+				t->snd_una = seg_ack;
+				/* Trim acked bytes off the head of tx_buf. */
+				t->tx_head = (t->tx_head + acked) % TCP_BUFFER_SIZE;
+				t->snd_wnd = ntohs(h->window);
+				tcp_drain_tx(t);
+			}
+		}
+
+		/* Take any in-order payload into rx_buf and ACK back. */
+		unsigned int data_off = (h->data_off >> 4) * 4u;
+		if (data_off >= len)
+			data_off = sizeof(struct tcp_hdr);
+		unsigned int data_len = len - data_off;
+		if (data_len > 0 && seg_seq == t->rcv_nxt) {
+			const unsigned char *data =
+			    (const unsigned char *)payload + data_off;
+			unsigned int put = 0;
+			while (put < data_len) {
+				unsigned int next = (t->rx_tail + 1) % TCP_BUFFER_SIZE;
+				if (next == t->rx_head)
+					break;       /* rx buffer full */
+				t->rx_buf[t->rx_tail] = data[put++];
+				t->rx_tail = next;
+			}
+			t->rcv_nxt += put;
+			tcp_emit(t, TCP_ACK, (void *)0, 0);
+		}
+
+		if ((h->flags & TCP_FIN) && t->state == TCP_ESTABLISHED) {
+			t->rcv_nxt = seg_seq + data_len + 1;
+			t->state   = TCP_CLOSE_WAIT;
 			tcp_emit(t, TCP_ACK, (void *)0, 0);
 		}
 		break;
+	}
 
 	case TCP_FIN_WAIT_1:
 		if (h->flags & TCP_ACK)
