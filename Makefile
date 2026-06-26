@@ -119,7 +119,7 @@ FREEDOOM1_WAD ?= wads/freedoom1.wad
 FREEDOOM2_WAD ?= wads/freedoom2.wad
 FREEDM_WAD    ?= wads/freedm.wad
 
-C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c audio.c dma.c pci.c e1000.c net.c ethernet.c
+C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c audio.c dma.c pci.c e1000.c net.c ethernet.c arp.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 # boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
 LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(C_OBJS)
