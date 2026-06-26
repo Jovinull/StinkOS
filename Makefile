@@ -93,19 +93,26 @@ APP18_LBA = 208           # PONG   — 8-sector slot  (208..215)
 # the StinkFS directory at 225, and a ~32 MiB StinkFS data region at 226..65225
 # (big enough for a Doom WAD plus save games). The Doom slot lives just past
 # that data region.
-TOC_LBA   = 224
+TOC_LBA      = 224
 FS_DIR_LBA   = 225
 FS_DATA_LBA  = 226
-FS_DATA_END  = 65226       # must match FS_DATA_END in fs.c
-DOOM_LBA  = 65226          # first sector after the StinkFS data region
-DOOM_SECTORS = 2048        # 1 MiB max app image -- plenty for the Doom binary
-DISK_END  = 34444288       # (DOOM_LBA + DOOM_SECTORS) * 512 = 67274 * 512
+FS_DATA_END  = 200226       # must match FS_DATA_END in fs.c (~100 MiB)
+# Each Doom variant gets its own 1 MiB slot just past the StinkFS data region:
+#   freedoom1 (Doom 1 set)   -> DOOM1_LBA
+#   freedoom2 (Doom 2 set)   -> DOOM2_LBA
+#   freedm    (deathmatch)   -> FREEDM_LBA
+DOOM_SECTORS = 2048
+DOOM1_LBA    = 200226
+DOOM2_LBA    = 202274        # DOOM1_LBA + DOOM_SECTORS
+FREEDM_LBA   = 204322        # DOOM2_LBA + DOOM_SECTORS
+DISK_END     = 105661440     # (FREEDM_LBA + DOOM_SECTORS) * 512 = 206370 * 512
 
-# Optional: pre-populate StinkFS with a Doom WAD at build time. Pass
-#   make WAD_FILE=path/to/freedoom1.wad
-# and the disk image will boot with DOOM1.WAD already on the filesystem
-# (which is what doomgeneric_stink.c's fake argv looks for).
-WAD_FILE  ?=
+# WAD bundling. Defaults look under wads/ for the three Freedoom releases the
+# fetch-wads.sh script downloads; override on the command line to point at a
+# specific WAD or to disable a slot. Missing files just skip silently.
+FREEDOOM1_WAD ?= wads/freedoom1.wad
+FREEDOOM2_WAD ?= wads/freedoom2.wad
+FREEDM_WAD    ?= wads/freedm.wad
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
