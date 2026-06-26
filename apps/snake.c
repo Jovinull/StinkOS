@@ -24,11 +24,7 @@ static int food_x, food_y;
 
 static void draw_cell(int cx, int cy, unsigned int rgb)
 {
-	int px = cx * CELL;
-	int py = cy * CELL;
-	for (int y = 0; y < CELL; y++)
-		for (int x = 0; x < CELL; x++)
-			sys_draw(px + x, py + y, rgb);
+	sys_fillrect(cx * CELL, cy * CELL, CELL, CELL, rgb);
 }
 
 static int occupied(int x, int y)
@@ -75,9 +71,7 @@ static void place_food(void)
 
 static void clear_screen(void)
 {
-	for (int y = 0; y < 768; y++)
-		for (int x = 0; x < 1024; x++)
-			sys_draw(x, y, BG);
+	sys_fillrect(0, 0, 1024, 768, BG);
 }
 
 /* Returns the exit reason: 0 = player quit, 1 = hit wall, 2 = hit self.
