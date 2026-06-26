@@ -135,7 +135,7 @@ static void cmd_update(void)
 	sys_drawtext(140, 150, "GET " REPO_URL_BASE REPO_INDEX_PATH, COLOR_DIM);
 
 	int status = 0;
-	int n = http_get(REPO_URL_BASE REPO_INDEX_PATH, pkg_buf, sizeof(pkg_buf), &status);
+	int n = http_get(REPO_URL_BASE REPO_INDEX_PATH, pkg_buf, MAX_PKG_BYTES, &status);
 	if (n <= 0 || status != 200) {
 		sys_drawtext(140, 190, "fetch failed.", COLOR_ERR);
 		wait_any_key(220, "press any key.", COLOR_DIM);
@@ -323,7 +323,7 @@ static void cmd_install(void)
 	sys_drawtext(180, 180, url, COLOR_DIM);
 
 	int status = 0;
-	int n = http_get(url, pkg_buf, sizeof(pkg_buf), &status);
+	int n = http_get(url, pkg_buf, MAX_PKG_BYTES, &status);
 	if (n <= 0 || status != 200) {
 		sys_drawtext(140, 220, "download failed.", COLOR_ERR);
 		wait_any_key(250, "press any key.", COLOR_DIM);
