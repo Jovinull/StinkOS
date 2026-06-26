@@ -165,10 +165,12 @@ void isr_handler(struct regs *r)
 
 void irq_handler(struct regs *r)
 {
+	int preempt = 0;
 	if (r->int_no == 32) {                     /* IRQ0: PIT timer */
 		ticks++;
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
+		preempt = 1;                       /* let the scheduler reshuffle */
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
 	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
@@ -180,4 +182,11 @@ void irq_handler(struct regs *r)
 	if (r->int_no >= 40)                        /* from the slave PIC */
 		outb(0xA0, 0x20);
 	outb(0x20, 0x20);                           /* end of interrupt */
+
+	/* EOI must precede the yield: context_switch may not return for many ticks,
+	 * and the PIC won't deliver further IRQs until the current one is acked.
+	 * proc_yield() is a no-op until a second kernel thread exists, so the
+	 * single-process boot path stays bit-identical to the pre-scheduler code. */
+	if (preempt)
+		proc_yield();
 }

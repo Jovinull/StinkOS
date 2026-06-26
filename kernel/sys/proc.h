@@ -73,8 +73,13 @@ unsigned int   context_init(unsigned int kstack_top, void (*entry)(void));
 /* Spawn a kernel thread: allocate a PCB slot + a 4 KiB kernel stack, pre-build
  * the stack via context_init() so the first switch jumps into `entry`, and
  * leave the new proc in PROC_READY. Returns the new PCB or NULL if the table
- * is full or out of memory. The scheduler (added in a follow-up commit) is
- * what eventually picks it up; until then the thread just sits READY. */
+ * is full or out of memory. */
 struct proc   *proc_kthread_create(const char *name, void (*entry)(void));
+
+/* Round-robin yield: pick the next PROC_READY slot after the current proc's
+ * index and context_switch into it. If no other ready thread exists, returns
+ * immediately so the current proc keeps the CPU. Safe to call from IRQ
+ * context (the PIT tick uses it) as well as voluntarily from kernel code. */
+void           proc_yield(void);
 
 #endif

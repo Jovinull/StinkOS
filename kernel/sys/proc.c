@@ -148,3 +148,34 @@ struct proc *proc_kthread_create(const char *name, void (*entry)(void))
 
 	return p;
 }
+
+/* Find the next PROC_READY slot in round-robin order starting from `from + 1`.
+ * Returns NULL if nothing else is runnable. */
+static struct proc *next_ready(int from)
+{
+	for (int i = 1; i <= PROC_MAX; i++) {
+		int idx = (from + i) % PROC_MAX;
+		if (table[idx].state == PROC_READY)
+			return &table[idx];
+	}
+	return 0;
+}
+
+void proc_yield(void)
+{
+	if (!running)
+		return;                            /* proc_init() not run yet */
+
+	int cur_idx = running->pid - 1;
+	struct proc *next = next_ready(cur_idx);
+	if (!next)
+		return;                            /* no other ready thread */
+
+	struct proc *prev = running;
+	if (prev->state == PROC_RUNNING)
+		prev->state = PROC_READY;          /* preempted, not blocked */
+	next->state = PROC_RUNNING;
+	running     = next;
+
+	context_switch(&prev->esp, next->esp);
+}
