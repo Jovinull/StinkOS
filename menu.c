@@ -12,6 +12,7 @@
 #include "fs.h"
 #include "rtc.h"
 #include "audio.h"
+#include "net.h"
 
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
@@ -275,6 +276,10 @@ void menu_run(void)
 		}
 
 		if (c == 0 && !moved && !clicked && !clock_tick) {
+			/* Drain at most one network frame per idle cycle so DHCP
+			 * completes and any background TCP/UDP work makes progress
+			 * without needing a dedicated kernel thread. */
+			(void)net_poll_once();
 			__asm__ volatile ("hlt");
 			continue;
 		}

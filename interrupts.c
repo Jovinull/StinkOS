@@ -11,6 +11,9 @@
 #include "fs.h"
 #include "vfs.h"
 #include "audio.h"
+#include "tcp.h"
+#include "dns.h"
+#include "net.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -437,6 +440,56 @@ static void syscall_dispatch(struct regs *r)
 	case 30:                                   /* SYS_AUDIO_SET_VOLUME: ebx=handle ecx=volume */
 		audio_mix_set_volume((int)r->ebx, (int)r->ecx);
 		r->eax = 0;
+		break;
+	case 31:                                   /* SYS_SOCK_CONNECT: ebx=ipv4 ecx=port -> handle */
+		r->eax = (unsigned int)tcp_connect((ipv4_t)r->ebx, (unsigned short)r->ecx);
+		break;
+	case 32: {                                 /* SYS_SOCK_SEND: ebx=h ecx=buf edx=len */
+		if (!paging_user_range_ok(r->ecx, r->edx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)tcp_send((int)r->ebx, (const void *)r->ecx, r->edx);
+		break;
+	}
+	case 33: {                                 /* SYS_SOCK_RECV: ebx=h ecx=buf edx=max */
+		if (!paging_user_range_ok(r->ecx, r->edx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)tcp_recv((int)r->ebx, (void *)r->ecx, r->edx);
+		break;
+	}
+	case 34:                                   /* SYS_SOCK_CLOSE: ebx=h */
+		tcp_close((int)r->ebx);
+		r->eax = 0;
+		break;
+	case 35:                                   /* SYS_SOCK_STATE: ebx=h -> state */
+		r->eax = (unsigned int)tcp_get_state((int)r->ebx);
+		break;
+	case 36: {                                 /* SYS_DNS_REQUEST: ebx=name (string) */
+		if (!paging_user_range_ok(r->ebx, 1)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)dns_resolve((const char *)r->ebx);
+		break;
+	}
+	case 37: {                                 /* SYS_DNS_POLL: ebx=*ipv4 -> 1 if ready */
+		if (!paging_user_range_ok(r->ebx, sizeof(ipv4_t))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		if (dns_ready()) {
+			*(ipv4_t *)r->ebx = dns_get_ip();
+			r->eax = 1;
+		} else {
+			r->eax = 0;
+		}
+		break;
+	}
+	case 38:                                   /* SYS_NET_POLL: -> 1 if frame processed, 0 if idle */
+		r->eax = (unsigned int)net_poll_once();
 		break;
 	case 27: {                                 /* SYS_GETMOUSE: ebx=*dx ecx=*dy edx=*buttons */
 		if (!paging_user_range_ok(r->ebx, sizeof(int)) ||
