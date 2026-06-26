@@ -216,7 +216,7 @@ pr, pg, pb = pixel_at(w, px, 15, 15)      # inside the app's 20x20 white square
 app_drew = pr > 200 and pg > 200 and pb > 200
 tr, tg, tb = pixel_at(w, px, 122, 90)     # a lit pixel of the "STINKOS" title
 title_drawn = tr > 200 and tg > 200 and tb > 200
-mr, mg, mb = pixel_at(w, px, 142, 120)    # a lit pixel of the "1 HELLO" menu entry
+mr, mg, mb = pixel_at(w, px, 140, 120)    # a lit pixel of the "HELLO" menu entry
 menu_drawn = mr > 200 and mg > 200 and mb > 200
 gw, gh, gpx = read_ppm(FB2)               # game screen after moving the block
 gr, gg, gb = pixel_at(gw, gpx, 120, 120)  # inside the moved green block
@@ -235,7 +235,7 @@ checks = {
     "menu drawn":      menu_drawn,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
-    "disk app loaded": "loader: app loaded from disk slot" in out,
+    "disk app loaded": "loader: app loaded from fs" in out,
     "ring3 syscall":   "ring3: hello from disk app" in out,
     "draw syscall":    app_drew,
     "alloc syscall":   "app: alloc ok" in out,
@@ -264,4 +264,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: disk TOC -> menu -> isolated ring3 apps (asm + C); 20 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 20 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")

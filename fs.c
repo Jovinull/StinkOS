@@ -1,42 +1,28 @@
-/* On-disk storage for StinkOS. Holds two things, both matching the Makefile
- * layout: the read-only app table-of-contents (TOC) the menu boots from, and
- * StinkFS -- a small writable filesystem of named files (a one-sector directory
- * plus a contiguous data region). All persistent userland state lives in files. */
+/* On-disk storage for StinkOS.
+ *
+ * StinkFS: a small writable filesystem of named files. The directory spans two
+ * contiguous sectors at FS_DIR_LBA, followed by a contiguous data region at
+ * FS_DATA_LBA. All app ELFs, WAD assets, and persistent userland state live
+ * here as named files.
+ *
+ * Disk layout (must match the Makefile):
+ *   LBA 0     : boot sector
+ *   LBA 1-127 : kernel (127 sectors, up to 63.5 KiB)
+ *   LBA 128-129 : StinkFS directory (2 sectors)
+ *   LBA 130+  : StinkFS data (~100 MiB) */
 #include "fs.h"
 #include "ata.h"
 
-/* Disk layout (must match the Makefile). The app region spans LBA 128..327;
- * apps are placed at the LBAs recorded in the TOC (slot sizes need not be
- * uniform), and all metadata lives above the region. */
-#define TOC_LBA   328              /* app table-of-contents */
-#define MAX_APPS  32
-
-/* StinkFS layout. The data region is sized to hold the full Freedoom asset
- * set side by side: freedoom1.wad (~28 MiB) + freedoom2.wad (~28 MiB) +
- * freedm.wad (~22 MiB) ~= 78 MiB, plus ~20 MiB of headroom for save games
- * and any other files. */
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
-#define FS_DIR_LBA    329          /* directory sector */
-#define FS_DATA_LBA   330          /* first data sector */
-#define FS_DATA_END   200330       /* one past the last data sector (~100 MiB) */
-#define FS_MAX_FILES  16
+#define FS_DIR_LBA    128          /* first directory sector            */
+#define FS_DIR_SECTORS 2           /* directory spans two 512-byte sectors */
+#define FS_DATA_LBA   130          /* first data sector                 */
+#define FS_DATA_END   200130       /* one past the last data sector (~100 MiB) */
+#define FS_MAX_FILES  40           /* fits in 2 sectors: 12 + 40*24 = 972 B  */
 
-struct toc_entry {
-	char         name[16];
-	unsigned int lba;
-	unsigned int sectors;
-} __attribute__((packed));
-
-static unsigned char buf[512];
-static int           count;
-static struct toc_entry *entries;
-
-/* StinkFS directory: a magic word, a file count, a bump pointer to the next
- * free data sector, then a fixed table of name/start/size records. The whole
- * structure lives in one disk sector. */
 struct fs_file {
 	char         name[16];
-	unsigned int start;        /* first data sector */
+	unsigned int start;        /* first data sector (absolute LBA) */
 	unsigned int size;         /* file length in bytes */
 } __attribute__((packed));
 
@@ -47,13 +33,14 @@ struct fs_dir {
 	struct fs_file files[FS_MAX_FILES];
 } __attribute__((packed));
 
-static unsigned char dir_buf[512];
+/* Directory buffer: two 512-byte sectors. */
+static unsigned char dir_buf[512 * FS_DIR_SECTORS];
 static unsigned char io_buf[512];          /* per-sector bounce buffer */
 static struct fs_dir *dir = (struct fs_dir *)dir_buf;
 
 static void fs_dir_load(void)
 {
-	ata_read(FS_DIR_LBA, 1, dir_buf);
+	ata_read(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf);
 	if (dir->magic != STINKFS_MAGIC) {     /* uninitialised: start empty */
 		dir->magic     = STINKFS_MAGIC;
 		dir->count     = 0;
@@ -61,31 +48,34 @@ static void fs_dir_load(void)
 	}
 }
 
+static void fs_dir_save(void)
+{
+	ata_write(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf);
+}
+
 void fs_init(void)
 {
-	ata_read(TOC_LBA, 1, buf);
-	count = *(unsigned int *)buf;
-	if (count < 0 || count > MAX_APPS)
-		count = 0;
-	entries = (struct toc_entry *)(buf + 4);
-
 	fs_dir_load();
 }
 
-int          fs_count(void)            { return count; }
-const char  *fs_name(int index)        { return entries[index].name; }
-unsigned int fs_lba(int index)         { return entries[index].lba; }
-unsigned int fs_sectors(int index)     { return entries[index].sectors; }
+/* ---- name helpers ---- */
 
-/* ---- StinkFS named files ---- */
-
-/* Names are compared and stored as a fixed 16-byte field; the caller passes a
- * NUL-padded canonical name (see the syscall layer). */
 static int name_eq(const char *a, const char *b)
 {
 	for (int i = 0; i < 16; i++)
 		if (a[i] != b[i])
 			return 0;
+	return 1;
+}
+
+static int name_ci_eq(const char *a, const char *b)
+{
+	for (int i = 0; i < 16; i++) {
+		char ca = a[i], cb = b[i];
+		if (ca >= 'a' && ca <= 'z') ca -= 32;
+		if (cb >= 'a' && cb <= 'z') cb -= 32;
+		if (ca != cb) return 0;
+	}
 	return 1;
 }
 
@@ -102,9 +92,10 @@ static unsigned int need_sectors(unsigned int size)
 	return (size + 511) / 512;
 }
 
-/* Writes 'size' bytes from 'buf' to the file 'name', creating it or reusing its
- * existing region when the new size still fits. Returns 0 on success, -1 if the
- * directory is full or the data region has no room. */
+/* ---- public API ---- */
+
+/* Writes 'size' bytes from 'buf' to the file 'name', creating it or reusing
+ * its existing region when the new size still fits. */
 int fs_file_write(const char *name, const void *buf, unsigned int size)
 {
 	unsigned int need = need_sectors(size);
@@ -115,10 +106,10 @@ int fs_file_write(const char *name, const void *buf, unsigned int size)
 		start = dir->files[i].start;       /* reuse the current region */
 	} else {
 		if (dir->next_free + need > FS_DATA_END)
-			return -1;                 /* out of data space */
+			return -1;
 		start = dir->next_free;
 		dir->next_free += need;
-		if (i < 0) {                       /* new directory entry */
+		if (i < 0) {
 			if (dir->count >= FS_MAX_FILES)
 				return -1;
 			i = (int)dir->count;
@@ -137,7 +128,7 @@ int fs_file_write(const char *name, const void *buf, unsigned int size)
 	while (remaining > 0) {
 		unsigned int chunk = remaining < 512 ? remaining : 512;
 		for (int k = 0; k < 512; k++)
-			io_buf[k] = 0;             /* zero-pad the tail sector */
+			io_buf[k] = 0;
 		for (unsigned int k = 0; k < chunk; k++)
 			io_buf[k] = src[k];
 		ata_write(lba, 1, io_buf);
@@ -146,13 +137,11 @@ int fs_file_write(const char *name, const void *buf, unsigned int size)
 		lba++;
 	}
 
-	ata_write(FS_DIR_LBA, 1, dir_buf);         /* persist the directory */
+	fs_dir_save();
 	return 0;
 }
 
-/* Reads up to 'maxsize' bytes of file 'name' starting at byte 'offset'. Returns
- * the number of bytes copied (0 if offset is at/after EOF), or -1 if the file
- * does not exist. */
+/* Reads up to 'maxsize' bytes of file 'name' starting at byte 'offset'. */
 int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,
                     unsigned int offset)
 {
@@ -191,9 +180,7 @@ int fs_file_read(const char *name, void *buf, unsigned int maxsize)
 	return fs_file_read_at(name, buf, maxsize, 0);
 }
 
-/* Deletes file 'name', compacting the data region so no space is leaked: every
- * file stored after the hole is shifted down over it, its start sector fixed up,
- * and the bump pointer rewound. Returns 0 on success, -1 if not found. */
+/* Deletes file 'name', compacting the data region. */
 int fs_file_delete(const char *name)
 {
 	int i = fs_find(name);
@@ -203,8 +190,6 @@ int fs_file_delete(const char *name)
 	unsigned int freed = need_sectors(dir->files[i].size);
 	unsigned int hole  = dir->files[i].start;
 
-	/* Slide the data of every later file down over the freed sectors. Source
-	 * sits above the destination, so an ascending copy never self-overwrites. */
 	for (unsigned int lba = hole + freed; lba < dir->next_free; lba++) {
 		ata_read(lba, 1, io_buf);
 		ata_write(lba - freed, 1, io_buf);
@@ -219,13 +204,10 @@ int fs_file_delete(const char *name)
 	dir->count--;
 	dir->next_free -= freed;
 
-	ata_write(FS_DIR_LBA, 1, dir_buf);
+	fs_dir_save();
 	return 0;
 }
 
-/* Ensures file 'i' has room for at least 'new_size' bytes, growing its region
- * when needed: extend the bump pointer if it is the last file, else relocate it
- * to fresh space (copying the old sectors). Updates start. Returns 0 or -1. */
 static int fs_grow(int i, unsigned int new_size)
 {
 	unsigned int start    = dir->files[i].start;
@@ -235,14 +217,14 @@ static int fs_grow(int i, unsigned int new_size)
 	if (new_sect <= old_sect)
 		return 0;
 
-	if (start + old_sect == dir->next_free) {          /* last file: extend */
+	if (start + old_sect == dir->next_free) {
 		if (start + new_sect > FS_DATA_END)
 			return -1;
 		dir->next_free = start + new_sect;
 		return 0;
 	}
 
-	if (dir->next_free + new_sect > FS_DATA_END)        /* relocate with room */
+	if (dir->next_free + new_sect > FS_DATA_END)
 		return -1;
 	unsigned int dst = dir->next_free;
 	for (unsigned int s = 0; s < old_sect; s++) {
@@ -254,9 +236,6 @@ static int fs_grow(int i, unsigned int new_size)
 	return 0;
 }
 
-/* Writes 'size' bytes from 'buf' into the data region at byte 'pos' (relative to
- * 'start'), read-modify-writing each touched sector so neighbouring bytes are
- * preserved. The region must already be allocated (see fs_grow). */
 static void fs_put(unsigned int start, unsigned int pos,
                    const void *buf, unsigned int size)
 {
@@ -268,7 +247,7 @@ static void fs_put(unsigned int start, unsigned int pos,
 		unsigned int chunk = 512 - off;
 		if (chunk > remaining)
 			chunk = remaining;
-		ata_read(sec, 1, io_buf);                  /* preserve other bytes */
+		ata_read(sec, 1, io_buf);
 		for (unsigned int k = 0; k < chunk; k++)
 			io_buf[off + k] = src[k];
 		ata_write(sec, 1, io_buf);
@@ -278,7 +257,6 @@ static void fs_put(unsigned int start, unsigned int pos,
 	}
 }
 
-/* Appends 'size' bytes to file 'name' (creating it if absent). */
 int fs_file_append(const char *name, const void *buf, unsigned int size)
 {
 	int i = fs_find(name);
@@ -289,21 +267,17 @@ int fs_file_append(const char *name, const void *buf, unsigned int size)
 
 	unsigned int old_size = dir->files[i].size;
 	unsigned int new_size = old_size + size;
-	if (new_size < old_size)                           /* size overflow */
+	if (new_size < old_size)
 		return -1;
 	if (fs_grow(i, new_size) != 0)
 		return -1;
 
 	fs_put(dir->files[i].start, old_size, buf, size);
 	dir->files[i].size = new_size;
-	ata_write(FS_DIR_LBA, 1, dir_buf);
+	fs_dir_save();
 	return 0;
 }
 
-/* Writes 'size' bytes to file 'name' starting at byte 'offset', overwriting in
- * place and extending the file when the write runs past its end. 'offset' may
- * not exceed the current size (no sparse holes). Creates the file when absent
- * and offset is 0. Returns 0 on success, -1 on error. */
 int fs_file_write_at(const char *name, const void *buf, unsigned int size,
                      unsigned int offset)
 {
@@ -315,11 +289,11 @@ int fs_file_write_at(const char *name, const void *buf, unsigned int size,
 		return offset == 0 ? fs_file_write(name, buf, size) : -1;
 
 	unsigned int old_size = dir->files[i].size;
-	if (offset > old_size)                             /* would leave a hole */
+	if (offset > old_size)
 		return -1;
 
 	unsigned int end = offset + size;
-	if (end < offset)                                  /* overflow */
+	if (end < offset)
 		return -1;
 
 	if (end > old_size) {
@@ -329,7 +303,7 @@ int fs_file_write_at(const char *name, const void *buf, unsigned int size,
 	}
 
 	fs_put(dir->files[i].start, offset, buf, size);
-	ata_write(FS_DIR_LBA, 1, dir_buf);
+	fs_dir_save();
 	return 0;
 }
 
@@ -338,15 +312,12 @@ int fs_file_count(void)
 	return (int)dir->count;
 }
 
-/* Returns the size in bytes of file 'name', or -1 if it does not exist. */
 int fs_file_size(const char *name)
 {
 	int i = fs_find(name);
 	return i < 0 ? -1 : (int)dir->files[i].size;
 }
 
-/* Copies the 16-byte name of file 'index' into 'name_out' and returns its size
- * in bytes, or -1 if the index is out of range. */
 int fs_file_info(int index, char *name_out)
 {
 	if (index < 0 || (unsigned int)index >= dir->count)
@@ -354,4 +325,19 @@ int fs_file_info(int index, char *name_out)
 	for (int k = 0; k < 16; k++)
 		name_out[k] = dir->files[index].name[k];
 	return (int)dir->files[index].size;
+}
+
+/* Returns the absolute LBA and sector count of file 'name' (case-insensitive).
+ * Used by the ELF loader to launch apps by filename from the menu and shell. */
+int fs_file_lba_sectors(const char *name, unsigned int *lba_out,
+                        unsigned int *sectors_out)
+{
+	for (unsigned int i = 0; i < dir->count; i++) {
+		if (name_ci_eq(dir->files[i].name, name)) {
+			*lba_out     = dir->files[i].start;
+			*sectors_out = need_sectors(dir->files[i].size);
+			return 0;
+		}
+	}
+	return -1;
 }

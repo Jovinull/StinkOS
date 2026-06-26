@@ -312,35 +312,56 @@ static int name_ci_eq(const char *a, const char *b)
 	}
 }
 
-/* Find a TOC app by the name the user typed, ignoring the "<n> " slot-number
- * prefix and letter case ("snake" matches the entry "17 SNAKE"). Returns the
- * TOC index, or -1 if no app matches. */
-static int toc_find(const char *name)
+/* Build "NAME.ELF" from a user-typed name (e.g. "snake" → "SNAKE.ELF") and
+ * verify it exists in StinkFS. Fills elf_out (16 bytes, NUL-padded) and
+ * returns 0 on success, -1 if the name is too long or the file is not found. */
+static int find_app_elf(const char *name, char *elf_out)
 {
-	for (int i = 0; i < fs_count(); i++) {
-		const char *e = fs_name(i);
-		while (*e >= '0' && *e <= '9')     /* skip the leading slot number */
-			e++;
-		if (*e == ' ')
-			e++;
-		if (name_ci_eq(e, name))
-			return i;
+	/* Convert to uppercase and measure length. */
+	char upper[12];
+	int k;
+	for (k = 0; k < 11 && name[k]; k++) {
+		char c = name[k];
+		if (c >= 'a' && c <= 'z') c -= 32;
+		upper[k] = c;
 	}
-	return -1;
+	upper[k] = '\0';
+
+	/* Accept names that already end in .ELF; otherwise append it. */
+	int has_ext = (k >= 4 &&
+	               upper[k-4] == '.' && upper[k-3] == 'E' &&
+	               upper[k-2] == 'L' && upper[k-1] == 'F');
+
+	char candidate[16];
+	if (has_ext) {
+		for (int i = 0; i < 16; i++)
+			candidate[i] = (i < k) ? upper[i] : 0;
+	} else {
+		if (k + 4 > 11) return -1;
+		for (int i = 0; i < k; i++) candidate[i] = upper[i];
+		candidate[k]   = '.'; candidate[k+1] = 'E';
+		candidate[k+2] = 'L'; candidate[k+3] = 'F';
+		for (int i = k + 4; i < 16; i++) candidate[i] = 0;
+	}
+
+	if (fs_file_size(candidate) < 0)
+		return -1;
+	for (int i = 0; i < 16; i++) elf_out[i] = candidate[i];
+	return 0;
 }
 
-/* Load TOC app 'index' over the single user region and enter ring 3. Audio is
- * silenced and the heap reset first because the previous app's pages are
- * reused. Does not return on success; returns -1 if the image is malformed --
- * and since the user region is then half-overwritten, the caller must abort to
- * the menu rather than try to resume the program that called us. */
-static int exec_run(int index)
+/* Load the ELF named 'elf_name' from StinkFS and enter ring 3. Does not return
+ * on success; returns -1 if the file is missing or the image is malformed. */
+static int exec_run_by_elf(const char *elf_name)
 {
-	unsigned int entry;
+	unsigned int lba, sectors;
+	if (fs_file_lba_sectors(elf_name, &lba, &sectors) != 0)
+		return -1;
 
-	audio_mix_silence_all();                   /* mixer reads user pages we reuse */
+	unsigned int entry;
+	audio_mix_silence_all();
 	paging_reset_user_heap();
-	if (elf_load(fs_lba(index), fs_sectors(index), &entry) != 0)
+	if (elf_load(lba, sectors, &entry) != 0)
 		return -1;
 	enter_user_mode(entry, paging_user_stack_top());
 	return -1;                                 /* unreachable */
@@ -353,9 +374,8 @@ static void app_return(void)
 {
 	if (exec_active) {
 		exec_active = 0;
-		int sh = toc_find("shell");
-		if (sh >= 0)
-			exec_run(sh);              /* reload the shell; no return */
+		char shell_elf[16] = "SHELL.ELF\0\0\0\0\0\0\0";
+		exec_run_by_elf(shell_elf);        /* reload the shell; no return */
 		/* shell missing or unloadable: fall through to the menu */
 	}
 	menu_exit();                               /* does not return */
@@ -390,8 +410,8 @@ static void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		int idx = toc_find(kname);
-		if (idx < 0) {                     /* unknown app: the caller stays alive */
+		char elf_name[16];
+		if (find_app_elf(kname, elf_name) != 0) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -399,7 +419,7 @@ static void syscall_dispatch(struct regs *r)
 		serial_write(kname);
 		serial_putc('\n');
 		exec_active = 1;                   /* child returns to a shell, not the menu */
-		exec_run(idx);                     /* replaces the caller; returns only on error */
+		exec_run_by_elf(elf_name);         /* replaces the caller; returns only on error */
 		exec_active = 0;                   /* image was bad: user region is trashed */
 		menu_exit();                       /* bail to the menu; does not return */
 		break;
