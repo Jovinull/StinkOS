@@ -25,4 +25,11 @@ int  icmp_send_echo_request(ipv4_t dst, unsigned short identifier,
 /* Called by ipv4.c on IP_PROTO_ICMP packets. */
 void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
 
+/* Echo-reply wait, for an outbound ping driven by the SYS_PING syscall. Arm
+ * with the id/sequence about to be sent, then poll icmp_ping_replied() while
+ * pumping the receive path; icmp_handle flags it when the matching reply lands.
+ * Single outstanding ping at a time (the stack is single-threaded). */
+void icmp_ping_arm(unsigned short identifier, unsigned short sequence);
+int  icmp_ping_replied(void);
+
 #endif

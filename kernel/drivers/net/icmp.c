@@ -8,6 +8,22 @@
 
 static unsigned char scratch[ETH_MAX_PAYLOAD - 20];     /* IP header eats 20 */
 
+/* Outstanding outbound-ping state (see icmp_ping_arm). */
+static volatile int   ping_pending;
+static unsigned short ping_id;
+static unsigned short ping_seq;
+static volatile int   ping_replied;
+
+void icmp_ping_arm(unsigned short identifier, unsigned short sequence)
+{
+	ping_id      = identifier;
+	ping_seq     = sequence;
+	ping_replied = 0;
+	ping_pending = 1;
+}
+
+int icmp_ping_replied(void) { return ping_replied; }
+
 int icmp_send_echo_request(ipv4_t dst, unsigned short identifier,
                            unsigned short sequence,
                            const void *payload, unsigned int payload_len)
@@ -38,6 +54,16 @@ void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		return;
 
 	const struct icmp_hdr *h = (const struct icmp_hdr *)payload;
+
+	if (h->type == ICMP_TYPE_ECHO_REPLY) {     /* reply to our own ping */
+		if (ping_pending &&
+		    ntohs(h->identifier) == ping_id &&
+		    ntohs(h->sequence)   == ping_seq) {
+			ping_replied = 1;
+			ping_pending = 0;
+		}
+		return;
+	}
 
 	if (h->type != ICMP_TYPE_ECHO_REQUEST)
 		return;

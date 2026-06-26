@@ -237,6 +237,19 @@ struct sys_net_info {
 static inline int sys_netinfo(struct sys_net_info *out)
                                                  { return __syscall(43, (int)out, 0, 0); }
 
+/* Send one ICMP echo request to 'ip' (network byte order, e.g. from
+ * sys_ip4()) and wait up to 'timeout_ms' for the reply. Returns the round-trip
+ * time in milliseconds on success, or -1 on timeout / no network. */
+static inline int sys_ping(unsigned int ip, unsigned int timeout_ms)
+                                                 { return __syscall(44, (int)ip, (int)timeout_ms, 0); }
+
+/* Compose a network-byte-order IPv4 address from four octets (a.b.c.d). */
+static inline unsigned int sys_ip4(unsigned int a, unsigned int b,
+                                   unsigned int c, unsigned int d)
+{
+    return (a & 0xff) | ((b & 0xff) << 8) | ((c & 0xff) << 16) | ((d & 0xff) << 24);
+}
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is

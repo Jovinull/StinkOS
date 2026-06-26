@@ -280,6 +280,44 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 44: {                                 /* SYS_PING: ebx=ipv4(net order) ecx=timeout_ms -> rtt_ms or -1 */
+		if (!e1000_present() || r->ebx == 0) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		static unsigned short ping_seq;
+		unsigned short id  = 0x5453;       /* 'TS' */
+		unsigned short seq = ++ping_seq;
+		const char payload[] = "stinkos-ping";
+
+		icmp_ping_arm(id, seq);
+		if (icmp_send_echo_request((ipv4_t)r->ebx, id, seq,
+		                           payload, sizeof(payload) - 1) < 0) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+
+		unsigned int start = pit_ticks();
+		unsigned int limit = (r->ecx + 9) / 10;   /* ms -> 100 Hz ticks, round up */
+		if (limit == 0)
+			limit = 1;
+
+		int rtt = -1;
+		while ((unsigned int)(pit_ticks() - start) <= limit) {
+			net_poll_once();               /* poll RX so the reply is seen */
+			if (icmp_ping_replied()) {
+				rtt = (int)((pit_ticks() - start) * 10);   /* ticks -> ms */
+				break;
+			}
+			/* The syscall arrived through an interrupt gate (IF cleared), so
+			 * without this window the PIT would never tick and the timeout
+			 * below could never fire -- the same sti+hlt+cli pattern SYS_SLEEP
+			 * uses to wait on the timer without losing an IRQ. */
+			__asm__ volatile ("sti; hlt; cli");
+		}
+		r->eax = (unsigned int)rtt;
+		break;
+	}
 	case 6:                                    /* SYS_TICKS: -> PIT ticks */
 		r->eax = pit_ticks();
 		break;
