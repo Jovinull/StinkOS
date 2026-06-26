@@ -12,5 +12,6 @@ struct regs {
 
 void interrupts_init(void);          /* build + load the IDT, remap the PIC */
 void pit_init(unsigned int hz);      /* program the PIT to fire IRQ0 at hz  */
+unsigned int pit_ticks(void);        /* PIT ticks since boot (for timed waits) */
 
 #endif
