@@ -334,10 +334,16 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"21 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
-	@if [ -n "$(WAD_FILE)" ]; then \
-		echo "stinkfs: bundling $(WAD_FILE) as DOOM1.WAD"; \
-		python3 tools/make-stinkfs.py os.bin $(FS_DIR_LBA) $(FS_DATA_LBA) $(FS_DATA_END) "DOOM1.WAD=$(WAD_FILE)"; \
-	fi
+	@stinkfs_args=""; \
+	  if [ -f "$(FREEDOOM1_WAD)" ]; then stinkfs_args="$$stinkfs_args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
+	  if [ -f "$(FREEDOOM2_WAD)" ]; then stinkfs_args="$$stinkfs_args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
+	  if [ -f "$(FREEDM_WAD)" ];    then stinkfs_args="$$stinkfs_args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
+	  if [ -n "$$stinkfs_args" ]; then \
+	    echo "stinkfs: bundling$$stinkfs_args"; \
+	    python3 tools/make-stinkfs.py os.bin $(FS_DIR_LBA) $(FS_DATA_LBA) $(FS_DATA_END) $$stinkfs_args; \
+	  else \
+	    echo "stinkfs: no WADs under wads/ (run 'bash tools/fetch-wads.sh' to download)"; \
+	  fi
 
 hex:
 	hexdump os.bin
