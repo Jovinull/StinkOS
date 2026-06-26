@@ -209,14 +209,17 @@ void    I_PlaySong(void *h, boolean lp){ (void)h; (void)lp; }
 void    I_StopSong(void)               { }
 boolean I_MusicIsPlaying(void)         { return false; }
 
-/* ---- legacy sfx interface stubs (called by s_sound.c / d_main.c) ---- */
-void I_InitSound(boolean use_sfx_prefix)  { (void)use_sfx_prefix; }
-void I_ShutdownSound(void)                { }
-int  I_GetSfxLumpNum(sfxinfo_t *sfx)     { (void)sfx; return -1; }
-void I_UpdateSound(void)                  { }
-void I_UpdateSoundParams(int ch, int v, int sep) { (void)ch; (void)v; (void)sep; }
-int  I_StartSound(sfxinfo_t *sfx, int ch, int vol, int sep) { (void)sfx; (void)ch; (void)vol; (void)sep; return -1; }
-void I_StopSound(int channel)             { (void)channel; }
-boolean I_SoundIsPlaying(int channel)     { (void)channel; return false; }
-void I_PrecacheSounds(sfxinfo_t *s, int n){ (void)s; (void)n; }
-void I_BindSoundVariables(void)           { }
+/* ---- sfx interface (called directly by s_sound.c / d_main.c) ----
+ * StinkOS compiles this backend instead of the multi-module i_sound.c
+ * dispatcher, so these entry points forward straight to the single mixer
+ * backend above rather than selecting one at runtime. */
+void    I_InitSound(boolean use_sfx_prefix)         { Stink_SfxInit(use_sfx_prefix); }
+void    I_ShutdownSound(void)                       { Stink_SfxShutdown(); }
+int     I_GetSfxLumpNum(sfxinfo_t *sfx)             { return Stink_GetSfxLumpNum(sfx); }
+void    I_UpdateSound(void)                         { Stink_SfxUpdate(); }
+void    I_UpdateSoundParams(int ch, int v, int sep) { Stink_SfxUpdateParams(ch, v, sep); }
+int     I_StartSound(sfxinfo_t *sfx, int ch, int vol, int sep) { return Stink_StartSound(sfx, ch, vol, sep); }
+void    I_StopSound(int channel)                    { Stink_StopSound(channel); }
+boolean I_SoundIsPlaying(int channel)               { return Stink_SoundIsPlaying(channel); }
+void    I_PrecacheSounds(sfxinfo_t *s, int n)       { Stink_CacheSounds(s, n); }
+void    I_BindSoundVariables(void)                  { }
