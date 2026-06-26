@@ -1,23 +1,6 @@
 /* StinkOS kernel - entry point in 32-bit protected mode.
  * The bootloader sets a VBE linear-framebuffer mode and hands control here. */
-#include "io.h"
-#include "serial.h"
-#include "interrupts.h"
-#include "keyboard.h"
-#include "vbe.h"
-#include "fb.h"
-#include "pmm.h"
-#include "paging.h"
-#include "gdt.h"
-#include "menu.h"
-#include "mouse.h"
-#include "audio.h"
-#include "pci.h"
-#include "ata.h"
-#include "e1000.h"
-#include "net.h"
-#include "dhcp.h"
-#include "bootdiag.h"
+#include "defs.h"
 
 void kmain(void)
 {

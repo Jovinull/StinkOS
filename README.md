@@ -146,7 +146,9 @@ Add a build rule beside the others in the `Makefile`, pick a free LBA slot, wire
 The kernel sources are grouped by subsystem under `kernel/`, with the boot
 assembly and link script in `boot/`. Object files build flat into `build/`;
 the Makefile resolves a bare source or `#include "foo.h"` to the right
-subdirectory via `VPATH` and `-I` include paths.
+subdirectory via `VPATH` and `-I` include paths. Broad consumers (the boot
+path, the syscall dispatch) include `kernel/defs.h`, an umbrella that pulls in
+every subsystem header so they need a single include instead of a long list.
 
 | Area | Files |
 |------|-------|

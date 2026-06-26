@@ -1,28 +1,7 @@
 /* System-call dispatch (int 0x80) and its file/VFS/exec helpers. The trap
  * layer (trap.c) routes int 0x80 here via syscall_dispatch, and calls
  * app_return when a ring-3 app ends or faults. */
-#include "interrupts.h"
-#include "syscall.h"
-#include "serial.h"
-#include "fb.h"
-#include "pmm.h"
-#include "paging.h"
-#include "menu.h"
-#include "mouse.h"
-#include "speaker.h"
-#include "fs.h"
-#include "vfs.h"
-#include "elf.h"
-#include "audio.h"
-#include "tcp.h"
-#include "dns.h"
-#include "net.h"
-#include "dhcp.h"
-#include "e1000.h"
-#include "ata.h"
-#include "mbr.h"
-#include "io.h"
-#include "keyboard.h"
+#include "defs.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */

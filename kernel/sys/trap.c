@@ -1,13 +1,7 @@
 /* Low-level interrupt machinery: IDT setup, PIC remap, the PIT timer and the
  * C-side trap/IRQ handlers the assembly stubs call into. The syscall layer
  * (int 0x80) lives in syscall.c; this file just routes there. */
-#include "interrupts.h"
-#include "syscall.h"
-#include "serial.h"
-#include "keyboard.h"
-#include "audio.h"
-#include "mouse.h"
-#include "io.h"
+#include "defs.h"
 
 /* ---- assembly stubs ---- */
 extern void idt_load(unsigned int idt_ptr_addr);
