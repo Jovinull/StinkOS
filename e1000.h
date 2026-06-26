@@ -26,4 +26,10 @@ int  e1000_present(void);
  * success, -1 if the device isn't present. */
 int  e1000_get_mac(unsigned char *out);
 
+/* Non-blocking receive. Copies the next available Ethernet frame into 'buf'
+ * (truncated to max_len if larger) and returns the byte count, or 0 when no
+ * frame is pending. Frames the hardware accepted with no CRC errors are
+ * delivered minus the trailing CRC (RCTL.SECRC strips it). */
+unsigned int e1000_poll_receive(void *buf, unsigned int max_len);
+
 #endif
