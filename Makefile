@@ -94,9 +94,18 @@ APP18_LBA = 208           # PONG   — 8-sector slot  (208..215)
 # (big enough for a Doom WAD plus save games). The Doom slot lives just past
 # that data region.
 TOC_LBA   = 224
+FS_DIR_LBA   = 225
+FS_DATA_LBA  = 226
+FS_DATA_END  = 65226       # must match FS_DATA_END in fs.c
 DOOM_LBA  = 65226          # first sector after the StinkFS data region
 DOOM_SECTORS = 2048        # 1 MiB max app image -- plenty for the Doom binary
 DISK_END  = 34444288       # (DOOM_LBA + DOOM_SECTORS) * 512 = 67274 * 512
+
+# Optional: pre-populate StinkFS with a Doom WAD at build time. Pass
+#   make WAD_FILE=path/to/freedoom1.wad
+# and the disk image will boot with DOOM1.WAD already on the filesystem
+# (which is what doomgeneric_stink.c's fake argv looks for).
+WAD_FILE  ?=
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
@@ -288,6 +297,10 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"19 DOOM:$(DOOM_LBA):$(BUILD)/doom.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
+	@if [ -n "$(WAD_FILE)" ]; then \
+		echo "stinkfs: bundling $(WAD_FILE) as DOOM1.WAD"; \
+		python3 tools/make-stinkfs.py os.bin $(FS_DIR_LBA) $(FS_DATA_LBA) $(FS_DATA_END) "DOOM1.WAD=$(WAD_FILE)"; \
+	fi
 
 hex:
 	hexdump os.bin
