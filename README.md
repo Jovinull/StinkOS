@@ -143,17 +143,24 @@ Add a build rule beside the others in the `Makefile`, pick a free LBA slot, wire
 
 ## Components
 
+The kernel sources are grouped by subsystem under `kernel/`, with the boot
+assembly and link script in `boot/`. Object files build flat into `build/`;
+the Makefile resolves a bare source or `#include "foo.h"` to the right
+subdirectory via `VPATH` and `-I` include paths.
+
 | Area | Files |
 |------|-------|
-| Boot, protected-mode entry           | `boot.s`, `linker.ld` |
+| Boot, protected-mode entry           | `boot/boot.s`, `boot/linker.ld` |
 | Kernel entry                         | `kernel.c` |
-| Interrupts (IDT, PIC, PIT, syscalls) | `interrupts.c`, `interrupts_asm.s` |
-| GDT + TSS                            | `gdt.c`, `gdt_asm.s` |
-| Paging, physical memory              | `paging.c`, `pmm.c` |
-| Video (VBE + framebuffer + font)     | `vbe.c`, `fb.c`, `font.c` |
-| Drivers (serial, keyboard, ATA, speaker) | `serial.c`, `keyboard.c`, `ata.c`, `speaker.c` |
-| StinkFS (named flat files)           | `fs.c`, `fs.h` |
-| ELF loader + Ring 3 entry            | `elf.c`, `menu.c`, `usermode_asm.s` |
+| Interrupts (IDT, PIC, PIT, syscalls) | `kernel/sys/interrupts.c`, `boot/interrupts_asm.s` |
+| GDT + TSS                            | `kernel/arch/gdt.c`, `boot/gdt_asm.s` |
+| Paging, physical memory              | `kernel/arch/paging.c`, `kernel/arch/pmm.c` |
+| Video (VBE + framebuffer + font)     | `kernel/drivers/video/{vbe,fb,font}.c` |
+| Input (keyboard, mouse)              | `kernel/drivers/input/{keyboard,mouse}.c` |
+| Storage (ATA), audio, misc           | `kernel/drivers/storage/ata.c`, `kernel/drivers/audio/`, `kernel/drivers/misc/{serial,rtc}.c` |
+| Network stack                        | `kernel/drivers/net/` (e1000, ethernet, arp, ipv4, icmp, udp, tcp, dhcp, dns, pci) |
+| StinkFS + VFS                        | `kernel/fs/{fs,vfs,mbr}.c` |
+| ELF loader + Ring 3 entry            | `kernel/sys/elf.c`, `kernel/ui/menu.c`, `boot/usermode_asm.s` |
 | Userland C library                   | `apps/libstink.h`, `apps/crt0.s` |
 
 ## Toolchain — why a cross-compiler?
