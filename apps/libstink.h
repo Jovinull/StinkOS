@@ -268,6 +268,10 @@ static inline void sys_fillrect(int x, int y, int w, int h, unsigned int rgb)
 #define KEY_DOWN  29
 #define KEY_LEFT  30
 #define KEY_RIGHT 31
+#define KEY_HOME  (-6)
+#define KEY_END   (-5)
+#define KEY_PGUP  (-4)
+#define KEY_PGDN  (-3)
 
 /* Standard ASCII control code for Ctrl+<letter>, e.g. KEY_CTRL('c') == 3. */
 #define KEY_CTRL(c) ((c) - 'a' + 1)
