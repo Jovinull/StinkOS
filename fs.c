@@ -9,16 +9,16 @@
  * apps are placed at the LBAs recorded in the TOC (slot sizes need not be
  * uniform), and all metadata lives above the region. */
 #define TOC_LBA   224              /* app table-of-contents */
-#define MAX_APPS  20
+#define MAX_APPS  32
 
-/* StinkFS layout. The data region is sized to hold a Doom WAD comfortably
- * (Freedoom1 is ~12 MiB, the commercial doom.wad is ~10 MiB) -- 65000 sectors
- * works out to ~32 MiB, plenty of headroom for save games and other files
- * alongside the WAD. */
+/* StinkFS layout. The data region is sized to hold the full Freedoom asset
+ * set side by side: freedoom1.wad (~28 MiB) + freedoom2.wad (~28 MiB) +
+ * freedm.wad (~22 MiB) ~= 78 MiB, plus ~20 MiB of headroom for save games
+ * and any other files. */
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
 #define FS_DIR_LBA    225          /* directory sector */
 #define FS_DATA_LBA   226          /* first data sector */
-#define FS_DATA_END   65226        /* one past the last data sector (~32 MiB) */
+#define FS_DATA_END   200226       /* one past the last data sector (~100 MiB) */
 #define FS_MAX_FILES  16
 
 struct toc_entry {
