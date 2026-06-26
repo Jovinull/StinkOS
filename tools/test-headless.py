@@ -264,4 +264,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 20 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
