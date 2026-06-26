@@ -23,4 +23,13 @@ int audio_present(void);
  * (SB16/AWE32). */
 unsigned int audio_dsp_version(void);
 
+/* IRQ5 dispatch. Called from the kernel's IRQ handler when the SB16 raises
+ * an interrupt (DMA half/full buffer completion). Reads the ack ports and
+ * advances internal state. */
+void audio_handle_irq(void);
+
+/* How many times audio_handle_irq has been invoked since boot. Tests + the
+ * mixer use this to verify the DSP is actually clocking through DMA. */
+unsigned int audio_irq_count_get(void);
+
 #endif
