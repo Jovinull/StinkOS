@@ -38,24 +38,26 @@ static unsigned char dir_buf[512 * FS_DIR_SECTORS];
 static unsigned char io_buf[512];          /* per-sector bounce buffer */
 static struct fs_dir *dir = (struct fs_dir *)dir_buf;
 
-static void fs_dir_load(void)
+static int fs_dir_load(void)
 {
-	ata_read(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf);
-	if (dir->magic != STINKFS_MAGIC) {     /* uninitialised: start empty */
+	if (ata_read(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf) != 0)
+		return -1;                         /* disk read failed: do not guess  */
+	if (dir->magic != STINKFS_MAGIC) {     /* uninitialised: start empty       */
 		dir->magic     = STINKFS_MAGIC;
 		dir->count     = 0;
 		dir->next_free = FS_DATA_LBA;
 	}
+	return 0;
 }
 
-static void fs_dir_save(void)
+static int fs_dir_save(void)
 {
-	ata_write(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf);
+	return ata_write(FS_DIR_LBA, FS_DIR_SECTORS, dir_buf);
 }
 
-void fs_init(void)
+int fs_init(void)
 {
-	fs_dir_load();
+	return fs_dir_load();
 }
 
 /* ---- name helpers ---- */
@@ -131,14 +133,14 @@ int fs_file_write(const char *name, const void *buf, unsigned int size)
 			io_buf[k] = 0;
 		for (unsigned int k = 0; k < chunk; k++)
 			io_buf[k] = src[k];
-		ata_write(lba, 1, io_buf);
+		if (ata_write(lba, 1, io_buf) != 0)
+			return -1;
 		src += chunk;
 		remaining -= chunk;
 		lba++;
 	}
 
-	fs_dir_save();
-	return 0;
+	return fs_dir_save();
 }
 
 /* Reads up to 'maxsize' bytes of file 'name' starting at byte 'offset'. */
@@ -165,7 +167,8 @@ int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,
 		unsigned int chunk = 512 - off;
 		if (chunk > remaining)
 			chunk = remaining;
-		ata_read(sec, 1, io_buf);
+		if (ata_read(sec, 1, io_buf) != 0)
+			return -1;
 		for (unsigned int k = 0; k < chunk; k++)
 			dst[k] = io_buf[off + k];
 		dst += chunk;
@@ -191,8 +194,10 @@ int fs_file_delete(const char *name)
 	unsigned int hole  = dir->files[i].start;
 
 	for (unsigned int lba = hole + freed; lba < dir->next_free; lba++) {
-		ata_read(lba, 1, io_buf);
-		ata_write(lba - freed, 1, io_buf);
+		if (ata_read(lba, 1, io_buf) != 0)
+			return -1;
+		if (ata_write(lba - freed, 1, io_buf) != 0)
+			return -1;
 	}
 
 	for (unsigned int j = 0; j < dir->count; j++)
@@ -204,8 +209,7 @@ int fs_file_delete(const char *name)
 	dir->count--;
 	dir->next_free -= freed;
 
-	fs_dir_save();
-	return 0;
+	return fs_dir_save();
 }
 
 static int fs_grow(int i, unsigned int new_size)
@@ -228,16 +232,18 @@ static int fs_grow(int i, unsigned int new_size)
 		return -1;
 	unsigned int dst = dir->next_free;
 	for (unsigned int s = 0; s < old_sect; s++) {
-		ata_read(start + s, 1, io_buf);
-		ata_write(dst + s, 1, io_buf);
+		if (ata_read(start + s, 1, io_buf) != 0)
+			return -1;
+		if (ata_write(dst + s, 1, io_buf) != 0)
+			return -1;
 	}
 	dir->next_free += new_sect;
 	dir->files[i].start = dst;
 	return 0;
 }
 
-static void fs_put(unsigned int start, unsigned int pos,
-                   const void *buf, unsigned int size)
+static int fs_put(unsigned int start, unsigned int pos,
+                  const void *buf, unsigned int size)
 {
 	unsigned int remaining = size;
 	const unsigned char *src = (const unsigned char *)buf;
@@ -247,14 +253,17 @@ static void fs_put(unsigned int start, unsigned int pos,
 		unsigned int chunk = 512 - off;
 		if (chunk > remaining)
 			chunk = remaining;
-		ata_read(sec, 1, io_buf);
+		if (ata_read(sec, 1, io_buf) != 0)
+			return -1;
 		for (unsigned int k = 0; k < chunk; k++)
 			io_buf[off + k] = src[k];
-		ata_write(sec, 1, io_buf);
+		if (ata_write(sec, 1, io_buf) != 0)
+			return -1;
 		pos += chunk;
 		remaining -= chunk;
 		src += chunk;
 	}
+	return 0;
 }
 
 int fs_file_append(const char *name, const void *buf, unsigned int size)
@@ -272,10 +281,10 @@ int fs_file_append(const char *name, const void *buf, unsigned int size)
 	if (fs_grow(i, new_size) != 0)
 		return -1;
 
-	fs_put(dir->files[i].start, old_size, buf, size);
+	if (fs_put(dir->files[i].start, old_size, buf, size) != 0)
+		return -1;
 	dir->files[i].size = new_size;
-	fs_dir_save();
-	return 0;
+	return fs_dir_save();
 }
 
 int fs_file_write_at(const char *name, const void *buf, unsigned int size,
@@ -302,9 +311,9 @@ int fs_file_write_at(const char *name, const void *buf, unsigned int size,
 		dir->files[i].size = end;
 	}
 
-	fs_put(dir->files[i].start, offset, buf, size);
-	fs_dir_save();
-	return 0;
+	if (fs_put(dir->files[i].start, offset, buf, size) != 0)
+		return -1;
+	return fs_dir_save();
 }
 
 int fs_file_count(void)

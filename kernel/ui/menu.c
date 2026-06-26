@@ -337,7 +337,8 @@ void menu_run(void)
 	selected = 0;
 	view = VIEW_MENU;
 
-	fs_init();
+	if (fs_init() != 0)
+		serial_write("menu: fs init failed (disk read error)\n");
 	load_app_list();
 	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
 	redraw();
