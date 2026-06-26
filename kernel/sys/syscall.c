@@ -285,6 +285,34 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 49: {                                 /* SYS_PIPE: ebx=int fds[2] -> 0 ok, -1 fail */
+		if (!paging_user_range_ok(r->ebx, 2 * sizeof(int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		int *fds = (int *)r->ebx;
+		r->eax = (unsigned int)pipe_alloc(&fds[0], &fds[1]);
+		break;
+	}
+	case 50: {                                 /* SYS_PIPE_READ: ebx=h ecx=buf edx=n -> bytes or -1 */
+		if (!paging_user_range_ok(r->ecx, r->edx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)pipe_read((int)r->ebx, (void *)r->ecx, r->edx);
+		break;
+	}
+	case 51: {                                 /* SYS_PIPE_WRITE: ebx=h ecx=buf edx=n -> bytes or -1 */
+		if (!paging_user_range_ok(r->ecx, r->edx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)pipe_write((int)r->ebx, (const void *)r->ecx, r->edx);
+		break;
+	}
+	case 52:                                   /* SYS_PIPE_CLOSE: ebx=h -> 0 or -1 */
+		r->eax = (unsigned int)pipe_close((int)r->ebx);
+		break;
 	case 47: {                                 /* SYS_WAIT: -> exit_code of any reaped child, or -1 */
 		for (;;) {
 			struct proc *z = proc_find_zombie_child(0);

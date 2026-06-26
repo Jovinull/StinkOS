@@ -20,6 +20,7 @@
 #include "interrupts.h"
 #include "syscall.h"
 #include "proc.h"
+#include "pipe.h"
 #include "bootdiag.h"
 #include "elf.h"
 

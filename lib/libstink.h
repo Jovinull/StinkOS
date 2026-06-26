@@ -256,6 +256,17 @@ static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 
 static inline int sys_wait(void)                 { return __syscall(47, 0, 0, 0); }
 static inline int sys_waitpid(int pid)           { return __syscall(48, pid, 0, 0); }
 
+/* Anonymous pipes. sys_pipe fills fds[0] with the read handle and fds[1] with
+ * the write handle, both opaque ints. sys_pipe_read returns 0 on EOF (all
+ * writers closed); sys_pipe_write returns -1 on EPIPE (all readers closed).
+ * Each end is released independently with sys_pipe_close. */
+static inline int sys_pipe(int fds[2])           { return __syscall(49, (int)fds, 0, 0); }
+static inline int sys_pipe_read(int h, void *buf, unsigned int n)
+                                                 { return __syscall(50, h, (int)buf, (int)n); }
+static inline int sys_pipe_write(int h, const void *buf, unsigned int n)
+                                                 { return __syscall(51, h, (int)buf, (int)n); }
+static inline int sys_pipe_close(int h)          { return __syscall(52, h, 0, 0); }
+
 /* Compose a network-byte-order IPv4 address from four octets (a.b.c.d). */
 static inline unsigned int sys_ip4(unsigned int a, unsigned int b,
                                    unsigned int c, unsigned int d)
