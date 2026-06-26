@@ -97,3 +97,28 @@ int proc_count(void)
 			n++;
 	return n;
 }
+
+/* Pre-build a kernel stack so the first context_switch into it pops sane
+ * callee-saved regs and rets straight into `entry`.
+ *
+ * The asm switch (boot/context_asm.s) pops EDI, ESI, EBX, EBP, EFLAGS in that
+ * order and then issues ret -- so we lay those six 4-byte words from the top
+ * downward: [return-addr=entry][EFLAGS=0x202][EBP=0][EBX=0][ESI=0][EDI=0].
+ * The ESP value handed to context_switch is the address of the EDI slot, i.e.
+ * the lowest of the six words.
+ *
+ * EFLAGS bit 1 must always be 1 (reserved) and IF (bit 9) is set so the new
+ * thread runs with interrupts on, matching the kernel's normal posture. */
+unsigned int context_init(unsigned int kstack_top, void (*entry)(void))
+{
+	unsigned int *sp = (unsigned int *)kstack_top;
+
+	*--sp = (unsigned int)entry;               /* return address: ret jumps here */
+	*--sp = 0x00000202;                         /* EFLAGS: reserved bit + IF      */
+	*--sp = 0;                                  /* EBP                            */
+	*--sp = 0;                                  /* EBX                            */
+	*--sp = 0;                                  /* ESI                            */
+	*--sp = 0;                                  /* EDI                            */
+
+	return (unsigned int)sp;
+}

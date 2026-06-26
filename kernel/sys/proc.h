@@ -55,4 +55,19 @@ struct proc   *proc_get(int pid);
 /* Number of non-UNUSED slots. */
 int            proc_count(void);
 
+/* ---- Context switch primitives ---- */
+
+/* Cooperative switch between two kernel stacks. Stores the current ESP into
+ * *old_esp_ptr (after pushing callee-saved regs + EFLAGS) and reloads ESP
+ * from new_esp; pops the matching frame and returns. Implemented in asm
+ * (boot/context_asm.s). */
+void           context_switch(unsigned int *old_esp_ptr, unsigned int new_esp);
+
+/* Prepare a fresh kernel stack so the first context_switch into it transfers
+ * control to `entry` with a 0 argument and a sane EFLAGS. `kstack_top` is the
+ * highest address of the stack region (exclusive); returns the ESP value to
+ * store in the PCB. The stack region must have room for at least 32 bytes
+ * (5 callee-saved-reg slots + return address + small alignment slack). */
+unsigned int   context_init(unsigned int kstack_top, void (*entry)(void));
+
 #endif
