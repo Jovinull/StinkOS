@@ -58,12 +58,12 @@ On boot, StinkOS will:
 
 1. **Load itself from disk** via the BIOS, enable A20, build a GDT, and switch the CPU into 32-bit protected mode. (`boot.s`)
 2. **Set a VBE linear framebuffer** at 1024×768×32 — pixels go straight to video memory. (`vbe.c`, `fb.c`)
-3. **Wire up interrupts** — IDT, remap the PIC, configure the PIT at 100 Hz, drive the PS/2 keyboard. (`interrupts.c`, `keyboard.c`)
+3. **Wire up interrupts** — IDT, remap the PIC, configure the PIT at 100 Hz, drive the PS/2 keyboard. (`trap.c`, `keyboard.c`)
 4. **Enable paging** with a 4 MiB identity map for the kernel, backed by a physical frame allocator. Userland gets its own isolated 4 KiB-paged region. (`paging.c`, `pmm.c`)
 5. **Install a TSS** and drop into a graphical start menu. (`menu.c`, `gdt.c`)
-6. **Load and run apps in Ring 3.** The kernel reads an ELF binary from a raw disk slot, copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`)
+6. **Load and run apps in Ring 3.** The kernel reads a named ELF file from StinkFS, copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`)
 
-There's also a filesystem of my own design (`fs.c` — "StinkFS"), a PC speaker driver (`speaker.c`), an ATA disk driver (`ata.c`), and a serial console used for debug output (visible in the QEMU stdio log).
+There's also a filesystem of my own design (`fs.c` — "StinkFS"), a PC speaker driver (`speaker.c`), an ATA disk driver (`ata.c`), and a serial console used for debug output (visible in the QEMU stdio log). The boot path ends with a BIOS-style POST screen reporting each subsystem's status (`bootdiag.c`), and a network stack (e1000 NIC → ARP/IP/ICMP/UDP/TCP/DHCP/DNS) backs the shell's `netinfo` and `ping` commands.
 
 ## Run it (2 minutes)
 
@@ -106,11 +106,15 @@ Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `eb
 | 12 | `fdelete`| `ebx`=name                        | Delete a file |
 | 13 | `fappend`| `ebx`=name `ecx`=buf `edx`=size   | Append to an existing file |
 
-C apps don't write `int 0x80` by hand — `lib/libstink.h` wraps each call as a static inline. Drop it in and call `sys_draw(x, y, 0xff00ff)`.
+The table above is a representative slice; the ABI is ~44 calls today — file
+and VFS I/O, on-screen text and blits, audio, TCP/UDP sockets, DNS, `netinfo`
+and `ping`, `exec`, and direct framebuffer mapping. C apps don't write
+`int 0x80` by hand — `lib/libstink.h` wraps each call as a static inline. Drop
+it in and call `sys_draw(x, y, 0xff00ff)`.
 
 ## Userland apps
 
-Apps are independent ELF binaries. They live on raw disk slots (LBAs 64, 72, 80, …) and show up in the start menu at boot:
+Apps are independent ELF binaries. They live as named ELF files in StinkFS and show up in the start menu at boot:
 
 | Name | What it is |
 |------|------------|
@@ -139,7 +143,10 @@ void main(void) {
 }
 ```
 
-Add a build rule beside the others in the `Makefile`, pick a free LBA slot, wire it into the TOC line at the end of the rule, and `make run`. The menu picks it up automatically.
+Add a build rule beside the others in the `Makefile`, list the resulting `.elf`
+in the `make-stinkfs.py` arguments at the end of the `os` target so it gets
+written into StinkFS as a named file, and `make run`. The menu picks it up
+automatically.
 
 ## Components
 
@@ -154,7 +161,8 @@ every subsystem header so they need a single include instead of a long list.
 |------|-------|
 | Boot, protected-mode entry           | `boot/boot.s`, `boot/linker.ld` |
 | Kernel entry                         | `kernel/main.c` (`kmain`) |
-| Interrupts (IDT, PIC, PIT, syscalls) | `kernel/sys/interrupts.c`, `boot/interrupts_asm.s` |
+| Interrupts (IDT, PIC, PIT)           | `kernel/sys/trap.c`, `boot/interrupts_asm.s` |
+| Syscall dispatch (`int 0x80`)        | `kernel/sys/syscall.c` |
 | GDT + TSS                            | `kernel/arch/gdt.c`, `boot/gdt_asm.s` |
 | Paging, physical memory              | `kernel/arch/paging.c`, `kernel/arch/pmm.c` |
 | Video (VBE + framebuffer + font)     | `kernel/drivers/video/{vbe,fb,font}.c` |
