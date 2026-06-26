@@ -504,6 +504,16 @@ int sprintf(char *out, const char *fmt, ...);
  * any directive snprintf supports is available here too. */
 void sys_printf(const char *fmt, ...);
 
+/* C standard printf: writes to the serial debug log (StinkOS has no stdout
+ * file descriptor). Returns the number of characters that would have been
+ * written, matching glibc's contract. */
+int printf(const char *fmt, ...);
+
+/* Case-insensitive string comparisons. Live in libstink_posix.c, declared here
+ * because the doom-shims <strings.h> needs the same prototype. ASCII-only. */
+int strcasecmp(const char *a, const char *b);
+int strncasecmp(const char *a, const char *b, unsigned int n);
+
 /* ---- C-style stdio (apps/libstink_stdio.c) ---- */
 
 typedef struct __file FILE;

@@ -100,3 +100,35 @@ int mkdir(const char *path, mode_t mode)
 	(void)mode;
 	return 0;                              /* no directories in StinkFS */
 }
+
+/* ASCII case-insensitive comparisons. Doom uses them on lump names and a few
+ * config-file keys -- never on locale-aware text -- so the "C" locale
+ * folding (uppercase A-Z only) is fine. */
+int strcasecmp(const char *a, const char *b)
+{
+	for (;;) {
+		int ca = (unsigned char)*a++;
+		int cb = (unsigned char)*b++;
+		int la = (ca >= 'A' && ca <= 'Z') ? ca + ('a' - 'A') : ca;
+		int lb = (cb >= 'A' && cb <= 'Z') ? cb + ('a' - 'A') : cb;
+		if (la != lb)
+			return la - lb;
+		if (la == 0)
+			return 0;
+	}
+}
+
+int strncasecmp(const char *a, const char *b, unsigned int n)
+{
+	for (unsigned int i = 0; i < n; i++) {
+		int ca = (unsigned char)a[i];
+		int cb = (unsigned char)b[i];
+		int la = (ca >= 'A' && ca <= 'Z') ? ca + ('a' - 'A') : ca;
+		int lb = (cb >= 'A' && cb <= 'Z') ? cb + ('a' - 'A') : cb;
+		if (la != lb)
+			return la - lb;
+		if (la == 0)
+			return 0;
+	}
+	return 0;
+}
