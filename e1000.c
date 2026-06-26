@@ -20,6 +20,7 @@
 #define E1000_IMC       0x00D8     /* interrupt mask clear */
 #define E1000_RCTL      0x0100
 #define E1000_TCTL      0x0400
+#define E1000_TIPG      0x0410     /* transmit inter-packet gap */
 #define E1000_RDBAL     0x2800
 #define E1000_RDBAH     0x2804
 #define E1000_RDLEN     0x2808
@@ -49,8 +50,22 @@
 #define E1000_RXD_STAT_DD      0x01u         /* descriptor done          */
 #define E1000_RXD_STAT_EOP     0x02u         /* end of packet            */
 
+/* TCTL (transmit control) bits. */
+#define E1000_TCTL_EN          0x00000002u   /* transmitter enable */
+#define E1000_TCTL_PSP         0x00000008u   /* pad short packets  */
+#define E1000_TCTL_CT_SHIFT    4
+#define E1000_TCTL_COLD_SHIFT  12
+
+/* TX descriptor command/status. */
+#define E1000_TXD_CMD_EOP      0x01u
+#define E1000_TXD_CMD_IFCS     0x02u         /* insert FCS (CRC)   */
+#define E1000_TXD_CMD_RS       0x08u         /* report status      */
+#define E1000_TXD_STAT_DD      0x01u
+
 #define RX_RING_COUNT  32
 #define RX_BUF_SIZE    2048
+#define TX_RING_COUNT  8
+#define TX_BUF_SIZE    2048
 
 struct rx_desc {
 	unsigned long long addr;
@@ -61,9 +76,23 @@ struct rx_desc {
 	unsigned short     special;
 } __attribute__((packed));
 
+struct tx_desc {
+	unsigned long long addr;
+	unsigned short     length;
+	unsigned char      cso;
+	unsigned char      cmd;
+	unsigned char      status;
+	unsigned char      css;
+	unsigned short     special;
+} __attribute__((packed));
+
 static struct rx_desc  rx_ring[RX_RING_COUNT] __attribute__((aligned(16)));
 static unsigned char   rx_buffers[RX_RING_COUNT][RX_BUF_SIZE] __attribute__((aligned(16)));
 static unsigned int    rx_cursor;          /* next descriptor we'll consume */
+
+static struct tx_desc  tx_ring[TX_RING_COUNT] __attribute__((aligned(16)));
+static unsigned char   tx_buffers[TX_RING_COUNT][TX_BUF_SIZE] __attribute__((aligned(16)));
+static unsigned int    tx_cursor;          /* next descriptor we'll write */
 
 static volatile unsigned int *e1000_mmio;
 static int                    e1000_initialised;
@@ -142,9 +171,10 @@ int e1000_init(void)
 
 	read_mac_from_rar();
 	setup_rx();
+	setup_tx();
 	e1000_initialised = 1;
 	log_mac();
-	serial_write("e1000: RX ring armed\n");
+	serial_write("e1000: RX + TX rings armed\n");
 	return 1;
 }
 
@@ -186,6 +216,63 @@ static void setup_rx(void)
 	            E1000_RCTL_EN  | E1000_RCTL_BAM   |
 	            E1000_RCTL_UPE | E1000_RCTL_MPE   |
 	            E1000_RCTL_BSIZE_2048 | E1000_RCTL_SECRC);
+}
+
+/* Set up the TX descriptor ring. Each descriptor permanently points to its
+ * own 2 KiB scratch buffer; send_frame copies the caller's data in. All
+ * descriptors start marked "done" so the first send doesn't spin. */
+static void setup_tx(void)
+{
+	for (int i = 0; i < TX_RING_COUNT; i++) {
+		tx_ring[i].addr   = (unsigned long long)(unsigned int)tx_buffers[i];
+		tx_ring[i].status = E1000_TXD_STAT_DD;
+	}
+	tx_cursor = 0;
+
+	e1000_write(E1000_TDBAL, (unsigned int)tx_ring);
+	e1000_write(E1000_TDBAH, 0);
+	e1000_write(E1000_TDLEN, TX_RING_COUNT * sizeof(struct tx_desc));
+	e1000_write(E1000_TDH,   0);
+	e1000_write(E1000_TDT,   0);
+
+	/* Collision threshold 0x10, collision distance 0x40 -- harmless full-
+	 * duplex defaults inherited from half-duplex Ethernet legacy. */
+	e1000_write(E1000_TCTL,
+	            E1000_TCTL_EN | E1000_TCTL_PSP |
+	            (0x10u << E1000_TCTL_CT_SHIFT) |
+	            (0x40u << E1000_TCTL_COLD_SHIFT));
+
+	/* Inter-packet gap timer: 802.3 spec values for 1 Gbps full-duplex. */
+	e1000_write(E1000_TIPG, 10u | (8u << 10) | (12u << 20));
+}
+
+/* Queues 'len' bytes from 'buf' onto the wire. Blocks (spins) until a TX
+ * descriptor is available, then copies into its scratch buffer and bumps
+ * the chip's tail pointer. Returns 'len' on success, -1 on bad arguments. */
+int e1000_send_frame(const void *buf, unsigned int len)
+{
+	if (!e1000_initialised || !buf || len == 0 || len > TX_BUF_SIZE)
+		return -1;
+
+	struct tx_desc *d = &tx_ring[tx_cursor];
+	while (!(d->status & E1000_TXD_STAT_DD))
+		;                                  /* wait for slot to drain */
+
+	const unsigned char *src = (const unsigned char *)buf;
+	unsigned char       *dst = tx_buffers[tx_cursor];
+	for (unsigned int i = 0; i < len; i++)
+		dst[i] = src[i];
+
+	d->length  = (unsigned short)len;
+	d->cso     = 0;
+	d->cmd     = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
+	d->status  = 0;
+	d->css     = 0;
+	d->special = 0;
+
+	tx_cursor = (tx_cursor + 1) % TX_RING_COUNT;
+	e1000_write(E1000_TDT, tx_cursor);
+	return (int)len;
 }
 
 /* Polls the next RX descriptor for a completed packet. Returns the frame
