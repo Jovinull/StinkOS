@@ -127,11 +127,49 @@ int system(const char *command)
 
 int rename(const char *oldpath, const char *newpath)
 {
-	(void)oldpath;
-	(void)newpath;
-	/* StinkFS has no rename primitive; ported code that hits this path
-	 * (Doom's atomic-save sequence) just falls back to a non-atomic save. */
-	return -1;
+	if (!oldpath || !newpath)
+		return -1;
+
+	/* StinkFS has no native rename primitive, so synthesise it: read the
+	 * old file in full, write it under the new name (truncating any prior
+	 * version), then delete the old name. Not atomic across a crash but
+	 * good enough for Doom's save-to-temp + rename pattern. */
+	int fd = sys_open(oldpath, 0);
+	if (fd < 0)
+		return -1;
+
+	int size = sys_seek(fd, 0, SYS_SEEK_END);
+	if (size < 0) {
+		sys_close(fd);
+		return -1;
+	}
+	sys_seek(fd, 0, SYS_SEEK_SET);
+
+	void *buf = (size > 0) ? malloc((unsigned int)size) : (void *)0;
+	if (size > 0 && !buf) {
+		sys_close(fd);
+		return -1;
+	}
+
+	int got = 0;
+	if (size > 0) {
+		got = sys_read(fd, buf, (unsigned int)size);
+		if (got != size) {
+			free(buf);
+			sys_close(fd);
+			return -1;
+		}
+	}
+	sys_close(fd);
+
+	int rc = sys_fwrite(newpath, buf, (unsigned int)size);
+	if (buf)
+		free(buf);
+	if (rc != 0)
+		return -1;
+
+	sys_fdelete(oldpath);                       /* best-effort: ignore errors */
+	return 0;
 }
 
 /* ASCII case-insensitive comparisons. Doom uses them on lump names and a few
