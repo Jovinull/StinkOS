@@ -115,6 +115,39 @@ static int point_in_box(int x, int y, int bx, int by, int bw, int bh)
 	return x >= bx && x < bx + bw && y >= by && y < by + bh;
 }
 
+/* Case-insensitive compare of two NUL-terminated names. */
+static int ci_eq(const char *a, const char *b)
+{
+	for (;; a++, b++) {
+		char ca = *a, cb = *b;
+		if (ca >= 'a' && ca <= 'z') ca -= 32;
+		if (cb >= 'a' && cb <= 'z') cb -= 32;
+		if (ca != cb) return 0;
+		if (ca == 0)  return 1;
+	}
+}
+
+/* The Doom engine ELFs are always built and stored, but each one opens a
+ * specific IWAD at startup -- without it the app aborts. Map a Doom variant's
+ * ELF name to the WAD it needs, or return 0 for a non-Doom app. */
+static const char *doom_required_wad(const char *elf)
+{
+	if (ci_eq(elf, "DOOM1.ELF"))  return "FREEDOOM1.WAD";
+	if (ci_eq(elf, "DOOM2.ELF"))  return "FREEDOOM2.WAD";
+	if (ci_eq(elf, "FREEDM.ELF")) return "FREEDM.WAD";
+	return 0;
+}
+
+/* True when 'elf' is a Doom variant whose IWAD is absent from StinkFS, so the
+ * menu must mark it unavailable and refuse to launch it. */
+static int app_wad_missing(const char *elf)
+{
+	const char *wad = doom_required_wad(elf);
+	if (!wad) return 0;
+	unsigned int lba, sectors;
+	return fs_file_lba_sectors(wad, &lba, &sectors) != 0;
+}
+
 static void draw(int selected)
 {
 	fb_fill(0x001022);
@@ -124,7 +157,14 @@ static void draw(int selected)
 	for (int i = 0; i < app_count; i++) {
 		char dname[16];
 		display_name(app_names[i], dname);
-		fb_text(140, 120 + i * 20, dname, 0xFFFFFF);
+		int missing = app_wad_missing(app_names[i]);
+		unsigned int col = missing ? 0x707070 : 0xFFFFFF;
+		fb_text(140, 120 + i * 20, dname, col);
+		if (missing) {
+			int dl = 0;
+			while (dname[dl]) dl++;
+			fb_text(140 + dl * 8 + 8, 120 + i * 20, "(no wad)", 0x707070);
+		}
 		if (i == selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
@@ -266,6 +306,12 @@ void menu_exit(void)
 
 static void launch(int index)
 {
+	if (app_wad_missing(app_names[index])) {
+		fb_text(140, 500, "missing WAD - cannot launch this app", 0xFF6060);
+		serial_write("menu: refused launch, WAD missing\n");
+		return;
+	}
+
 	if (ksetjmp(&exit_ctx) != 0)
 		return;                         /* app called SYS_EXIT: back to menu */
 
