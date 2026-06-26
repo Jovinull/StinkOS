@@ -272,3 +272,17 @@ void sys_printf(const char *fmt, ...)
 	va_end(args);
 	sys_log(buf);
 }
+
+/* C-standard printf: same destination as sys_printf (no real stdout fd), but
+ * returns a character count so ported code that checks the return value is
+ * happy. */
+int printf(const char *fmt, ...)
+{
+	char buf[512];
+	va_list args;
+	va_start(args, fmt);
+	int n = vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	sys_log(buf);
+	return n;
+}
