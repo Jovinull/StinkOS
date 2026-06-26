@@ -33,10 +33,4 @@ int net_poll_once(void)
 	return 1;
 }
 
-/* Temporary stub for the upper layer that hasn't landed yet. The real
- * tcp_handle (in tcp.c, future commit) replaces this in the same commit
- * that adds the TCP state machine. */
-void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
-{
-	(void)payload; (void)len; (void)src_ip;
-}
+/* tcp_handle lives in tcp.c now that the state machine has landed. */
