@@ -157,6 +157,8 @@ void pit_init(unsigned int hz)
 
 static volatile unsigned int ticks = 0;        /* PIT ticks since boot */
 
+unsigned int pit_ticks(void) { return ticks; }
+
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
 static int copy_user_name(unsigned int uname, char *kname)
