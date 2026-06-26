@@ -45,11 +45,22 @@
  * can never roll over a 64 KiB boundary mid-transfer: a 16 KiB block aligned
  * to 16 KiB sits at offset 0x0000 / 0x4000 / 0x8000 / 0xC000 within any
  * 64 KiB page, none of which can straddle. Living in kernel BSS keeps it
- * identity-mapped (physical address == virtual). */
+ * identity-mapped (physical address == virtual). The SB16 fires IRQ5 every
+ * AUDIO_HALF_SIZE samples in half-buffer mode, so the mixer refills the
+ * half the chip just finished while the other half is still streaming. At
+ * 22050 Hz mono u8 this cuts the worst-case audible latency from ~744 ms
+ * (full-buffer) to ~372 ms (half-buffer). */
 #define AUDIO_BUFFER_SIZE  16384u
+#define AUDIO_HALF_SIZE    (AUDIO_BUFFER_SIZE / 2u)
 
 static volatile unsigned char audio_buffer[AUDIO_BUFFER_SIZE]
 	__attribute__((aligned(AUDIO_BUFFER_SIZE)));
+
+/* Which half to refill on the next IRQ. The DMA chip plays half 0 first,
+ * then half 1, then half 0 again, etc. When the chip finishes half N, it
+ * raises IRQ5 and is now playing half (1-N) -- so the safe refill target
+ * is half N. */
+static volatile int next_fill_half;
 
 /* Set by audio_start_output once the DSP is actually clocking samples. */
 static int output_running;
@@ -172,15 +183,14 @@ unsigned int audio_dsp_version(void)
 	return ((unsigned int)dsp_major << 8) | dsp_minor;
 }
 
-/* Refills audio_buffer with mixed samples from every active mix channel.
- * Walks the buffer linearly; for each output sample, sums each channel's
- * source byte (recentred to signed -128..127, scaled by volume/256) and
- * saturates back to unsigned 8-bit. Channels that hit the end of their
+/* Fills [offset, offset+n) of audio_buffer with mixed samples from every
+ * active mix channel. Walks linearly; for each output sample, sums each
+ * channel's source byte (recentred to signed -128..127, scaled by volume/256)
+ * and saturates back to unsigned 8-bit. Channels that hit the end of their
  * source deactivate themselves -- no resource leaks. */
-static void mixer_fill(void)
+static void mixer_fill_window(unsigned int offset, unsigned int n)
 {
-	unsigned char *out = (unsigned char *)audio_buffer;
-	unsigned int   n   = AUDIO_BUFFER_SIZE;
+	unsigned char *out = (unsigned char *)audio_buffer + offset;
 
 	for (unsigned int i = 0; i < n; i++) {
 		int sum = 0;
@@ -251,14 +261,15 @@ void audio_mix_silence_all(void)
 		channels[i].active = 0;
 }
 
-/* IRQ5 dispatcher: the SB16 raises this when a DMA half-buffer or full-
- * buffer completion is reached. We refill the buffer with whatever the
- * mixer says, then acknowledge both 8-bit and 16-bit on every fire (two
- * cheap port reads, and we don't yet care which side triggered). */
+/* IRQ5 dispatcher: the SB16 raises this every half-buffer in auto-init mode,
+ * so we refill the half that just finished playing (next_fill_half) while
+ * the chip streams the other half. Toggling the flag keeps the two halves
+ * ping-ponging without us having to read DMA progress registers. */
 void audio_handle_irq(void)
 {
 	irq_count++;
-	mixer_fill();
+	mixer_fill_window(next_fill_half * AUDIO_HALF_SIZE, AUDIO_HALF_SIZE);
+	next_fill_half ^= 1;
 	(void)inb(SB_BASE + 0xE);              /* 8-bit DMA ack */
 	(void)inb(SB_BASE + 0xF);              /* 16-bit DMA ack */
 }
@@ -291,14 +302,19 @@ int audio_start_output(void)
 	dsp_write(DSP_SPEAKER_ON);
 	dsp_set_output_rate(AUDIO_RATE_HZ);
 
-	unsigned int count = AUDIO_BUFFER_SIZE - 1;
+	/* Program the BLOCK size, not the buffer size: when the chip plays
+	 * `block` samples in auto-init it fires IRQ5 and rewinds inside the
+	 * DMA ring. Setting block = half-buffer gives twice-per-cycle IRQs,
+	 * halving worst-case mixer latency. */
+	unsigned int count = AUDIO_HALF_SIZE - 1;
 	dsp_write(DSP_OUTPUT_8BIT_AI);
 	dsp_write(DSP_MODE_MONO_U8);
 	dsp_write((unsigned char)(count & 0xFF));
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
+	next_fill_half = 0;
 	output_running = 1;
-	serial_write("audio: SB16 output started, 22050 Hz mono u8\n");
+	serial_write("audio: SB16 output started, 22050 Hz mono u8, half-buffer IRQs\n");
 	return 0;
 }
 
