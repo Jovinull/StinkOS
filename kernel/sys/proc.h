@@ -70,4 +70,11 @@ void           context_switch(unsigned int *old_esp_ptr, unsigned int new_esp);
  * (5 callee-saved-reg slots + return address + small alignment slack). */
 unsigned int   context_init(unsigned int kstack_top, void (*entry)(void));
 
+/* Spawn a kernel thread: allocate a PCB slot + a 4 KiB kernel stack, pre-build
+ * the stack via context_init() so the first switch jumps into `entry`, and
+ * leave the new proc in PROC_READY. Returns the new PCB or NULL if the table
+ * is full or out of memory. The scheduler (added in a follow-up commit) is
+ * what eventually picks it up; until then the thread just sits READY. */
+struct proc   *proc_kthread_create(const char *name, void (*entry)(void));
+
 #endif

@@ -122,3 +122,29 @@ unsigned int context_init(unsigned int kstack_top, void (*entry)(void))
 
 	return (unsigned int)sp;
 }
+
+struct proc *proc_kthread_create(const char *name, void (*entry)(void))
+{
+	if (!entry)
+		return 0;
+
+	struct proc *p = proc_alloc(name);
+	if (!p)
+		return 0;
+
+	/* A single 4 KiB physical frame is enough for early kernel threads -- they
+	 * never recurse deeply and own no large locals. If the table runs out of
+	 * memory, fail closed and release the PCB slot so the caller can retry. */
+	unsigned int frame = pmm_alloc();
+	if (!frame) {
+		proc_free(p);
+		return 0;
+	}
+
+	p->kstack_top = frame + 4096;              /* stack grows down from the top */
+	p->esp        = context_init(p->kstack_top, entry);
+	p->cr3        = 0;                          /* share the kernel page dir */
+	p->state      = PROC_READY;
+
+	return p;
+}
