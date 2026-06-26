@@ -182,6 +182,21 @@ static inline int sys_dns_poll(unsigned int *out_ip)
  * call this in their main loop. */
 static inline int sys_net_poll(void)             { return __syscall(38, 0, 0, 0); }
 
+/* Multi-drive disk access. Drive 0/1/2/3 = primary master / primary slave /
+ * secondary master / secondary slave. Used by the installer to clone the
+ * boot media onto a fresh target disk. */
+static inline int sys_disk_info(int drive, char *model41, unsigned int *sectors)
+                                                 { return __syscall(39, drive, (int)model41, (int)sectors); }
+
+/* Copy 'count' contiguous sectors from src_drive[src_lba..) to
+ * dst_drive[src_lba..). Returns the number of sectors actually copied (so
+ * caller can spot errors mid-way and resume). The source and destination
+ * LBA are the same -- the installer pattern is "clone disk to disk" not
+ * relocate. */
+static inline int sys_disk_copy(int src_drive, int dst_drive,
+                                unsigned int src_lba, unsigned int count)
+                                                 { return __syscall4(40, src_drive, dst_drive, (int)count, (int)src_lba); }
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is
