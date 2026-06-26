@@ -3,7 +3,7 @@
 #ifndef FS_H
 #define FS_H
 
-void fs_init(void);   /* load the directory from disk */
+int fs_init(void);    /* load the directory from disk; 0 ok, -1 on disk error */
 
 /* Named-file operations. 'name' is a NUL-padded 16-byte canonical name. */
 int fs_file_write(const char *name, const void *buf, unsigned int size);
