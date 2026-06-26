@@ -9,12 +9,15 @@
 .equ LOAD_ADDR, 0x7E00     # where the kernel area is loaded (right after boot)
 # A single INT 13h read to 0x0000:LOAD_ADDR would wrap at the 64 KiB segment
 # boundary (0xFFFF) once the kernel exceeds ~33 KiB, scribbling over low RAM.
-# Split the load at 0x10000: stage 1 fills LOAD_ADDR..0x10000 in segment 0,
-# stage 2 loads the remainder into segment 0x1000 (linear 0x10000+). The image
-# stays contiguous in linear memory, so the kernel's link address is unchanged.
+# So load in chunks that never cross a segment: the first fills LOAD_ADDR..0x10000
+# in segment 0, then each following chunk loads 64 KiB into the next segment
+# (0x1000, 0x2000, ...). The image stays contiguous in linear memory, so the
+# kernel's link address is unchanged and the kernel may grow past 64 KiB, up to
+# the low-memory stack. Loop state lives in memory because INT 13h is not
+# guaranteed to preserve registers across the call.
 # NB: '/' is a line-comment char in this assembler, so divide by 512 with '>>9'.
 .equ STAGE1, (0x10000 - LOAD_ADDR) >> 9    # 65 sectors: exactly fills up to 0x10000
-.equ STAGE2, KSECTORS - STAGE1             # remainder (KSECTORS must exceed STAGE1)
+.equ CHUNK,  128                           # 64 KiB chunks after the first (seg += 0x1000)
 .equ STACK_TOP, 0x90000    # protected-mode stack (below 640 KiB)
 .equ VBE_INFO, 0x0500      # scratch VbeInfoBlock (real-mode, free low RAM)
 .equ MODE_INFO, 0x0700     # VBE ModeInfoBlock, read by the kernel after PM
@@ -60,12 +63,41 @@ _start:
 vbe_done:
 	# boot_drive was saved before VBE; the disk read reloads DL from it
 
-	# --- load the kernel in two INT 13h stages (see STAGE1/STAGE2) ---
-	mov $dap1, %si
+	# --- load the kernel: first chunk to LOAD_ADDR, then 64 KiB chunks ---
+	movw $STAGE1, dap_count
+	movw $LOAD_ADDR, dap_off
+	movw $0x0000, dap_seg
+	movl $1, dap_lba
+	mov $dap, %si
 	call read_dap
-	mov $dap2, %si
+	movw $(KSECTORS - STAGE1), remaining
+	movw $0x1000, cur_seg
+	movl $(1 + STAGE1), cur_lba
+load_loop:
+	movw remaining, %ax
+	test %ax, %ax
+	jz load_ok
+	cmp $CHUNK, %ax
+	jbe 1f
+	mov $CHUNK, %ax
+1:
+	movw %ax, chunk_n
+	movw %ax, dap_count
+	movw $0x0000, dap_off
+	movw cur_seg, %bx
+	movw %bx, dap_seg
+	movl cur_lba, %ebx
+	movl %ebx, dap_lba
+	mov $dap, %si
 	call read_dap
-	jmp load_ok
+	movw chunk_n, %ax
+	movw remaining, %bx
+	sub %ax, %bx
+	movw %bx, remaining
+	movzwl %ax, %eax
+	addl %eax, cur_lba
+	addw $0x1000, cur_seg
+	jmp load_loop
 
 # Read the extended-read DAP at %si, retrying with a controller reset up to 3x.
 read_dap:
@@ -112,20 +144,21 @@ boot_drive: .byte 0
 retries:    .byte 0
 
 .align 4
-dap1:                          # stage 1: STAGE1 sectors -> 0x0000:LOAD_ADDR
-	.byte 0x10             # packet size
-	.byte 0x00             # reserved
-	.word STAGE1           # sectors to read
-	.word LOAD_ADDR        # dest offset
-	.word 0x0000           # dest segment -> linear LOAD_ADDR
-	.quad 1                # starting LBA (LBA 1 = 2nd sector)
-dap2:                          # stage 2: STAGE2 sectors -> 0x1000:0x0000 (linear 0x10000)
-	.byte 0x10             # packet size
-	.byte 0x00             # reserved
-	.word STAGE2           # sectors to read
-	.word 0x0000           # dest offset
-	.word 0x1000           # dest segment -> linear 0x10000
-	.quad 1 + STAGE1       # starting LBA, just after stage 1
+# Disk Address Packet, rewritten in place for each chunk by the load loop.
+dap:
+dap_size:   .byte 0x10         # packet size
+            .byte 0x00         # reserved
+dap_count:  .word 0            # sectors to read this chunk
+dap_off:    .word 0            # destination offset
+dap_seg:    .word 0            # destination segment
+dap_lba:    .long 0            # starting LBA, low 32 bits
+dap_lba_hi: .long 0            # starting LBA, high 32 bits (kernel is low, =0)
+
+# Load-loop state (kept in memory; INT 13h may clobber registers).
+remaining:  .word 0            # sectors still to load after the first chunk
+cur_seg:    .word 0            # destination segment for the next chunk
+cur_lba:    .long 0            # starting LBA for the next chunk
+chunk_n:    .word 0            # sectors in the current chunk
 
 # ---- GDT: flat 32-bit model ----
 .align 8
