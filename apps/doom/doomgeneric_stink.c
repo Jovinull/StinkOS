@@ -167,7 +167,7 @@ void DG_DrawFrame(void)
 	poll_mouse_events();
 	sys_blit(DOOM_X_OFFSET, DOOM_Y_OFFSET,
 	         DOOMGENERIC_RESX, DOOMGENERIC_RESY,
-	         DG_ScreenBuffer);
+	         (const unsigned int *)DG_ScreenBuffer);
 }
 
 void DG_SleepMs(uint32_t ms)
