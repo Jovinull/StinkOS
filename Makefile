@@ -15,9 +15,12 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
 APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
 
 # Userland support library objects: malloc/free allocator, snprintf family,
-# and the FILE*-based stdio layer. Linked into every C app; --gc-sections at
-# link time drops any unreferenced helpers so unused pieces cost nothing.
-LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o $(BUILD)/libstink_stdio.o
+# FILE*-based stdio, POSIX glue (errno, gettimeofday, open/stat...) and the
+# setjmp/longjmp asm. Linked into every C app; --gc-sections at link time
+# drops any unreferenced helpers so unused pieces cost nothing.
+LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
+                $(BUILD)/libstink_stdio.o $(BUILD)/libstink_posix.o \
+                $(BUILD)/libstink_setjmp.o
 
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
@@ -76,6 +79,14 @@ $(BUILD)/libstink_printf.o: apps/libstink_printf.c apps/libstink.h | $(BUILD)
 
 $(BUILD)/libstink_stdio.o: apps/libstink_stdio.c apps/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c apps/libstink_stdio.c -o $(BUILD)/libstink_stdio.o
+
+# POSIX glue needs the doom-shims headers on its include path so its <time.h>
+# and <sys/stat.h> includes find the layout it implements against.
+$(BUILD)/libstink_posix.o: apps/libstink_posix.c apps/libstink.h apps/doom-shims/time.h apps/doom-shims/sys/stat.h | $(BUILD)
+	$(CC) $(CFLAGS) -I apps/doom-shims -c apps/libstink_posix.c -o $(BUILD)/libstink_posix.o
+
+$(BUILD)/libstink_setjmp.o: apps/libstink_setjmp.s | $(BUILD)
+	$(AS) -O0 apps/libstink_setjmp.s -o $(BUILD)/libstink_setjmp.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
