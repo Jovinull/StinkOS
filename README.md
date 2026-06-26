@@ -189,16 +189,20 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 - [x] Paging + physical frame allocator
 - [x] Userland (Ring 3), isolated address space, fault isolation
 - [x] ELF program loader
-- [x] StinkFS (flat named files, persisted to disk)
-- [x] Sound (PC speaker)
-- [x] Start menu
+- [x] StinkFS (flat named files, persisted to disk; apps load from here)
+- [x] Sound — PC speaker + Sound Blaster 16 (DMA-driven output)
+- [x] Start menu, graphical shell, full-screen text editor
+- [x] PS/2 mouse driver + cursor, exposed to apps via syscall
+- [x] Networking — e1000 NIC, ARP/IP/ICMP/UDP/TCP, DHCP/DNS, `netinfo`/`ping`
+- [x] `sys_map_fb` — apps blit by writing the framebuffer directly
+- [x] Package manager (`stink-pkg`) with SHA-256 integrity verification
+- [x] Boot-time POST diagnostic with per-subsystem status
 
 **Up next** (in no particular order):
 
-- [ ] Mouse aim wired through to apps (driver exists; needs a syscall + Doom glue)
-- [ ] Audio mixer (PC speaker only today — no Doom music/SFX)
-- [ ] Networking stack (multiplayer Doom needs sockets)
-- [ ] Real `sys_map_fb` so apps blit by writing the framebuffer directly
+- [ ] Preemptive multitasking — multiple concurrent Ring 3 processes
+- [ ] Doom audio glue (SB16 driver exists; needs wiring to the sound engine)
+- [ ] Doom mouse-aim glue (`sys_getmouse` exists; needs engine integration)
 
 ## Doom
 
