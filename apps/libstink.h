@@ -118,6 +118,27 @@ static inline int sys_get_mouse(int *dx, int *dy, int *buttons)
 #define MOUSE_RIGHT_BTN  0x02
 #define MOUSE_MIDDLE_BTN 0x04
 
+/* Audio output. Samples are mono unsigned 8-bit at the rate the kernel mixer
+ * uses internally (22050 Hz today; check via the future sys_audio_rate if it
+ * ever varies). Volume is 0..256 (256 = unity gain).
+ *
+ * sys_audio_play returns a channel handle (0..7) the caller can later pass to
+ * sys_audio_stop / sys_audio_set_volume, or -1 if every channel is busy or
+ * the sample pointer is bad. The kernel does NOT copy 'samples' -- the caller
+ * must keep the buffer alive until the sound finishes (or until exit). */
+#define AUDIO_VOL_FULL  256
+#define AUDIO_VOL_HALF  128
+#define AUDIO_VOL_MUTE  0
+
+static inline int sys_audio_play(const unsigned char *samples,
+                                 unsigned int length, int volume)
+                                                 { return __syscall(28, (int)samples, (int)length, volume); }
+
+static inline void sys_audio_stop(int handle)    { __syscall(29, handle, 0, 0); }
+
+static inline void sys_audio_set_volume(int handle, int volume)
+                                                 { __syscall(30, handle, volume, 0); }
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is

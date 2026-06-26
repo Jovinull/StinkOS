@@ -420,6 +420,24 @@ static void syscall_dispatch(struct regs *r)
 	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
 		r->eax = keyboard_get_event();
 		break;
+	case 28: {                                 /* SYS_AUDIO_PLAY: ebx=samples ecx=length edx=volume -> handle or -1 */
+		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)audio_mix_play((const unsigned char *)r->ebx,
+		                                      r->ecx,
+		                                      (int)r->edx);
+		break;
+	}
+	case 29:                                   /* SYS_AUDIO_STOP: ebx=handle */
+		audio_mix_stop((int)r->ebx);
+		r->eax = 0;
+		break;
+	case 30:                                   /* SYS_AUDIO_SET_VOLUME: ebx=handle ecx=volume */
+		audio_mix_set_volume((int)r->ebx, (int)r->ecx);
+		r->eax = 0;
+		break;
 	case 27: {                                 /* SYS_GETMOUSE: ebx=*dx ecx=*dy edx=*buttons */
 		if (!paging_user_range_ok(r->ebx, sizeof(int)) ||
 		    !paging_user_range_ok(r->ecx, sizeof(int)) ||
