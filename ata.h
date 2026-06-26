@@ -1,10 +1,18 @@
-/* ATA PIO disk driver (LBA28, polling). Supports the four standard ISA IDE
+/* ATA PIO + Bus Master DMA driver (LBA28). Supports the four standard ISA IDE
  * slots: primary master/slave + secondary master/slave. The plain ata_*
  * functions still address drive 0 (primary master) for compatibility with
- * the existing kernel + apps; new code (the installer in particular) goes
- * through ata_drive_* to pick a specific drive. */
+ * the existing kernel + apps; new code goes through ata_drive_* to pick a
+ * specific drive.
+ *
+ * Call ata_dma_init() once after pci_scan() to probe for a PIIX IDE controller
+ * and enable Bus Master DMA. If the probe fails the driver silently falls back
+ * to PIO for all subsequent transfers. */
 #ifndef ATA_H
 #define ATA_H
+
+/* Probe for a PIIX3/PIIX4 IDE controller and enable Bus Master DMA.
+ * Safe to call even when no PIIX device is present; falls back to PIO. */
+void ata_dma_init(void);
 
 /* Drive index: 0..3 maps to (primary|secondary) x (master|slave). */
 int ata_drive_read    (int drive, unsigned int lba, unsigned int count, void *buffer);

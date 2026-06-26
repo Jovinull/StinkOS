@@ -13,6 +13,7 @@
 #include "mouse.h"
 #include "audio.h"
 #include "pci.h"
+#include "ata.h"
 #include "e1000.h"
 #include "net.h"
 #include "dhcp.h"
@@ -62,6 +63,7 @@ void kernel_main(void)
 	audio_init();                              /* probes SB16; no-op if -device sb16 absent */
 	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
 	pci_scan();                                /* log every PCI device for visibility */
+	ata_dma_init();                            /* enable PIIX Bus Master DMA if present */
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
 	net_init();                                /* caches local MAC for L2 emit */
 	dhcp_start();                              /* DISCOVER goes out; reply lands via UDP cb */
