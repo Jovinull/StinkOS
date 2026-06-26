@@ -9,15 +9,20 @@ static unsigned int pitch;
 static unsigned int width;
 static unsigned int height;
 static unsigned int bytes_pp;
+static unsigned int fb_phys;      /* raw physical address of the LFB */
 
 void fb_init(const struct vbe_mode *m)
 {
-	fb = (volatile unsigned char *)m->framebuffer;
-	pitch = m->pitch;
-	width = m->width;
-	height = m->height;
+	fb       = (volatile unsigned char *)m->framebuffer;
+	fb_phys  = m->framebuffer;
+	pitch    = m->pitch;
+	width    = m->width;
+	height   = m->height;
 	bytes_pp = m->bpp / 8;
 }
+
+unsigned int fb_phys_base(void) { return fb_phys; }
+unsigned int fb_stride_px(void) { return width; }   /* pixels per row (== pitch/bytes_pp) */
 
 void fb_putpixel(unsigned int x, unsigned int y, unsigned int rgb)
 {

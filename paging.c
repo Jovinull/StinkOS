@@ -40,9 +40,17 @@
 #define USER_HEAP_LO     USER_STACK_TOP
 #define USER_HEAP_HI     USER_END
 
+/* Userland framebuffer window: the physical LFB is mapped read/write into this
+ * high, kernel-unused virtual range so a ring-3 app can blit straight to video
+ * memory (double-buffering, no syscall per rectangle). Spans up to
+ * USER_FB_PDES * 4 MiB of LFB, well clear of the pmm-managed RAM (1..32 MiB). */
+#define USER_FB_BASE     0x10000000u
+#define USER_FB_PDES     4u
+
 static unsigned int *page_dir;
 static unsigned int *user_pts[USER_PDES];        /* one 4 KiB PT per user PDE */
 static unsigned int  user_heap_next;             /* next unmapped heap address */
+static int           fb_pde_mapped;              /* 1 while the user FB PDE is live */
 
 static void load_cr3(void)
 {
@@ -126,13 +134,38 @@ unsigned int paging_user_code_end(void)   { return USER_CODE_END; }
 unsigned int paging_user_stack_top(void)  { return USER_STACK_TOP; }
 
 /* Release every heap page the previous app mapped, then rewind the bump
- * pointer. The next app sees a fresh, empty heap. */
+ * pointer. Also restores the FB PDE to a kernel-only identity mapping so the
+ * next app cannot access the LFB until it explicitly calls SYS_MAP_FB. */
 void paging_reset_user_heap(void)
 {
 	for (unsigned int v = USER_HEAP_LO; v < user_heap_next; v += PAGE_4KB)
 		unmap_user_page(v);
 	user_heap_next = USER_HEAP_LO;
+
+	if (fb_pde_mapped) {
+		unsigned int idx = USER_FB_BASE / PAGE_4MB;
+		page_dir[idx] = (idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+		fb_pde_mapped = 0;
+		load_cr3();
+	}
 }
+
+/* Map the physical LFB at USER_FB_BASE using a single 4 MiB PSE page so
+ * ring-3 apps can write directly to VRAM (zero syscalls per pixel). The
+ * physical address must be 4 MiB-aligned; VBE guarantees this in practice.
+ * Calling this again overwrites any prior mapping (safe for one LFB). */
+void paging_map_fb(unsigned int phys_base)
+{
+	if (phys_base == 0)
+		return;
+	unsigned int idx  = USER_FB_BASE / PAGE_4MB;
+	unsigned int aligned = phys_base & ~(PAGE_4MB - 1u);
+	page_dir[idx] = aligned | PG_PRESENT | PG_RW | PG_USER | PG_PS;
+	fb_pde_mapped = 1;
+	load_cr3();
+}
+
+unsigned int paging_user_fb_base(void) { return USER_FB_BASE; }
 
 /* Lazily map and return the next 4 KiB heap page (a virtual address), or 0 if
  * the heap is full or physical memory is exhausted. */
