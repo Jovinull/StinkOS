@@ -49,10 +49,14 @@ APP16_LBA = 192           # ARROWS — 8-sector slot  (192..199)
 APP17_LBA = 200           # SNAKE  — 8-sector slot  (200..207)
 APP18_LBA = 208           # PONG   — 8-sector slot  (208..215)
 
-# The app region spans LBA 64..223. Metadata lives above it: the app TOC at
-# LBA 224, then StinkFS (directory at 225, 32-sector data region at 226..257).
-TOC_LBA  = 224
-DISK_END = 132096         # 258 * 512: keep TOC and StinkFS present
+# The small-app region spans LBA 64..223. Metadata: the app TOC at LBA 224,
+# the StinkFS directory at 225, and a ~32 MiB StinkFS data region at 226..65225
+# (big enough for a Doom WAD plus save games). The Doom slot lives just past
+# that data region.
+TOC_LBA   = 224
+DOOM_LBA  = 65226          # first sector after the StinkFS data region
+DOOM_SECTORS = 2048        # 1 MiB max app image -- plenty for the Doom binary
+DISK_END  = 34444288       # (DOOM_LBA + DOOM_SECTORS) * 512 = 67274 * 512
 
 C_SRCS  = kernel.c serial.c interrupts.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
