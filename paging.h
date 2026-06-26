@@ -16,4 +16,11 @@ void paging_reset_user_heap(void);         /* reset the heap for a new app */
 /* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
 int paging_user_range_ok(unsigned int addr, unsigned int len);
 
+/* Map the physical LFB at the fixed user virtual address USER_FB_BASE using a
+ * 4 MiB PSE PDE with PG_USER. Returns the virtual address the app should use.
+ * The mapping is torn down in paging_reset_user_heap so each new app must call
+ * SYS_MAP_FB explicitly. */
+void         paging_map_fb(unsigned int phys_base);
+unsigned int paging_user_fb_base(void);
+
 #endif

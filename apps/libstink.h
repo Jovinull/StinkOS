@@ -83,6 +83,21 @@ static inline void *sys_sbrk(int delta)
  * no matching app is found in the disk TOC. */
 static inline int sys_exec(const char *name) { return __syscall(41, (int)name, 0, 0); }
 
+/* Map the VBE linear framebuffer directly into userland (no kernel call per
+ * pixel). Returns the virtual address of the framebuffer base or 0 on error.
+ * The mapping is 4 MiB wide (PSE page, PG_USER) at a fixed high virtual
+ * address. Call once per process; the kernel tears it down on app switch. */
+static inline volatile unsigned int *sys_map_fb(void)
+{
+    unsigned int base = (unsigned int)__syscall(42, 0, 0, 0);
+    return base ? (volatile unsigned int *)base : (volatile unsigned int *)0;
+}
+
+/* Screen geometry guaranteed by the boot-time VBE mode (1024x768 32bpp). */
+#define SYS_FB_W      1024u
+#define SYS_FB_H       768u
+#define SYS_FB_STRIDE 1024u   /* pixels per row (pitch / 4 bytes) */
+
 /* Returns the next raw PS/2 key event, or 0 if the queue is empty. The result
  * has bit 31 set (so non-zero unambiguously means "got an event"), with:
  *   bit 15    : pressed (1) / released (0)          -- KEY_EV_PRESSED below

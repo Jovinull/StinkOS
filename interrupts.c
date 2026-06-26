@@ -404,6 +404,10 @@ static void syscall_dispatch(struct regs *r)
 		menu_exit();                       /* bail to the menu; does not return */
 		break;
 	}
+	case 42:                                   /* SYS_MAP_FB: -> userland FB base addr */
+		paging_map_fb(fb_phys_base());
+		r->eax = paging_user_fb_base();
+		break;
 	case 6:                                    /* SYS_TICKS: -> PIT ticks */
 		r->eax = ticks;
 		break;
