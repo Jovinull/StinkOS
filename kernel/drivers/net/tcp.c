@@ -157,10 +157,13 @@ static void tcp_retransmit(struct tcb *t)
 }
 
 /* Find the TCB matching the segment's (remote_ip, remote_port, local_port).
- * Returns -1 if no connection matches (caller will RST). */
+ * An exact 5-tuple match wins; failing that, fall through to a LISTEN socket
+ * on the same local_port (its remote fields are zeroed until it accepts a
+ * SYN). Returns -1 if nothing matches (caller will RST). */
 static int tcb_find(ipv4_t remote_ip, unsigned short remote_port,
                     unsigned short local_port)
 {
+	int listen_idx = -1;
 	for (int i = 0; i < TCP_MAX_CONNS; i++) {
 		struct tcb *t = &conns[i];
 		if (!t->in_use)
@@ -169,8 +172,10 @@ static int tcb_find(ipv4_t remote_ip, unsigned short remote_port,
 		    t->remote_port == remote_port &&
 		    t->local_port  == local_port)
 			return i;
+		if (t->state == TCP_LISTEN && t->local_port == local_port)
+			listen_idx = i;
 	}
-	return -1;
+	return listen_idx;
 }
 
 /* Compute the TCP checksum (one's-complement over pseudo-header + segment).
@@ -416,6 +421,39 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	}
 
 	switch (t->state) {
+	case TCP_LISTEN:
+		/* Only a bare SYN advances a LISTEN socket; everything else gets
+		 * a RST so the peer learns the port is closed for non-handshake
+		 * traffic. Single-connection model -- the LISTEN slot mutates
+		 * into the accepted connection; a follow-up commit could maintain
+		 * a backlog of pending SYNs instead. */
+		if ((h->flags & TCP_SYN) && !(h->flags & TCP_ACK)) {
+			t->remote_ip   = src_ip;
+			t->remote_port = src_port;
+			t->snd_una     = initial_seq;
+			t->snd_nxt     = initial_seq;
+			t->rcv_nxt     = seg_seq + 1;
+			t->snd_wnd     = ntohs(h->window);
+			initial_seq   += 64000u;
+			t->state       = TCP_SYN_RECEIVED;
+			tcp_emit(t, TCP_SYN | TCP_ACK, (void *)0, 0);
+			t->snd_nxt += 1;            /* our SYN consumes one slot */
+			tcp_arm_rto(t);
+		} else if (!(h->flags & TCP_RST)) {
+			tcp_emit_rst(src_ip, h);
+		}
+		break;
+
+	case TCP_SYN_RECEIVED:
+		if ((h->flags & TCP_ACK) && seg_ack == t->snd_nxt) {
+			t->snd_una        = seg_ack;
+			t->snd_wnd        = ntohs(h->window);
+			t->state          = TCP_ESTABLISHED;
+			t->last_seg_ticks = 0;      /* our SYN-ACK has been acked */
+			t->retries        = 0;
+		}
+		break;
+
 	case TCP_SYN_SENT:
 		if ((h->flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK) &&
 		    seg_ack == t->snd_nxt) {
@@ -423,6 +461,8 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			t->snd_una = seg_ack;
 			t->snd_wnd = ntohs(h->window);
 			t->state   = TCP_ESTABLISHED;
+			t->last_seg_ticks = 0;      /* our SYN has been acked */
+			t->retries        = 0;
 			tcp_emit(t, TCP_ACK, (void *)0, 0);
 		}
 		break;
