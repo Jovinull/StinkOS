@@ -194,3 +194,29 @@ music_module_t DG_music_module = {
 	Stink_MusicIsPlaying,
 	Stink_MusicPoll,
 };
+
+/* ---- legacy music interface stubs (called by s_sound.c directly) ---- */
+int snd_musicdevice = 0;
+
+void    I_InitMusic(void)              { }
+void    I_ShutdownMusic(void)          { }
+void    I_SetMusicVolume(int v)        { (void)v; }
+void    I_PauseSong(void)              { }
+void    I_ResumeSong(void)             { }
+void   *I_RegisterSong(void *d, int l) { (void)d; (void)l; return (void *)0; }
+void    I_UnRegisterSong(void *h)      { (void)h; }
+void    I_PlaySong(void *h, boolean lp){ (void)h; (void)lp; }
+void    I_StopSong(void)               { }
+boolean I_MusicIsPlaying(void)         { return false; }
+
+/* ---- legacy sfx interface stubs (called by s_sound.c / d_main.c) ---- */
+void I_InitSound(boolean use_sfx_prefix)  { (void)use_sfx_prefix; }
+void I_ShutdownSound(void)                { }
+int  I_GetSfxLumpNum(sfxinfo_t *sfx)     { (void)sfx; return -1; }
+void I_UpdateSound(void)                  { }
+void I_UpdateSoundParams(int ch, int v, int sep) { (void)ch; (void)v; (void)sep; }
+int  I_StartSound(sfxinfo_t *sfx, int ch, int vol, int sep) { (void)sfx; (void)ch; (void)vol; (void)sep; return -1; }
+void I_StopSound(int channel)             { (void)channel; }
+boolean I_SoundIsPlaying(int channel)     { (void)channel; return false; }
+void I_PrecacheSounds(sfxinfo_t *s, int n){ (void)s; (void)n; }
+void I_BindSoundVariables(void)           { }
