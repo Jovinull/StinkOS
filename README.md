@@ -178,12 +178,57 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 
 **Up next** (in no particular order):
 
-- [ ] Userland heap (`sys_brk` / a real allocator)
-- [ ] Arrow keys in the PS/2 driver
-- [ ] Larger app slots (or a proper on-disk app layout)
-- [ ] Framebuffer-mapping syscall so apps can blit faster than per-pixel
-- [ ] `printf` and string primitives in `libstink.h`
-- [ ] More games. Maybe a shell. Maybe a port of something old.
+- [ ] Mouse aim wired through to apps (driver exists; needs a syscall + Doom glue)
+- [ ] Audio mixer (PC speaker only today — no Doom music/SFX)
+- [ ] Networking stack (multiplayer Doom needs sockets)
+- [ ] Real `sys_map_fb` so apps blit by writing the framebuffer directly
+
+## Doom
+
+Yeah, Doom. Phase 1, Phase 2 and FreeDM all run.
+
+**One-time setup — get the WADs:**
+
+```bash
+bash tools/fetch-wads.sh        # downloads freedoom-0.13.0 + freedm into wads/
+```
+
+That pulls ~33 MB from the official [Freedoom GitHub release](https://github.com/freedoom/freedoom/releases). The `wads/` directory is gitignored — those binaries aren't part of the source.
+
+If you have a commercial `doom.wad` or `doom2.wad` you'd rather use, drop it under `wads/` and the build will pick it up by overriding the file path:
+
+```bash
+make FREEDOOM1_WAD=path/to/doom.wad
+```
+
+**Build and run:**
+
+```bash
+make run
+```
+
+The boot menu picks up three new entries — `DOOM1`, `DOOM2`, `FREEDM`. Pick one with arrows, Enter, and the engine fires up against the matching IWAD. The disk image grows to ~100 MiB because the WADs live in StinkFS alongside the kernel.
+
+**Controls (vanilla Doom set):**
+
+| Key | Action |
+|---|---|
+| `W` / arrows up | walk forward |
+| `S` / arrows down | walk back |
+| `A` / `D` | strafe |
+| ← / → | turn |
+| Left Ctrl | fire |
+| Space | open door / use |
+| Shift | run |
+| `1`–`9` | select weapon |
+| Tab | automap |
+| Esc | menu |
+
+**What works:** all 36 Doom 1 maps, all 32 Doom 2 maps, all monsters, weapons, power-ups, save/load (via StinkFS), automap, intermissions, cheats (`IDDQD`, `IDKFA`, etc.).
+
+**What doesn't (yet):** music and sound effects (no audio driver), mouse aim (driver exists but isn't wired to the input event queue), networking (no stack).
+
+**How the port works under the hood:** vendored doomgeneric (Chocolate Doom derivative) lives in `apps/doom/`; `apps/doom-shims/` provides the POSIX headers Doom expects, and `apps/libstink_{alloc,stdio,printf,posix,setjmp}` are the corresponding runtime backends. The platform layer is `apps/doom/doomgeneric_stink.c` (~200 lines). One source tree, three ELFs — each compiled with a different `-DSTINKDOOM_IWAD` so the `DOOM1` / `DOOM2` / `FREEDM` menu entries auto-load the right WAD.
 
 ## Contributing
 
