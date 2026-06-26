@@ -7,6 +7,14 @@
                            # must exceed the linked kernel image (boot+code+data,
                            # up to __bss_start) and stay below APP1_LBA (128).
 .equ LOAD_ADDR, 0x7E00     # where the kernel area is loaded (right after boot)
+# A single INT 13h read to 0x0000:LOAD_ADDR would wrap at the 64 KiB segment
+# boundary (0xFFFF) once the kernel exceeds ~33 KiB, scribbling over low RAM.
+# Split the load at 0x10000: stage 1 fills LOAD_ADDR..0x10000 in segment 0,
+# stage 2 loads the remainder into segment 0x1000 (linear 0x10000+). The image
+# stays contiguous in linear memory, so the kernel's link address is unchanged.
+# NB: '/' is a line-comment char in this assembler, so divide by 512 with '>>9'.
+.equ STAGE1, (0x10000 - LOAD_ADDR) >> 9    # 65 sectors: exactly fills up to 0x10000
+.equ STAGE2, KSECTORS - STAGE1             # remainder (KSECTORS must exceed STAGE1)
 .equ STACK_TOP, 0x90000    # protected-mode stack (below 640 KiB)
 .equ VBE_INFO, 0x0500      # scratch VbeInfoBlock (real-mode, free low RAM)
 .equ MODE_INFO, 0x0700     # VBE ModeInfoBlock, read by the kernel after PM
@@ -52,20 +60,29 @@ _start:
 vbe_done:
 	# boot_drive was saved before VBE; the disk read reloads DL from it
 
-	# --- load kernel sectors via INT 13h extended read (LBA), with retry ---
+	# --- load the kernel in two INT 13h stages (see STAGE1/STAGE2) ---
+	mov $dap1, %si
+	call read_dap
+	mov $dap2, %si
+	call read_dap
+	jmp load_ok
+
+# Read the extended-read DAP at %si, retrying with a controller reset up to 3x.
+read_dap:
 	movb $3, retries
-load_disk:
+read_retry:
 	mov boot_drive, %dl
-	mov $dap, %si
 	mov $0x42, %ah
 	int $0x13
-	jnc load_ok
+	jnc read_ok
 	xor %ah, %ah               # reset disk system
 	mov boot_drive, %dl
 	int $0x13
 	decb retries
-	jnz load_disk
+	jnz read_retry
 	jmp disk_error
+read_ok:
+	ret
 load_ok:
 
 	# --- enable A20 (fast gate, port 0x92) ---
@@ -95,13 +112,20 @@ boot_drive: .byte 0
 retries:    .byte 0
 
 .align 4
-dap:                           # INT 13h Disk Address Packet
+dap1:                          # stage 1: STAGE1 sectors -> 0x0000:LOAD_ADDR
 	.byte 0x10             # packet size
 	.byte 0x00             # reserved
-	.word KSECTORS         # sectors to read
+	.word STAGE1           # sectors to read
 	.word LOAD_ADDR        # dest offset
-	.word 0x0000           # dest segment -> 0x0000:LOAD_ADDR
+	.word 0x0000           # dest segment -> linear LOAD_ADDR
 	.quad 1                # starting LBA (LBA 1 = 2nd sector)
+dap2:                          # stage 2: STAGE2 sectors -> 0x1000:0x0000 (linear 0x10000)
+	.byte 0x10             # packet size
+	.byte 0x00             # reserved
+	.word STAGE2           # sectors to read
+	.word 0x0000           # dest offset
+	.word 0x1000           # dest segment -> linear 0x10000
+	.quad 1 + STAGE1       # starting LBA, just after stage 1
 
 # ---- GDT: flat 32-bit model ----
 .align 8
