@@ -14,13 +14,16 @@ static struct proc *running;            /* NULL until proc_init() runs */
 
 static void zero_proc(struct proc *p)
 {
-	p->pid        = 0;
-	p->parent_pid = 0;
-	p->state      = PROC_UNUSED;
-	p->exit_code  = 0;
-	p->kstack_top = 0;
-	p->esp        = 0;
-	p->cr3        = 0;
+	p->pid             = 0;
+	p->parent_pid      = 0;
+	p->state           = PROC_UNUSED;
+	p->exit_code       = 0;
+	p->kstack_top      = 0;
+	p->esp             = 0;
+	p->cr3             = 0;
+	p->pending_signals = 0;
+	for (int i = 0; i < PROC_NSIG; i++)
+		p->sig_handlers[i] = 0;
 	for (int i = 0; i < PROC_NAME_LEN; i++)
 		p->name[i] = 0;
 }

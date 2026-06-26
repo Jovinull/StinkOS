@@ -285,6 +285,59 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 53: {                                 /* SYS_SIGNAL: ebx=sig ecx=handler_addr -> 0 ok / -1 */
+		unsigned int sig = r->ebx;
+		if (sig >= PROC_NSIG) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *cur = proc_current();
+		if (!cur) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		cur->sig_handlers[sig] = r->ecx;
+		r->eax = 0;
+		break;
+	}
+	case 54: {                                 /* SYS_RAISE: ebx=pid ecx=sig -> 0 ok / -1 */
+		int pid = (int)r->ebx;
+		unsigned int sig = r->ecx;
+		if (sig >= PROC_NSIG) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *target = proc_get(pid);
+		if (!target) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		target->pending_signals |= (1u << sig);
+		r->eax = 0;
+		break;
+	}
+	case 55: {                                 /* SYS_SIGPOLL: -> next pending signal + handler addr; 0 if none */
+		/* Returns a single 32-bit value packing (sig << 24) | (handler_addr & 0x00FFFFFF)
+		 * is too lossy; instead we drain one bit and return the signal number, and the
+		 * caller can re-query its own handler with a follow-up SYS_SIGNAL(sig, NULL)
+		 * pattern -- not done here. For this cooperative model the caller already
+		 * registered the handler, so it knows what to dispatch. */
+		struct proc *cur = proc_current();
+		if (!cur || !cur->pending_signals) {
+			r->eax = 0;
+			break;
+		}
+		/* Pick the lowest-numbered pending signal. */
+		unsigned int b = cur->pending_signals;
+		unsigned int sig = 0;
+		while (!(b & 1)) {
+			b >>= 1;
+			sig++;
+		}
+		cur->pending_signals &= ~(1u << sig);
+		r->eax = sig;
+		break;
+	}
 	case 49: {                                 /* SYS_PIPE: ebx=int fds[2] -> 0 ok, -1 fail */
 		if (!paging_user_range_ok(r->ebx, 2 * sizeof(int))) {
 			r->eax = (unsigned int)-1;

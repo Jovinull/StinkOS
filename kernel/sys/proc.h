@@ -22,6 +22,8 @@ enum proc_state {
 	PROC_ZOMBIE                         /* exited, waiting for parent reap */
 };
 
+#define PROC_NSIG       32              /* matches POSIX signal-number range */
+
 struct proc {
 	int               pid;              /* 1..PROC_MAX, or 0 if UNUSED */
 	int               parent_pid;       /* 0 = no parent (boot proc) */
@@ -30,6 +32,8 @@ struct proc {
 	unsigned int      kstack_top;       /* top of this proc's kernel stack */
 	unsigned int      esp;              /* saved kernel-stack pointer on switch */
 	unsigned int      cr3;              /* page-directory phys addr (0 = shared) */
+	unsigned int      pending_signals;  /* bitmap, bit N = signal N pending */
+	unsigned int      sig_handlers[PROC_NSIG];   /* userland handler addrs */
 	char              name[PROC_NAME_LEN];
 };
 

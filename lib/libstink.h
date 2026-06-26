@@ -256,6 +256,29 @@ static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 
 static inline int sys_wait(void)                 { return __syscall(47, 0, 0, 0); }
 static inline int sys_waitpid(int pid)           { return __syscall(48, pid, 0, 0); }
 
+/* Cooperative signals. The kernel only buffers the pending bits and the
+ * handler addresses; an app actually dispatches by polling sys_sigpoll(),
+ * looking up its registered handler, and calling it. Polling is cheap (one
+ * syscall) and lets the app pick a safe checkpoint to take async work --
+ * unlike "true" signals delivered on an iret frame mid-instruction. */
+#define STINK_SIG_HUP   1
+#define STINK_SIG_INT   2
+#define STINK_SIG_QUIT  3
+#define STINK_SIG_USR1  10
+#define STINK_SIG_USR2  12
+#define STINK_SIG_TERM  15
+#define STINK_NSIG      32
+
+typedef void (*stink_sig_handler)(int sig);
+
+static inline int sys_signal(int sig, stink_sig_handler handler)
+                                                 { return __syscall(53, sig, (int)handler, 0); }
+static inline int sys_raise(int pid, int sig)    { return __syscall(54, pid, sig, 0); }
+
+/* Returns the lowest pending signal number for the caller and clears its
+ * bit, or 0 if nothing is pending. */
+static inline int sys_sigpoll(void)              { return __syscall(55, 0, 0, 0); }
+
 /* Anonymous pipes. sys_pipe fills fds[0] with the read handle and fds[1] with
  * the write handle, both opaque ints. sys_pipe_read returns 0 on EOF (all
  * writers closed); sys_pipe_write returns -1 on EPIPE (all readers closed).
