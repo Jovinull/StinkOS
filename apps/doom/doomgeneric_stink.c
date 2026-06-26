@@ -164,15 +164,20 @@ void DG_SetWindowTitle(const char *title)
 	(void)title;                           /* no window manager to tell */
 }
 
-/* doomgeneric_Create / doomgeneric_Tick form the regular game loop; argv is
- * passed straight through so -iwad and friends can be picked up. Doom's d_iwad
- * search path won't find anything on this OS, so we pre-set -iwad here -- the
- * WAD must live in StinkFS under DOOM1.WAD before launch. */
+/* The kernel doesn't pass argv to user apps yet, so we synthesise a fixed
+ * command line here. STINKDOOM_IWAD names the WAD this binary is locked to;
+ * the Makefile compiles one ELF per supported variant (FREEDOOM1.WAD,
+ * FREEDOOM2.WAD, FREEDM.WAD), each with this macro pre-set. d_iwad's normal
+ * search path won't find anything on StinkOS, so the -iwad arg is required. */
+#ifndef STINKDOOM_IWAD
+#define STINKDOOM_IWAD "FREEDOOM1.WAD"
+#endif
+
 int main(int argc, char **argv)
 {
-	static char  arg0[] = "doom";
-	static char  arg1[] = "-iwad";
-	static char  arg2[] = "DOOM1.WAD";
+	static char  arg0[]   = "doom";
+	static char  arg1[]   = "-iwad";
+	static char  arg2[]   = STINKDOOM_IWAD;
 	static char *fake_argv[3] = { arg0, arg1, arg2 };
 
 	(void)argc;
