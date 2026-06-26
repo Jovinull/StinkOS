@@ -23,14 +23,12 @@
 
 static void fill_rect(int x, int y, int w, int h, unsigned int rgb)
 {
-	for (int row = 0; row < h; row++)
-		for (int col = 0; col < w; col++)
-			sys_draw(x + col, y + row, rgb);
+	sys_fillrect(x, y, w, h, rgb);
 }
 
 static void clear_rect(int x, int y, int w, int h)
 {
-	fill_rect(x, y, w, h, BG);
+	sys_fillrect(x, y, w, h, BG);
 }
 
 static void draw_score(int lscore, int rscore)
