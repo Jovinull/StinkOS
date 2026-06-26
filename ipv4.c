@@ -38,7 +38,13 @@ int ipv4_send(ipv4_t dst, unsigned char protocol,
 		return -1;
 
 	mac_t dst_mac;
-	if (!arp_lookup(dst, dst_mac)) {
+	if (dst == 0xFFFFFFFFu) {
+		/* 255.255.255.255 (limited broadcast): no ARP, dst MAC is the
+		 * Ethernet broadcast address. DHCPDISCOVER and similar
+		 * bootstrap traffic rely on this path. */
+		for (int i = 0; i < 6; i++)
+			dst_mac[i] = 0xFF;
+	} else if (!arp_lookup(dst, dst_mac)) {
 		/* No L2 binding yet; kick off resolution and let the caller
 		 * retry on a future tick. ICMP/UDP packets are fire-and-forget. */
 		arp_send_request(dst);
