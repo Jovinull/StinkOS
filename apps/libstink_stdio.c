@@ -310,3 +310,61 @@ int fflush(FILE *fp)
 	 * so report success. */
 	return 0;
 }
+
+/* sscanf: minimal Doom-compatible version. Handles "%x" (hex int) and "%i"/"%d"
+ * (signed decimal int). All other format specifiers consume one argument but
+ * do nothing. Returns number of items successfully matched. */
+int sscanf(const char *str, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	int matched = 0;
+	const char *s = str;
+	for (const char *f = fmt; *f != '\0'; f++) {
+		if (*f != '%') { if (*s == *f) s++; continue; }
+		f++;
+		if (*f == '\0') break;
+		if (*f == 'x' || *f == 'X') {
+			unsigned int v = 0;
+			while ((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f') || (*s >= 'A' && *s <= 'F')) {
+				unsigned int d;
+				if (*s >= '0' && *s <= '9') d = (unsigned int)(*s - '0');
+				else if (*s >= 'a' && *s <= 'f') d = (unsigned int)(*s - 'a') + 10u;
+				else d = (unsigned int)(*s - 'A') + 10u;
+				v = v * 16u + d;
+				s++;
+			}
+			*va_arg(ap, unsigned int *) = v;
+			matched++;
+		} else if (*f == 'i' || *f == 'd') {
+			int sign = 1;
+			if (*s == '-') { sign = -1; s++; }
+			else if (*s == '+') { s++; }
+			int v = 0;
+			while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
+			*va_arg(ap, int *) = v * sign;
+			matched++;
+		} else {
+			(void)va_arg(ap, void *);
+		}
+	}
+	va_end(ap);
+	return matched;
+}
+
+/* atof: parse a decimal floating-point number (no exponent). Doom uses this
+ * only for config-file floats (mouse sensitivity, gamma). */
+double atof(const char *s)
+{
+	int sign = 1;
+	if (*s == '-') { sign = -1; s++; }
+	else if (*s == '+') { s++; }
+	double v = 0.0;
+	while (*s >= '0' && *s <= '9') { v = v * 10.0 + (double)(*s - '0'); s++; }
+	if (*s == '.') {
+		s++;
+		double frac = 0.1;
+		while (*s >= '0' && *s <= '9') { v += (double)(*s - '0') * frac; frac *= 0.1; s++; }
+	}
+	return v * (double)sign;
+}
