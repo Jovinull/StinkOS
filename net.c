@@ -33,13 +33,10 @@ int net_poll_once(void)
 	return 1;
 }
 
-/* Temporary IP stub. The real ip_handle (in ip.c, future commit) will replace
- * this once the IPv4 layer lands. Declaring it weak isn't portable across our
- * cross-toolchain, so we drop a no-op here and the linker is happy until
- * ip.c arrives and replaces this translation unit's symbol... actually a
- * single non-weak definition is enough: when ip.c lands its definition stays
- * here and this stub gets removed in the same commit. */
-void ip_handle(const void *payload, unsigned int len)
+/* Temporary stub for the upper layer that hasn't landed yet. The real
+ * tcp_handle (in tcp.c, future commit) replaces this in the same commit
+ * that adds the TCP state machine. */
+void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 {
-	(void)payload; (void)len;
+	(void)payload; (void)len; (void)src_ip;
 }
