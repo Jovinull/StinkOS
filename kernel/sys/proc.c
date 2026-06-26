@@ -24,6 +24,7 @@ static void zero_proc(struct proc *p)
 	p->pending_signals = 0;
 	for (int i = 0; i < PROC_NSIG; i++)
 		p->sig_handlers[i] = 0;
+	vfs_fd_table_clear(p->fd_table);
 	for (int i = 0; i < PROC_NAME_LEN; i++)
 		p->name[i] = 0;
 }

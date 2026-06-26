@@ -9,6 +9,7 @@
 #define PROC_H
 
 #include "interrupts.h"   /* struct regs */
+#include "vfs.h"          /* struct vfs_fd + VFS_FD_MAX */
 
 #define PROC_MAX        16          /* hard cap on concurrent processes */
 #define PROC_NAME_LEN   16          /* incl. NUL */
@@ -34,6 +35,7 @@ struct proc {
 	unsigned int      cr3;              /* page-directory phys addr (0 = shared) */
 	unsigned int      pending_signals;  /* bitmap, bit N = signal N pending */
 	unsigned int      sig_handlers[PROC_NSIG];   /* userland handler addrs */
+	struct vfs_fd     fd_table[VFS_FD_MAX];       /* per-process open files */
 	char              name[PROC_NAME_LEN];
 };
 
