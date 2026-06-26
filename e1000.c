@@ -134,6 +134,9 @@ static void log_mac(void)
 	serial_putc('\n');
 }
 
+static void setup_rx(void);
+static void setup_tx(void);
+
 int e1000_init(void)
 {
 	struct pci_addr a;
