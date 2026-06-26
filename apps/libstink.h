@@ -218,6 +218,25 @@ static inline int sys_disk_copy(int src_drive, int dst_drive,
                                 unsigned int src_lba, unsigned int count)
                                                  { return __syscall4(40, src_drive, dst_drive, (int)count, (int)src_lba); }
 
+/* Network configuration snapshot. Layout mirrors `struct net_info` in the
+ * kernel's net.h byte-for-byte (24 bytes); all *_ip fields are in network
+ * byte order. dhcp_state matches enum dhcp_state: 0 init, 1 discovering,
+ * 2 requesting, 3 bound, 4 failed. */
+struct sys_net_info {
+    unsigned int  ip;
+    unsigned int  mask;
+    unsigned int  gateway;
+    unsigned int  dns;
+    unsigned char mac[6];
+    unsigned char dhcp_state;
+    unsigned char link_up;
+};
+
+/* Fill *out with the host's current network state. Returns 0 on success,
+ * -1 if the pointer is rejected by the kernel. */
+static inline int sys_netinfo(struct sys_net_info *out)
+                                                 { return __syscall(43, (int)out, 0, 0); }
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is

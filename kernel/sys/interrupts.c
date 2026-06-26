@@ -15,6 +15,8 @@
 #include "tcp.h"
 #include "dns.h"
 #include "net.h"
+#include "dhcp.h"
+#include "e1000.h"
 #include "ata.h"
 #include "mbr.h"
 #include "io.h"
@@ -430,6 +432,22 @@ static void syscall_dispatch(struct regs *r)
 		paging_map_fb(fb_phys_base());
 		r->eax = paging_user_fb_base();
 		break;
+	case 43: {                                 /* SYS_NETINFO: ebx=*struct net_info -> 0 ok, -1 bad ptr */
+		if (!paging_user_range_ok(r->ebx, sizeof(struct net_info))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct net_info *ni = (struct net_info *)r->ebx;
+		ni->ip         = net_get_local_ip();
+		ni->mask       = dhcp_get_subnet_mask();
+		ni->gateway    = dhcp_get_router();
+		ni->dns        = dhcp_get_dns();
+		net_get_local_mac(ni->mac);
+		ni->dhcp_state = (unsigned char)dhcp_get_state();
+		ni->link_up    = (unsigned char)e1000_present();
+		r->eax = 0;
+		break;
+	}
 	case 6:                                    /* SYS_TICKS: -> PIT ticks */
 		r->eax = ticks;
 		break;
