@@ -39,6 +39,20 @@ static inline ipv4_t ipv4(unsigned char a, unsigned char b,
 	             ((unsigned int)c <<  8) |  (unsigned int)d);
 }
 
+/* Flat snapshot of the host's network configuration, filled by the
+ * SYS_NETINFO syscall so a ring3 app can render it. The layout is a stable
+ * ABI contract: apps/libstink.h mirrors this struct byte-for-byte (24 bytes,
+ * 4-aligned, no padding). All ipv4_t fields are in network byte order. */
+struct net_info {
+	ipv4_t        ip;            /* 0  assigned address (0 until bound)   */
+	ipv4_t        mask;          /* 4  subnet mask                        */
+	ipv4_t        gateway;       /* 8  default gateway / router           */
+	ipv4_t        dns;           /* 12 primary DNS server                 */
+	unsigned char mac[6];        /* 16 NIC hardware address               */
+	unsigned char dhcp_state;    /* 22 enum dhcp_state value              */
+	unsigned char link_up;       /* 23 1 if the NIC is present/initialised*/
+};
+
 /* Local-host configuration. The MAC comes from the NIC; the IP is set by the
  * DHCP client at boot (or by hand for testing). Both are zero until then. */
 void   net_set_local_ip(ipv4_t ip);

@@ -198,7 +198,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("run <appname>  history  exit", TERM_FG);
+			term_print("run <appname>  netinfo  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -363,6 +363,28 @@ void main(void)
 				tprintf("launching %s...", rest);
 				if (sys_exec(rest) < 0)
 					tprintf("not found: %s", rest);
+			}
+		} else if (strcmp(line, "netinfo") == 0 || strcmp(line, "ifconfig") == 0) {
+			struct sys_net_info ni;
+			if (sys_netinfo(&ni) != 0) {
+				term_print("netinfo unavailable", TERM_ERR);
+			} else {
+				static const char *st[] = { "init", "discovering",
+				                            "requesting", "bound", "failed" };
+				unsigned char *ip = (unsigned char *)&ni.ip;
+				unsigned char *mk = (unsigned char *)&ni.mask;
+				unsigned char *gw = (unsigned char *)&ni.gateway;
+				unsigned char *dn = (unsigned char *)&ni.dns;
+				term_print(ni.link_up ? "link: up" : "link: down",
+				           ni.link_up ? TERM_FG : TERM_ERR);
+				tprintf("mac:  %02x:%02x:%02x:%02x:%02x:%02x",
+				        ni.mac[0], ni.mac[1], ni.mac[2],
+				        ni.mac[3], ni.mac[4], ni.mac[5]);
+				tprintf("ip:   %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+				tprintf("mask: %u.%u.%u.%u", mk[0], mk[1], mk[2], mk[3]);
+				tprintf("gw:   %u.%u.%u.%u", gw[0], gw[1], gw[2], gw[3]);
+				tprintf("dns:  %u.%u.%u.%u", dn[0], dn[1], dn[2], dn[3]);
+				tprintf("dhcp: %s", ni.dhcp_state <= 4 ? st[ni.dhcp_state] : "?");
 			}
 		} else {
 			tprintf("unknown command: %s", line);
