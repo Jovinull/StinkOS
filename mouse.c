@@ -24,6 +24,13 @@ static int cur_x, cur_y;
 static unsigned char cur_buttons;
 static unsigned int max_x, max_y;
 
+/* Relative motion accumulated between mouse_consume_delta calls. Stored in
+ * screen-space convention (+x = right, +y = down) so userland sees the same
+ * sign rules as the cursor position. Distinct from cur_x/cur_y, which track
+ * the absolute clamped cursor used by the menu's pointer drawing. */
+static volatile int delta_x_accum;
+static volatile int delta_y_accum;
+
 /* The cursor is a 7-pixel cross: a vertical arm (7 px) plus a horizontal arm
  * (7 px) sharing the centre pixel, 13 pixels total. Saving exactly what was
  * under those pixels lets us restore the background without a full repaint. */
@@ -131,6 +138,12 @@ void mouse_handle(unsigned char data)
 	cur_x += dx;
 	cur_y -= dy;             /* PS/2 reports +Y as "up"; screen Y grows down */
 
+	/* Accumulate the same motion in screen-space units for the relative-event
+	 * consumer (mouse_consume_delta). Userland apps doing mouselook (Doom,
+	 * any future FPS) want the raw delta, not the clamped absolute cursor. */
+	delta_x_accum += dx;
+	delta_y_accum -= dy;
+
 	if (cur_x < 0)
 		cur_x = 0;
 	if (cur_y < 0)
@@ -145,6 +158,19 @@ void mouse_get_state(int *x, int *y, unsigned char *buttons)
 {
 	*x = cur_x;
 	*y = cur_y;
+	*buttons = cur_buttons;
+}
+
+/* Returns the motion accumulated since the previous call and resets the
+ * accumulators. The kernel syscall handler runs with interrupts disabled
+ * (the int 0x80 IDT entry is an interrupt gate), so no IRQ12 can race the
+ * read-and-reset; no separate cli/sti pair needed. */
+void mouse_consume_delta(int *dx, int *dy, unsigned char *buttons)
+{
+	*dx = delta_x_accum;
+	*dy = delta_y_accum;
+	delta_x_accum = 0;
+	delta_y_accum = 0;
 	*buttons = cur_buttons;
 }
 

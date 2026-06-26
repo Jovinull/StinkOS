@@ -13,6 +13,13 @@ void mouse_init(unsigned int screen_w, unsigned int screen_h);
 void mouse_handle(unsigned char data);  /* called from the IRQ12 handler */
 void mouse_get_state(int *x, int *y, unsigned char *buttons);
 
+/* Drains the relative-motion accumulator into *dx/*dy (screen-space units:
+ * +x = right, +y = down) and reports current button state. Resets the
+ * accumulator to zero before returning, so back-to-back calls only see new
+ * motion. Designed for apps that need raw deltas (mouselook, drawing tools)
+ * instead of the clamped absolute cursor. */
+void mouse_consume_delta(int *dx, int *dy, unsigned char *buttons);
+
 /* Draws the cursor at the current position, saving whatever pixels were
  * there so mouse_undraw_cursor() can put them back. Call mouse_undraw_cursor()
  * before moving the cursor again (or before any other drawing touches the
