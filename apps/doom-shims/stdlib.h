@@ -8,4 +8,6 @@
  * so always report unset; Doom falls back to the working-directory search path
  * which is what we want anyway. */
 static inline char *getenv(const char *name) { (void)name; return (char *)0; }
+
+double atof(const char *s);
 #endif

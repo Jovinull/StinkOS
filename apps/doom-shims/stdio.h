@@ -5,4 +5,6 @@
 #ifndef _STINK_STDIO_H
 #define _STINK_STDIO_H
 #include "libstink.h"
+
+int sscanf(const char *str, const char *fmt, ...);
 #endif
