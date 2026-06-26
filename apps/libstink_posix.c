@@ -116,6 +116,15 @@ int remove(const char *path)
 	return sys_fdelete(path);
 }
 
+int system(const char *command)
+{
+	(void)command;
+	/* No shell on StinkOS. Doom's only callers (zenity error popup) treat
+	 * a non-zero return as "unavailable" and skip the popup; -1 is the
+	 * conventional value for "fork/exec failed". */
+	return -1;
+}
+
 int rename(const char *oldpath, const char *newpath)
 {
 	(void)oldpath;
