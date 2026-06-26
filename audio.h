@@ -47,4 +47,15 @@ unsigned char *audio_buffer_ptr(void);
 unsigned int   audio_buffer_size(void);
 unsigned int   audio_sample_rate(void);
 
+/* Software mixer. Up to 8 concurrent channels; each takes a pointer to mono
+ * unsigned 8-bit samples plus a length and a 0..256 volume (256 = unity).
+ * The source pointer is NOT copied -- the caller is responsible for keeping
+ * the sample buffer alive until the channel drains or audio_mix_stop is
+ * called. audio_mix_silence_all clears every channel without touching the
+ * DSP and is what menu_exit uses before unmapping the app's address space. */
+int  audio_mix_play(const unsigned char *samples, unsigned int length, int volume);
+void audio_mix_stop(int handle);
+void audio_mix_set_volume(int handle, int volume);
+void audio_mix_silence_all(void);
+
 #endif

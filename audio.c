@@ -54,6 +54,27 @@ static volatile unsigned char audio_buffer[AUDIO_BUFFER_SIZE]
 /* Set by audio_start_output once the DSP is actually clocking samples. */
 static int output_running;
 
+/* Software mixer: up to MIX_CHANNELS concurrent sound effects, each with its
+ * own volume and playback cursor. The mixer fills audio_buffer once per IRQ
+ * (whole-buffer cycle) by summing every active channel's contribution. Volume
+ * is fixed-point 0..256 (256 = unity gain). Samples are mono unsigned 8-bit.
+ *
+ * Channel source pointers point at memory the caller must keep alive until
+ * the channel drains -- the typical Doom case where sound lumps live in the
+ * pre-cached Z_Zone region. menu_exit silences everything before tearing
+ * down an app's address space so a stale pointer can't reach the IRQ. */
+#define MIX_CHANNELS 8
+
+struct mix_channel {
+	const unsigned char *src;
+	unsigned int         pos;
+	unsigned int         length;
+	int                  volume;        /* 0..256 */
+	int                  active;
+};
+
+static struct mix_channel channels[MIX_CHANNELS];
+
 /* The reset sequence wants a hold of >= 3 microseconds with the reset line
  * high. Without a known clock, count IO reads on port 0x80 (the legacy
  * "diagnostic port" that's traditionally used as a tiny portable delay). */
@@ -151,14 +172,93 @@ unsigned int audio_dsp_version(void)
 	return ((unsigned int)dsp_major << 8) | dsp_minor;
 }
 
+/* Refills audio_buffer with mixed samples from every active mix channel.
+ * Walks the buffer linearly; for each output sample, sums each channel's
+ * source byte (recentred to signed -128..127, scaled by volume/256) and
+ * saturates back to unsigned 8-bit. Channels that hit the end of their
+ * source deactivate themselves -- no resource leaks. */
+static void mixer_fill(void)
+{
+	unsigned char *out = (unsigned char *)audio_buffer;
+	unsigned int   n   = AUDIO_BUFFER_SIZE;
+
+	for (unsigned int i = 0; i < n; i++) {
+		int sum = 0;
+		for (int c = 0; c < MIX_CHANNELS; c++) {
+			struct mix_channel *ch = &channels[c];
+			if (!ch->active)
+				continue;
+			if (ch->pos >= ch->length) {
+				ch->active = 0;
+				continue;
+			}
+			/* Recenter unsigned 0..255 to signed -128..127, scale by
+			 * 0..256 volume, drop the 8 fractional bits. */
+			int s = (int)ch->src[ch->pos] - 128;
+			sum += (s * ch->volume) >> 8;
+			ch->pos++;
+		}
+		if (sum >  127) sum =  127;
+		if (sum < -128) sum = -128;
+		out[i] = (unsigned char)(sum + 128);
+	}
+}
+
+/* Claim the first free mixer channel for a one-shot sound effect. Volume is
+ * clamped to 0..256; pass 256 for unity. Returns the channel handle (0..7),
+ * or -1 if every slot is busy. */
+int audio_mix_play(const unsigned char *samples, unsigned int length, int volume)
+{
+	if (!samples || length == 0)
+		return -1;
+	if (volume < 0)   volume = 0;
+	if (volume > 256) volume = 256;
+
+	for (int i = 0; i < MIX_CHANNELS; i++) {
+		if (!channels[i].active) {
+			channels[i].src    = samples;
+			channels[i].pos    = 0;
+			channels[i].length = length;
+			channels[i].volume = volume;
+			channels[i].active = 1;
+			return i;
+		}
+	}
+	return -1;
+}
+
+void audio_mix_stop(int handle)
+{
+	if (handle < 0 || handle >= MIX_CHANNELS)
+		return;
+	channels[handle].active = 0;
+}
+
+void audio_mix_set_volume(int handle, int volume)
+{
+	if (handle < 0 || handle >= MIX_CHANNELS)
+		return;
+	if (volume < 0)   volume = 0;
+	if (volume > 256) volume = 256;
+	channels[handle].volume = volume;
+}
+
+/* Silence every channel without touching the DSP -- used when an app exits
+ * and its sample buffers are about to be unmapped. */
+void audio_mix_silence_all(void)
+{
+	for (int i = 0; i < MIX_CHANNELS; i++)
+		channels[i].active = 0;
+}
+
 /* IRQ5 dispatcher: the SB16 raises this when a DMA half-buffer or full-
- * buffer completion is reached. We acknowledge both 8-bit and 16-bit on
- * every fire -- two cheap port reads, and we don't yet care which side
- * triggered. The mixer interrupt-status register (port 0x224 idx 0x82) can
- * tell us "DMA8 / DMA16 / MPU" if we ever need to disambiguate. */
+ * buffer completion is reached. We refill the buffer with whatever the
+ * mixer says, then acknowledge both 8-bit and 16-bit on every fire (two
+ * cheap port reads, and we don't yet care which side triggered). */
 void audio_handle_irq(void)
 {
 	irq_count++;
+	mixer_fill();
 	(void)inb(SB_BASE + 0xE);              /* 8-bit DMA ack */
 	(void)inb(SB_BASE + 0xF);              /* 16-bit DMA ack */
 }
