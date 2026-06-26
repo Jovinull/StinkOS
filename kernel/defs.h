@@ -19,6 +19,7 @@
 /* core / system */
 #include "interrupts.h"
 #include "syscall.h"
+#include "proc.h"
 #include "bootdiag.h"
 #include "elf.h"
 

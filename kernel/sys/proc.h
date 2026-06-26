@@ -1,0 +1,58 @@
+/* Process control block + process table.
+ *
+ * First brick of the multitasking subsystem. This commit only introduces the
+ * data and the allocator -- no scheduler, no context switch, no IRQ tick hook.
+ * Those land in follow-up commits so each step stays trivially reviewable and
+ * keeps the kernel boot path working unchanged.
+ */
+#ifndef PROC_H
+#define PROC_H
+
+#include "interrupts.h"   /* struct regs */
+
+#define PROC_MAX        16          /* hard cap on concurrent processes */
+#define PROC_NAME_LEN   16          /* incl. NUL */
+
+enum proc_state {
+	PROC_UNUSED   = 0,                  /* slot free */
+	PROC_EMBRYO,                        /* allocated, not yet runnable */
+	PROC_READY,                         /* runnable, waiting for CPU */
+	PROC_RUNNING,                       /* on the CPU now */
+	PROC_SLEEPING,                      /* blocked on an event */
+	PROC_ZOMBIE                         /* exited, waiting for parent reap */
+};
+
+struct proc {
+	int               pid;              /* 1..PROC_MAX, or 0 if UNUSED */
+	int               parent_pid;       /* 0 = no parent (boot proc) */
+	enum proc_state   state;
+	int               exit_code;        /* meaningful only when ZOMBIE */
+	unsigned int      kstack_top;       /* top of this proc's kernel stack */
+	unsigned int      esp;              /* saved kernel-stack pointer on switch */
+	unsigned int      cr3;              /* page-directory phys addr (0 = shared) */
+	char              name[PROC_NAME_LEN];
+};
+
+/* Initialise the process table and reserve PID 1 for the kernel boot process,
+ * which is what every existing kernel path is implicitly running as today. */
+void           proc_init(void);
+
+/* Reserve a free slot, mark it EMBRYO, copy `name`, return the new struct.
+ * Returns NULL if the table is full. Parent PID is taken from proc_current(). */
+struct proc   *proc_alloc(const char *name);
+
+/* Mark the slot UNUSED. Safe to call on any state. */
+void           proc_free(struct proc *p);
+
+/* Currently-running process. Always non-NULL after proc_init(); during early
+ * boot, before proc_init() has been called, returns NULL so callers can
+ * detect the pre-init phase and fall back to legacy single-process behaviour. */
+struct proc   *proc_current(void);
+
+/* Lookup by PID. Returns NULL if `pid` is out of range or UNUSED. */
+struct proc   *proc_get(int pid);
+
+/* Number of non-UNUSED slots. */
+int            proc_count(void);
+
+#endif

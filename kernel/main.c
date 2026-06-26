@@ -46,6 +46,8 @@ void kmain(void)
 	bootdiag_add("cpu: idt+pic", BOOT_OK);
 	pit_init(100);
 	bootdiag_add("timer: pit", BOOT_OK);
+	proc_init();                               /* reserves PID 1 for the kernel boot path */
+	bootdiag_add("proc: pid 1", BOOT_OK);
 	keyboard_init();
 	bootdiag_add("input: kbd", BOOT_OK);
 	if (vm.valid)
