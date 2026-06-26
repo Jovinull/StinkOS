@@ -1,15 +1,29 @@
-/* ATA PIO read on the primary bus (I/O base 0x1F0), drive 0, LBA28 polling.
- * Enough to pull app binaries from fixed raw sectors until a real FS exists. */
+/* ATA PIO disk driver, multi-drive aware (LBA28, polling, no IRQ).
+ *
+ * Drive index layout:
+ *   0 = primary master   (I/O base 0x1F0, drive byte 0xE0)
+ *   1 = primary slave    (I/O base 0x1F0, drive byte 0xF0)
+ *   2 = secondary master (I/O base 0x170, drive byte 0xE0)
+ *   3 = secondary slave  (I/O base 0x170, drive byte 0xF0)
+ *
+ * The existing ata_read / ata_write / ata_identify functions stay as thin
+ * wrappers around drive 0 so every existing caller (fs.c, vfs.c, elf.c,
+ * menu.c) keeps compiling unchanged. New code (installer, future per-drive
+ * features) uses the drive-aware variants.
+ */
 #include "ata.h"
 #include "io.h"
 
-#define ATA_DATA     0x1F0
-#define ATA_SECCOUNT 0x1F2
-#define ATA_LBA_LO   0x1F3
-#define ATA_LBA_MID  0x1F4
-#define ATA_LBA_HI   0x1F5
-#define ATA_DRIVE    0x1F6
-#define ATA_CMD      0x1F7      /* write: command  / read: status */
+#define ATA_PRIMARY_BASE   0x1F0
+#define ATA_SECONDARY_BASE 0x170
+
+#define ATA_REG_DATA       0x00
+#define ATA_REG_SECCOUNT   0x02
+#define ATA_REG_LBA_LO     0x03
+#define ATA_REG_LBA_MID    0x04
+#define ATA_REG_LBA_HI     0x05
+#define ATA_REG_DRIVE      0x06
+#define ATA_REG_CMD        0x07     /* write: command  / read: status */
 
 #define ST_ERR 0x01
 #define ST_DRQ 0x08
@@ -20,31 +34,35 @@
 #define CMD_FLUSH_CACHE   0xE7
 #define CMD_IDENTIFY      0xEC
 
-/* A real drive answers in microseconds; this many spins is already a very
- * generous upper bound. Without it, a missing/faulty drive would hang the
- * whole kernel in a busy-loop that never exits instead of just failing the
- * read/write. */
 #define ATA_TIMEOUT_SPINS 1000000
 
-static int ata_wait_ready(void)
+/* Resolve a drive index into the (base port, drive-select byte) pair. */
+static unsigned short ata_base_for(int drive)
+{
+	return (drive < 2) ? ATA_PRIMARY_BASE : ATA_SECONDARY_BASE;
+}
+
+static unsigned char ata_drive_byte(int drive)
+{
+	return (drive & 1) ? 0xF0u : 0xE0u;
+}
+
+static int ata_wait_ready_base(unsigned short base)
 {
 	unsigned int spins = 0;
-	while ((inb(ATA_CMD) & ST_BSY) && spins < ATA_TIMEOUT_SPINS)
+	while ((inb(base + ATA_REG_CMD) & ST_BSY) && spins < ATA_TIMEOUT_SPINS)
 		spins++;
 	return (spins < ATA_TIMEOUT_SPINS) ? 0 : -1;
 }
 
-/* Waits for the drive to clear BSY and then either flag an error or assert
- * DRQ (data ready to transfer). Returns 0 if it's safe to move data, -1 on
- * a reported error or a timeout. */
-static int ata_poll(void)
+static int ata_poll_base(unsigned short base)
 {
-	if (ata_wait_ready() != 0)
+	if (ata_wait_ready_base(base) != 0)
 		return -1;
 
 	unsigned int spins = 0;
 	for (;;) {
-		unsigned char status = inb(ATA_CMD);
+		unsigned char status = inb(base + ATA_REG_CMD);
 		if (status & ST_ERR)
 			return -1;
 		if (status & ST_DRQ)
@@ -54,69 +72,83 @@ static int ata_poll(void)
 	}
 }
 
-static int ata_select(unsigned int lba, unsigned int count, unsigned char cmd)
+static int ata_select_drive(int drive, unsigned int lba,
+                            unsigned int count, unsigned char cmd)
 {
-	if (ata_wait_ready() != 0)
+	unsigned short base   = ata_base_for(drive);
+	unsigned char  dbyte  = ata_drive_byte(drive);
+
+	if (ata_wait_ready_base(base) != 0)
 		return -1;
 
-	outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));   /* master, LBA mode */
-	outb(ATA_SECCOUNT, count);
-	outb(ATA_LBA_LO, lba & 0xFF);
-	outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
-	outb(ATA_LBA_HI, (lba >> 16) & 0xFF);
-	outb(ATA_CMD, cmd);
+	outb(base + ATA_REG_DRIVE,    dbyte | ((lba >> 24) & 0x0Fu));
+	outb(base + ATA_REG_SECCOUNT, (unsigned char)count);
+	outb(base + ATA_REG_LBA_LO,   lba & 0xFFu);
+	outb(base + ATA_REG_LBA_MID, (lba >> 8) & 0xFFu);
+	outb(base + ATA_REG_LBA_HI,  (lba >> 16) & 0xFFu);
+	outb(base + ATA_REG_CMD,     cmd);
 	return 0;
 }
 
-int ata_read(unsigned int lba, unsigned int count, void *buffer)
+int ata_drive_read(int drive, unsigned int lba, unsigned int count, void *buffer)
 {
-	unsigned short *buf = (unsigned short *)buffer;
+	if (drive < 0 || drive > 3)
+		return -1;
+	unsigned short  base = ata_base_for(drive);
+	unsigned short *buf  = (unsigned short *)buffer;
 
-	if (ata_select(lba, count, CMD_READ_SECTORS) != 0)
+	if (ata_select_drive(drive, lba, count, CMD_READ_SECTORS) != 0)
 		return -1;
 
 	for (unsigned int s = 0; s < count; s++) {
-		if (ata_poll() != 0)
+		if (ata_poll_base(base) != 0)
 			return -1;
-		for (int i = 0; i < 256; i++)           /* 256 words = 512 bytes */
-			buf[i] = inw(ATA_DATA);
+		for (int i = 0; i < 256; i++)
+			buf[i] = inw(base + ATA_REG_DATA);
 		buf += 256;
 	}
 	return 0;
 }
 
-int ata_write(unsigned int lba, unsigned int count, const void *buffer)
+int ata_drive_write(int drive, unsigned int lba, unsigned int count, const void *buffer)
 {
-	const unsigned short *buf = (const unsigned short *)buffer;
+	if (drive < 0 || drive > 3)
+		return -1;
+	unsigned short        base = ata_base_for(drive);
+	const unsigned short *buf  = (const unsigned short *)buffer;
 
-	if (ata_select(lba, count, CMD_WRITE_SECTORS) != 0)
+	if (ata_select_drive(drive, lba, count, CMD_WRITE_SECTORS) != 0)
 		return -1;
 
 	for (unsigned int s = 0; s < count; s++) {
-		if (ata_poll() != 0)
+		if (ata_poll_base(base) != 0)
 			return -1;
-		for (int i = 0; i < 256; i++)           /* 256 words = 512 bytes */
-			outw(ATA_DATA, buf[i]);
+		for (int i = 0; i < 256; i++)
+			outw(base + ATA_REG_DATA, buf[i]);
 		buf += 256;
 	}
 
-	outb(ATA_CMD, CMD_FLUSH_CACHE);                 /* commit to the medium */
-	return ata_wait_ready();
+	outb(base + ATA_REG_CMD, CMD_FLUSH_CACHE);
+	return ata_wait_ready_base(base);
 }
 
-int ata_identify(char *model_out, unsigned int *sectors_out)
+int ata_drive_identify(int drive, char *model_out, unsigned int *sectors_out)
 {
-	if (ata_select(0, 0, CMD_IDENTIFY) != 0)
+	if (drive < 0 || drive > 3)
 		return -1;
-	if (ata_poll() != 0)
+	unsigned short base = ata_base_for(drive);
+
+	if (ata_select_drive(drive, 0, 0, CMD_IDENTIFY) != 0)
+		return -1;
+	if (ata_poll_base(base) != 0)
 		return -1;
 
 	unsigned short data[256];
 	for (int i = 0; i < 256; i++)
-		data[i] = inw(ATA_DATA);
+		data[i] = inw(base + ATA_REG_DATA);
 
-	/* Words 27-46 hold the model string, but each word stores its two
-	 * characters byte-swapped relative to normal string order. */
+	/* Words 27-46 hold the model string, each word storing two characters
+	 * byte-swapped relative to normal string order. */
 	for (int w = 0; w < 20; w++) {
 		unsigned short word = data[27 + w];
 		model_out[w * 2]     = (char)(word >> 8);
@@ -128,4 +160,21 @@ int ata_identify(char *model_out, unsigned int *sectors_out)
 
 	*sectors_out = ((unsigned int)data[61] << 16) | data[60];
 	return 0;
+}
+
+/* ---- backward-compat wrappers: drive 0 = primary master ---- */
+
+int ata_read(unsigned int lba, unsigned int count, void *buffer)
+{
+	return ata_drive_read(0, lba, count, buffer);
+}
+
+int ata_write(unsigned int lba, unsigned int count, const void *buffer)
+{
+	return ata_drive_write(0, lba, count, buffer);
+}
+
+int ata_identify(char *model_out, unsigned int *sectors_out)
+{
+	return ata_drive_identify(0, model_out, sectors_out);
 }
