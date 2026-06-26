@@ -38,9 +38,13 @@
  * live DSP responds in microseconds. */
 #define DSP_TIMEOUT_LOOPS  100000
 
-static int          sb_present;
+static int           sb_present;
 static unsigned char dsp_major;
 static unsigned char dsp_minor;
+
+/* Bumped on every IRQ5 the SB16 raises. Exposed via audio_irq_count_get for
+ * the playback layer (and tests) to confirm DMA is actually cycling. */
+static volatile unsigned int irq_count;
 
 static void io_delay(unsigned int loops)
 {
@@ -120,3 +124,17 @@ unsigned int audio_dsp_version(void)
 {
 	return ((unsigned int)dsp_major << 8) | dsp_minor;
 }
+
+/* IRQ5 dispatcher: the SB16 raises this when a DMA half-buffer or full-
+ * buffer completion is reached. We acknowledge both 8-bit and 16-bit on
+ * every fire -- two cheap port reads, and we don't yet care which side
+ * triggered. The mixer interrupt-status register (port 0x224 idx 0x82) can
+ * tell us "DMA8 / DMA16 / MPU" if we ever need to disambiguate. */
+void audio_handle_irq(void)
+{
+	irq_count++;
+	(void)inb(SB_BASE + 0xE);              /* 8-bit DMA ack */
+	(void)inb(SB_BASE + 0xF);              /* 16-bit DMA ack */
+}
+
+unsigned int audio_irq_count_get(void) { return irq_count; }

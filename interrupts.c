@@ -10,6 +10,7 @@
 #include "speaker.h"
 #include "fs.h"
 #include "vfs.h"
+#include "audio.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -489,6 +490,8 @@ void irq_handler(struct regs *r)
 			serial_write("StinkOS: timer tick\n");
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
+	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
+		audio_handle_irq();
 	} else if (r->int_no == 44) {              /* IRQ12: PS/2 mouse */
 		mouse_handle(inb(0x60));
 	}
