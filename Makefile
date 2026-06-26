@@ -62,6 +62,11 @@ DOOM_SRCS = dummy.c am_map.c doomdef.c doomstat.c dstrings.c d_event.c \
 
 DOOM_OBJS = $(addprefix $(BUILD)/doom/, $(DOOM_SRCS:.c=.o))
 
+# The Doom platform layer is variant-specific (one ELF per IWAD), so its .o
+# is built three times with different -DSTINKDOOM_IWAD. The rest of the engine
+# (DOOM_CORE_OBJS) is shared across all three variants.
+DOOM_CORE_OBJS = $(filter-out $(BUILD)/doom/doomgeneric_stink.o, $(DOOM_OBJS))
+
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
 IMG_MIN = 29184
@@ -248,11 +253,30 @@ $(BUILD)/doom:
 $(BUILD)/doom/%.o: $(DOOM_DIR)/%.c | $(BUILD)/doom
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
 
-$(BUILD)/doom.elf: apps/crt0.s apps/app.ld $(DOOM_OBJS) $(LIBSTINK_OBJS) | $(BUILD)
-	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom.elf $(BUILD)/crt0.o $(DOOM_OBJS) $(LIBSTINK_OBJS)
+# Per-variant builds of the platform layer: same source, one ELF per IWAD.
+# Each picks a different file name to point doomgeneric at via -DSTINKDOOM_IWAD.
+$(BUILD)/doom/stink_doom1.o: $(DOOM_DIR)/doomgeneric_stink.c | $(BUILD)/doom
+	$(CC) $(DOOM_CFLAGS) -DSTINKDOOM_IWAD='"FREEDOOM1.WAD"' -c $< -o $@
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/doom.elf
+$(BUILD)/doom/stink_doom2.o: $(DOOM_DIR)/doomgeneric_stink.c | $(BUILD)/doom
+	$(CC) $(DOOM_CFLAGS) -DSTINKDOOM_IWAD='"FREEDOOM2.WAD"' -c $< -o $@
+
+$(BUILD)/doom/stink_freedm.o: $(DOOM_DIR)/doomgeneric_stink.c | $(BUILD)/doom
+	$(CC) $(DOOM_CFLAGS) -DSTINKDOOM_IWAD='"FREEDM.WAD"' -c $< -o $@
+
+$(BUILD)/doom1.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom1.o $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom1.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom1.o $(LIBSTINK_OBJS)
+
+$(BUILD)/doom2.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom2.o $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom2.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom2.o $(LIBSTINK_OBJS)
+
+$(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS)
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
@@ -276,12 +300,16 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/arrows.elf of=os.bin bs=512 seek=$(APP16_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/pong.elf   of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
-	@size=$$(stat -c%s $(BUILD)/doom.elf); max=$$(($(DOOM_SECTORS) * 512)); \
+	@for v in doom1 doom2 freedm; do \
+	  size=$$(stat -c%s $(BUILD)/$$v.elf); max=$$(($(DOOM_SECTORS) * 512)); \
 	  if [ $$size -gt $$max ]; then \
-	    echo "ERROR: doom.elf $$size B > DOOM_SECTORS=$(DOOM_SECTORS) ($$max B); bump DOOM_SECTORS"; \
+	    echo "ERROR: $$v.elf $$size B > DOOM_SECTORS=$(DOOM_SECTORS) ($$max B); bump DOOM_SECTORS"; \
 	    exit 1; \
-	  fi
-	dd if=$(BUILD)/doom.elf   of=os.bin bs=512 seek=$(DOOM_LBA)  conv=notrunc status=none
+	  fi; \
+	done
+	dd if=$(BUILD)/doom1.elf  of=os.bin bs=512 seek=$(DOOM1_LBA)  conv=notrunc status=none
+	dd if=$(BUILD)/doom2.elf  of=os.bin bs=512 seek=$(DOOM2_LBA)  conv=notrunc status=none
+	dd if=$(BUILD)/freedm.elf of=os.bin bs=512 seek=$(FREEDM_LBA) conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
@@ -301,7 +329,9 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"16 ARROWS:$(APP16_LBA):$(BUILD)/arrows.elf" \
 		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
 		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf" \
-		"19 DOOM:$(DOOM_LBA):$(BUILD)/doom.elf"
+		"19 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
+		"20 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
+		"21 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 	@if [ -n "$(WAD_FILE)" ]; then \
