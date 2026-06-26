@@ -10,6 +10,7 @@
 #include "speaker.h"
 #include "fs.h"
 #include "vfs.h"
+#include "elf.h"
 #include "audio.h"
 #include "tcp.h"
 #include "dns.h"
@@ -288,6 +289,78 @@ static int vfs_syscall_write(int fd, unsigned int ubuf, unsigned int n)
 	return vfs_write(fd, (const void *)ubuf, n);
 }
 
+/* ---- program launch (SYS_EXEC) ---- */
+
+extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
+
+/* A program started with SYS_EXEC (by the shell) hands control back to a fresh
+ * shell when it ends, instead of to the graphical menu. This flag records that
+ * we are nested inside such a launch. */
+static int exec_active;
+
+/* Case-insensitive compare of two NUL-terminated names. */
+static int name_ci_eq(const char *a, const char *b)
+{
+	for (;; a++, b++) {
+		char ca = *a, cb = *b;
+		if (ca >= 'A' && ca <= 'Z') ca += 32;
+		if (cb >= 'A' && cb <= 'Z') cb += 32;
+		if (ca != cb)
+			return 0;
+		if (ca == 0)
+			return 1;
+	}
+}
+
+/* Find a TOC app by the name the user typed, ignoring the "<n> " slot-number
+ * prefix and letter case ("snake" matches the entry "17 SNAKE"). Returns the
+ * TOC index, or -1 if no app matches. */
+static int toc_find(const char *name)
+{
+	for (int i = 0; i < fs_count(); i++) {
+		const char *e = fs_name(i);
+		while (*e >= '0' && *e <= '9')     /* skip the leading slot number */
+			e++;
+		if (*e == ' ')
+			e++;
+		if (name_ci_eq(e, name))
+			return i;
+	}
+	return -1;
+}
+
+/* Load TOC app 'index' over the single user region and enter ring 3. Audio is
+ * silenced and the heap reset first because the previous app's pages are
+ * reused. Does not return on success; returns -1 if the image is malformed --
+ * and since the user region is then half-overwritten, the caller must abort to
+ * the menu rather than try to resume the program that called us. */
+static int exec_run(int index)
+{
+	unsigned int entry;
+
+	audio_mix_silence_all();                   /* mixer reads user pages we reuse */
+	paging_reset_user_heap();
+	if (elf_load(fs_lba(index), fs_sectors(index), &entry) != 0)
+		return -1;
+	enter_user_mode(entry, paging_user_stack_top());
+	return -1;                                 /* unreachable */
+}
+
+/* Called when the foreground ring-3 app ends (clean SYS_EXIT or a fault). If it
+ * was launched by the shell via SYS_EXEC, hand control to a fresh shell;
+ * otherwise fall back to the graphical menu. Does not return. */
+static void app_return(void)
+{
+	if (exec_active) {
+		exec_active = 0;
+		int sh = toc_find("shell");
+		if (sh >= 0)
+			exec_run(sh);              /* reload the shell; no return */
+		/* shell missing or unloadable: fall through to the menu */
+	}
+	menu_exit();                               /* does not return */
+}
+
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 static void syscall_dispatch(struct regs *r)
 {
@@ -308,9 +381,29 @@ static void syscall_dispatch(struct regs *r)
 	case 4:                                    /* SYS_ALLOC: -> user page or 0 */
 		r->eax = paging_user_alloc();
 		break;
-	case 5:                                    /* SYS_EXIT: return to the menu */
-		menu_exit();                       /* does not return */
+	case 5:                                    /* SYS_EXIT: back to the shell or menu */
+		app_return();                      /* does not return */
 		break;
+	case 41: {                                 /* SYS_EXEC: ebx=name -> -1 if no such app */
+		char kname[16];
+		if (copy_user_name(r->ebx, kname) != 0) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		int idx = toc_find(kname);
+		if (idx < 0) {                     /* unknown app: the caller stays alive */
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		serial_write("exec: ");
+		serial_write(kname);
+		serial_putc('\n');
+		exec_active = 1;                   /* child returns to a shell, not the menu */
+		exec_run(idx);                     /* replaces the caller; returns only on error */
+		exec_active = 0;                   /* image was bad: user region is trashed */
+		menu_exit();                       /* bail to the menu; does not return */
+		break;
+	}
 	case 6:                                    /* SYS_TICKS: -> PIT ticks */
 		r->eax = ticks;
 		break;
@@ -574,7 +667,7 @@ void isr_handler(struct regs *r)
 		serial_write("app: fault, killed (exception ");
 		serial_write_dec(r->int_no);
 		serial_write(")\n");
-		menu_exit();                       /* return to the menu (no return) */
+		app_return();                      /* back to the shell or menu (no return) */
 	}
 
 	serial_write("StinkOS: kernel exception ");
