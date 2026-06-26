@@ -4,6 +4,7 @@
 #include "net.h"
 #include "ethernet.h"
 #include "e1000.h"
+#include "tcp.h"
 
 static ipv4_t local_ip;            /* 0 until DHCP (or net_set_local_ip) fills it */
 static mac_t  local_mac;
@@ -25,6 +26,11 @@ void net_get_local_mac(mac_t out)
 
 int net_poll_once(void)
 {
+	/* Run the TCP retransmit timer every pump regardless of whether a frame
+	 * arrived -- the wire being silent is precisely when an unacked segment
+	 * needs to be resent. tcp_tick is cheap when no TCB has data in flight. */
+	tcp_tick();
+
 	unsigned char buf[ETH_MAX_FRAME];
 	unsigned int  n = e1000_poll_receive(buf, sizeof(buf));
 	if (n == 0)

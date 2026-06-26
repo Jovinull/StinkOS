@@ -21,6 +21,7 @@
 #include "tcp.h"
 #include "ipv4.h"
 #include "ethernet.h"
+#include "interrupts.h"   /* pit_ticks() for the RTO timer */
 
 #define TCP_MAX_CONNS    8
 #define TCP_BUFFER_SIZE  4096
@@ -28,6 +29,16 @@
 #define TCP_DEFAULT_WIN  4096
 
 #define EPHEMERAL_BASE   49152
+
+/* Retransmission constants. PIT runs at 100 Hz, so one "tick" is 10 ms.
+ *   - TCP_RTO_INITIAL  1000 ms (100 ticks): a conservative starting RTT
+ *     for a LAN where round-trips are sub-ms but we want headroom before
+ *     spamming the wire.
+ *   - TCP_RTO_MAX      60000 ms: ceiling after exponential backoff.
+ *   - TCP_MAX_RETRIES  5: ~31 s of total wait at exp backoff before drop. */
+#define TCP_RTO_INITIAL  100
+#define TCP_RTO_MAX      6000
+#define TCP_MAX_RETRIES  5
 
 struct tcb {
 	enum tcp_state state;
@@ -50,6 +61,15 @@ struct tcb {
 	unsigned char   tx_buf[TCP_BUFFER_SIZE];
 	unsigned int    tx_head;        /* next byte to put on wire     */
 	unsigned int    tx_tail;        /* next byte to append          */
+
+	/* Retransmission state. last_seg_ticks = PIT tick when the oldest
+	 * unacked segment was sent (or 0 if nothing is in flight). rto_ticks =
+	 * current timeout, doubled on every retry up to TCP_RTO_MAX. retries =
+	 * how many times the current segment has been resent; the connection
+	 * gets dropped after TCP_MAX_RETRIES consecutive failures. */
+	unsigned int    last_seg_ticks;
+	unsigned int    rto_ticks;
+	unsigned int    retries;
 
 	int             in_use;
 };
@@ -83,10 +103,57 @@ static int tcb_alloc(void)
 			t->rx_head = t->rx_tail = 0;
 			t->tx_head = t->tx_tail = 0;
 			t->rcv_wnd = TCP_BUFFER_SIZE;
+			t->last_seg_ticks = 0;
+			t->rto_ticks      = TCP_RTO_INITIAL;
+			t->retries        = 0;
 			return i;
 		}
 	}
 	return -1;
+}
+
+/* Mark `t` as having just sent a retransmittable segment so the RTO timer
+ * starts counting. Resets retries because the most recent emit was a fresh
+ * transmit, not a retransmit. */
+static void tcp_arm_rto(struct tcb *t)
+{
+	t->last_seg_ticks = pit_ticks();
+	t->rto_ticks      = TCP_RTO_INITIAL;
+	t->retries        = 0;
+}
+
+/* Re-emit the oldest unacked segment without advancing snd_nxt. Picks what to
+ * resend based on the connection state: SYN in SYN_SENT, the in-flight data
+ * chunk in ESTABLISHED/CLOSE_WAIT, FIN in FIN_WAIT_1 / LAST_ACK. */
+static void tcp_retransmit(struct tcb *t)
+{
+	unsigned int saved = t->snd_nxt;
+	t->snd_nxt = t->snd_una;           /* tcp_emit reads snd_nxt for h->seq */
+
+	switch (t->state) {
+	case TCP_SYN_SENT:
+		tcp_emit(t, TCP_SYN, (void *)0, 0);
+		break;
+	case TCP_FIN_WAIT_1:
+	case TCP_LAST_ACK:
+		tcp_emit(t, TCP_FIN | TCP_ACK, (void *)0, 0);
+		break;
+	case TCP_ESTABLISHED:
+	case TCP_CLOSE_WAIT: {
+		unsigned int chunk = saved - t->snd_una;
+		if (chunk > TCP_MSS)
+			chunk = TCP_MSS;
+		unsigned char linear[TCP_MSS];
+		for (unsigned int i = 0; i < chunk; i++)
+			linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
+		tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
+		break;
+	}
+	default:
+		break;
+	}
+
+	t->snd_nxt = saved;
 }
 
 /* Find the TCB matching the segment's (remote_ip, remote_port, local_port).
@@ -197,6 +264,7 @@ static void tcp_drain_tx(struct tcb *t)
 
 	tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
 	t->snd_nxt += chunk;
+	tcp_arm_rto(t);
 }
 
 /* Bare RST to an unsolicited segment (RFC 793 reset generation). */
@@ -234,6 +302,7 @@ tcp_handle_t tcp_connect(ipv4_t dst_ip, unsigned short dst_port)
 	t->state = TCP_SYN_SENT;
 	tcp_emit(t, TCP_SYN, (void *)0, 0);
 	t->snd_nxt += 1;                /* SYN consumes one sequence slot */
+	tcp_arm_rto(t);
 	return idx;
 }
 
@@ -298,11 +367,13 @@ void tcp_close(tcp_handle_t h)
 		t->state = TCP_FIN_WAIT_1;
 		tcp_emit(t, TCP_FIN | TCP_ACK, (void *)0, 0);
 		t->snd_nxt += 1;
+		tcp_arm_rto(t);
 		break;
 	case TCP_CLOSE_WAIT:
 		t->state = TCP_LAST_ACK;
 		tcp_emit(t, TCP_FIN | TCP_ACK, (void *)0, 0);
 		t->snd_nxt += 1;
+		tcp_arm_rto(t);
 		break;
 	default:
 		t->state  = TCP_CLOSED;
@@ -368,6 +439,13 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 				/* Trim acked bytes off the head of tx_buf. */
 				t->tx_head = (t->tx_head + acked) % TCP_BUFFER_SIZE;
 				t->snd_wnd = ntohs(h->window);
+				/* Fresh ACK clears the retransmit timer. If still some
+				 * bytes in flight, tcp_drain_tx re-arms it; if fully
+				 * caught up, leave last_seg_ticks=0 to disable RTO. */
+				if (t->snd_una == t->snd_nxt) {
+					t->last_seg_ticks = 0;
+					t->retries        = 0;
+				}
 				tcp_drain_tx(t);
 			}
 		}
@@ -432,5 +510,40 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 
 	default:
 		break;
+	}
+}
+
+void tcp_tick(void)
+{
+	unsigned int now = pit_ticks();
+
+	for (int i = 0; i < TCP_MAX_CONNS; i++) {
+		struct tcb *t = &conns[i];
+		if (!t->in_use || t->last_seg_ticks == 0)
+			continue;
+		if (t->snd_una == t->snd_nxt) {
+			/* Nothing unacked anymore; defensive clear in case the ACK
+			 * path missed it. */
+			t->last_seg_ticks = 0;
+			continue;
+		}
+		if ((now - t->last_seg_ticks) < t->rto_ticks)
+			continue;
+
+		if (t->retries >= TCP_MAX_RETRIES) {
+			/* Too many tries -- drop the connection. The peer might be
+			 * gone or unreachable; the user space will see CLOSED on
+			 * tcp_get_state and bail out. */
+			t->state  = TCP_CLOSED;
+			t->in_use = 0;
+			continue;
+		}
+
+		tcp_retransmit(t);
+		t->retries++;
+		t->rto_ticks *= 2;                  /* exponential backoff */
+		if (t->rto_ticks > TCP_RTO_MAX)
+			t->rto_ticks = TCP_RTO_MAX;
+		t->last_seg_ticks = now;
 	}
 }

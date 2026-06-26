@@ -81,4 +81,10 @@ enum tcp_state tcp_get_state(tcp_handle_t h);
 /* Dispatched from ipv4.c on IP_PROTO_TCP frames. */
 void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
 
+/* Periodic retransmission timer. Walks every in-use TCB and re-sends the
+ * oldest unacked segment if its RTO has elapsed. Exponential backoff doubles
+ * the RTO on each retry; after TCP_MAX_RETRIES the connection is dropped.
+ * Called from net_poll_once() so it runs whenever the kernel pumps the NIC. */
+void tcp_tick(void);
+
 #endif
