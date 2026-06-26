@@ -52,6 +52,11 @@ int atexit(void (*func)(void));
  * sys_fdelete, matching POSIX remove() on a regular file. */
 int remove(const char *path);
 int rename(const char *oldpath, const char *newpath);
+
+/* system() always fails -- StinkOS has no shell to hand a command line to.
+ * Ported code (Doom's optional zenity error popup, etc.) treats the failure
+ * as "feature unavailable" and falls back to a working path. */
+int system(const char *command);
 static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
 
@@ -571,5 +576,10 @@ int          getchar(void);
  * on it. */
 int fileno(FILE *fp);
 int isatty(int fd);
+
+/* fflush is a no-op: stdio is unbuffered (every fwrite turns straight into
+ * a syscall), so there is nothing to drain. Returns 0 for the success path
+ * callers expect. */
+int fflush(FILE *fp);
 
 #endif

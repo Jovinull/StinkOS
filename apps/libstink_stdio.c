@@ -301,3 +301,12 @@ int isatty(int fd)
 	(void)fd;
 	return 0;                                       /* StinkOS has no controlling TTY */
 }
+
+int fflush(FILE *fp)
+{
+	(void)fp;
+	/* Stdio here is unbuffered: every fread/fwrite turns straight into a
+	 * syscall. Nothing to flush -- but the standard return value matters,
+	 * so report success. */
+	return 0;
+}
