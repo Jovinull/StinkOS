@@ -300,20 +300,6 @@ extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
  * we are nested inside such a launch. */
 static int exec_active;
 
-/* Case-insensitive compare of two NUL-terminated names. */
-static int name_ci_eq(const char *a, const char *b)
-{
-	for (;; a++, b++) {
-		char ca = *a, cb = *b;
-		if (ca >= 'A' && ca <= 'Z') ca += 32;
-		if (cb >= 'A' && cb <= 'Z') cb += 32;
-		if (ca != cb)
-			return 0;
-		if (ca == 0)
-			return 1;
-	}
-}
-
 /* Build "NAME.ELF" from a user-typed name (e.g. "snake" → "SNAKE.ELF") and
  * verify it exists in StinkFS. Fills elf_out (16 bytes, NUL-padded) and
  * returns 0 on success, -1 if the name is too long or the file is not found. */
