@@ -14,6 +14,8 @@
 #include "tcp.h"
 #include "dns.h"
 #include "net.h"
+#include "ata.h"
+#include "mbr.h"
 #include "io.h"
 
 /* ---- assembly stubs ---- */
@@ -491,6 +493,36 @@ static void syscall_dispatch(struct regs *r)
 	case 38:                                   /* SYS_NET_POLL: -> 1 if frame processed, 0 if idle */
 		r->eax = (unsigned int)net_poll_once();
 		break;
+	case 39: {                                 /* SYS_DISK_INFO: ebx=drive ecx=model[41] edx=*sectors */
+		if (!paging_user_range_ok(r->ecx, 41) ||
+		    !paging_user_range_ok(r->edx, sizeof(unsigned int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		unsigned int secs = 0;
+		int rc = ata_drive_identify((int)r->ebx, (char *)r->ecx, &secs);
+		if (rc == 0)
+			*(unsigned int *)r->edx = secs;
+		r->eax = (unsigned int)rc;
+		break;
+	}
+	case 40: {                                 /* SYS_DISK_COPY: ebx=src_drv ecx=dst_drv edx=count esi=src_lba (dst_lba == src_lba for now) */
+		unsigned int src_drv  = r->ebx;
+		unsigned int dst_drv  = r->ecx;
+		unsigned int count    = r->edx;
+		unsigned int src_lba  = r->esi;
+		unsigned char buf[512];
+		unsigned int copied = 0;
+		for (unsigned int i = 0; i < count; i++) {
+			if (ata_drive_read((int)src_drv, src_lba + i, 1, buf) != 0)
+				break;
+			if (ata_drive_write((int)dst_drv, src_lba + i, 1, buf) != 0)
+				break;
+			copied++;
+		}
+		r->eax = copied;
+		break;
+	}
 	case 27: {                                 /* SYS_GETMOUSE: ebx=*dx ecx=*dy edx=*buttons */
 		if (!paging_user_range_ok(r->ebx, sizeof(int)) ||
 		    !paging_user_range_ok(r->ecx, sizeof(int)) ||
