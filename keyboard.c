@@ -24,6 +24,10 @@
 #define SC_ARROW_DOWN  0x50
 #define SC_ARROW_LEFT  0x4B
 #define SC_ARROW_RIGHT 0x4D
+#define SC_HOME        0x47
+#define SC_END         0x4F
+#define SC_PGUP        0x49
+#define SC_PGDN        0x51
 
 /* Scancode set 1 -> ASCII (unshifted). 0 means "no printable char". */
 static const char map_normal[128] = {
@@ -138,16 +142,20 @@ void keyboard_handle(void)
 		if (sc & SC_RELEASE)
 			return;                 /* only act on the key going down */
 
-		char arrow;
+		char nav;
 		switch (sc) {
-		case SC_ARROW_UP:    arrow = KEY_UP;    break;
-		case SC_ARROW_DOWN:  arrow = KEY_DOWN;  break;
-		case SC_ARROW_LEFT:  arrow = KEY_LEFT;  break;
-		case SC_ARROW_RIGHT: arrow = KEY_RIGHT; break;
-		default:             return;            /* other extended key: ignore */
+		case SC_ARROW_UP:    nav = KEY_UP;    break;
+		case SC_ARROW_DOWN:  nav = KEY_DOWN;  break;
+		case SC_ARROW_LEFT:  nav = KEY_LEFT;  break;
+		case SC_ARROW_RIGHT: nav = KEY_RIGHT; break;
+		case SC_HOME:        nav = KEY_HOME;  break;
+		case SC_END:         nav = KEY_END;   break;
+		case SC_PGUP:        nav = KEY_PGUP;  break;
+		case SC_PGDN:        nav = KEY_PGDN;  break;
+		default:             return;          /* other extended key: ignore */
 		}
-		serial_write("kbd: arrow\n");
-		kbuf_push(arrow);
+		serial_write("kbd: nav\n");
+		kbuf_push(nav);
 		return;
 	}
 
