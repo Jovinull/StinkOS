@@ -99,3 +99,8 @@ osdev-refs/
 CLAUDE.md
 TASKS.md
 history.txt
+
+# Doom WAD assets: user-supplied (downloaded via tools/fetch-wads.sh from
+# the freedoom github releases, or any other compatible WAD). Not versioned
+# because they're large binary blobs and not strictly part of the source.
+wads/
