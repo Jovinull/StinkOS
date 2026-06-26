@@ -285,6 +285,44 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 47: {                                 /* SYS_WAIT: -> exit_code of any reaped child, or -1 */
+		for (;;) {
+			struct proc *z = proc_find_zombie_child(0);
+			if (z) {
+				r->eax = (unsigned int)proc_reap(z);
+				break;
+			}
+			if (!proc_has_living_child()) {
+				r->eax = (unsigned int)-1;
+				break;
+			}
+			/* No zombie yet but children still alive. Sleep one tick at a
+			 * time -- sti+hlt lets the PIT IRQ fire and the scheduler hand
+			 * the CPU to whichever child might be ready to exit. */
+			__asm__ volatile ("sti; hlt; cli");
+		}
+		break;
+	}
+	case 48: {                                 /* SYS_WAITPID: ebx=pid -> exit_code, or -1 */
+		int target_pid = (int)r->ebx;
+		for (;;) {
+			struct proc *z = proc_find_zombie_child(target_pid);
+			if (z) {
+				r->eax = (unsigned int)proc_reap(z);
+				break;
+			}
+			/* Bail when the requested PID is neither a zombie child nor a
+			 * living child -- prevents waitpid() on a foreign PID looping
+			 * forever. */
+			struct proc *anyone = proc_get(target_pid);
+			if (!anyone || anyone->parent_pid != proc_current()->pid) {
+				r->eax = (unsigned int)-1;
+				break;
+			}
+			__asm__ volatile ("sti; hlt; cli");
+		}
+		break;
+	}
 	case 46: {                                 /* SYS_KILL: ebx=pid -> 0 or -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                    /* PID 1 (kinit) is not killable */

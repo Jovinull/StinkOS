@@ -250,6 +250,12 @@ static inline int sys_ping(unsigned int ip, unsigned int timeout_ms)
 static inline int sys_getpid(void)               { return __syscall(45, 0, 0, 0); }
 static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 0); }
 
+/* Block until any child of the caller exits, reap it, and return its exit
+ * code. Returns -1 if the caller has no children. sys_waitpid blocks for a
+ * specific PID and returns -1 if that PID is not a child of the caller. */
+static inline int sys_wait(void)                 { return __syscall(47, 0, 0, 0); }
+static inline int sys_waitpid(int pid)           { return __syscall(48, pid, 0, 0); }
+
 /* Compose a network-byte-order IPv4 address from four octets (a.b.c.d). */
 static inline unsigned int sys_ip4(unsigned int a, unsigned int b,
                                    unsigned int c, unsigned int d)

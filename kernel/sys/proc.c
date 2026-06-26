@@ -179,3 +179,47 @@ void proc_yield(void)
 
 	context_switch(&prev->esp, next->esp);
 }
+
+int proc_reap(struct proc *p)
+{
+	if (!p || p->state != PROC_ZOMBIE)
+		return -1;
+	int code = p->exit_code;
+	if (p->kstack_top) {
+		/* kstack_top is the EXCLUSIVE top, so the frame base sits 4 KiB below. */
+		pmm_free(p->kstack_top - 4096);
+	}
+	proc_free(p);
+	return code;
+}
+
+struct proc *proc_find_zombie_child(int pid)
+{
+	if (!running)
+		return 0;
+	for (int i = 0; i < PROC_MAX; i++) {
+		struct proc *p = &table[i];
+		if (p->state != PROC_ZOMBIE)
+			continue;
+		if (p->parent_pid != running->pid)
+			continue;
+		if (pid > 0 && p->pid != pid)
+			continue;
+		return p;
+	}
+	return 0;
+}
+
+int proc_has_living_child(void)
+{
+	if (!running)
+		return 0;
+	for (int i = 0; i < PROC_MAX; i++) {
+		struct proc *p = &table[i];
+		if (p->state == PROC_UNUSED || p->state == PROC_ZOMBIE)
+			continue;
+		if (p->parent_pid == running->pid)
+			return 1;
+	}
+	return 0;
+}

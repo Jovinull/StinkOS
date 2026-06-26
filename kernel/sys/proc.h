@@ -82,4 +82,20 @@ struct proc   *proc_kthread_create(const char *name, void (*entry)(void));
  * context (the PIT tick uses it) as well as voluntarily from kernel code. */
 void           proc_yield(void);
 
+/* Release a ZOMBIE proc: free its kernel-stack frame back to the PMM and mark
+ * the slot UNUSED. Returns the proc's exit_code. Safe to call only on a
+ * ZOMBIE; returns -1 if the slot is in any other state. */
+int            proc_reap(struct proc *p);
+
+/* Find a ZOMBIE child of the caller. If `pid` > 0, return that PID only when
+ * it is a ZOMBIE child of the caller; if `pid` <= 0, return any ZOMBIE child.
+ * Returns NULL if no matching ZOMBIE is currently present (caller may have
+ * living children that have not yet exited). */
+struct proc   *proc_find_zombie_child(int pid);
+
+/* True if the caller has any non-UNUSED non-ZOMBIE child, i.e. there is still
+ * a child that might exit in the future. Used by SYS_WAIT to distinguish
+ * "nothing to wait for" from "waiting on a live child". */
+int            proc_has_living_child(void);
+
 #endif
