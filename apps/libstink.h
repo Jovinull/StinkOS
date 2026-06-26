@@ -68,6 +68,17 @@ static inline unsigned int sys_get_keyevent(void)
 #define KEY_EV_EXTENDED  0x00000100u
 #define KEY_EV_SC_MASK   0x000000FFu
 
+/* Blits a w*h block of packed 0xXXRRGGBB pixels from 'src' (row-major,
+ * stride = w) to the framebuffer at (x, y). One syscall per frame replaces
+ * what sys_draw would do pixel-by-pixel (a 1024x768 frame is 786K pixels --
+ * 786K syscalls is not viable). Returns 0 on success, -1 if the source buffer
+ * isn't inside the app's user pages. */
+static inline int sys_blit(int x, int y, int w, int h, const unsigned int *src)
+                                                 { return __syscall(26,
+                                                                    (int)src,
+                                                                    (x << 16) | (y & 0xFFFF),
+                                                                    (w << 16) | (h & 0xFFFF)); }
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is

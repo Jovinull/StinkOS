@@ -419,6 +419,24 @@ static void syscall_dispatch(struct regs *r)
 	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
 		r->eax = keyboard_get_event();
 		break;
+	case 26: {                                 /* SYS_BLIT: ebx=src, ecx=(x<<16|y), edx=(w<<16|h) */
+		unsigned int x = r->ecx >> 16;
+		unsigned int y = r->ecx & 0xFFFF;
+		unsigned int w = r->edx >> 16;
+		unsigned int h = r->edx & 0xFFFF;
+		unsigned int bytes = w * h * 4;
+		if (w == 0 || h == 0 || bytes / 4 / w != h) {  /* overflow guard */
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		if (!paging_user_range_ok(r->ebx, bytes)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
+		r->eax = 0;
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;
