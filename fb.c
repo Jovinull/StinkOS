@@ -56,6 +56,37 @@ void fb_rect(unsigned int x0, unsigned int y0,
 			fb_putpixel(x0 + x, y0 + y, rgb);
 }
 
+/* Copies a 'w' by 'h' rectangle of packed 0xXXRRGGBB pixels from 'src' (a
+ * row-major user buffer with stride = w) to the framebuffer at (x0, y0). The
+ * destination is clipped to the visible area; the source is not -- the caller
+ * supplies w * h words. Writes are inlined per row to avoid the per-pixel
+ * function-call overhead of fb_putpixel on a 1024x768 surface (~786K pixels). */
+void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
+             const unsigned int *src)
+{
+	if (x0 >= width || y0 >= height)
+		return;
+
+	unsigned int cw = w;
+	unsigned int ch = h;
+	if (x0 + cw > width)  cw = width  - x0;
+	if (y0 + ch > height) ch = height - y0;
+
+	for (unsigned int row = 0; row < ch; row++) {
+		volatile unsigned char *p = fb + (y0 + row) * pitch + x0 * bytes_pp;
+		const unsigned int     *s = src + row * w;
+		for (unsigned int col = 0; col < cw; col++) {
+			unsigned int rgb = s[col];
+			p[0] =  rgb        & 0xFF;
+			p[1] = (rgb >> 8)  & 0xFF;
+			p[2] = (rgb >> 16) & 0xFF;
+			if (bytes_pp == 4)
+				p[3] = 0;
+			p += bytes_pp;
+		}
+	}
+}
+
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb)
 {
 	const unsigned char *glyph = font8x8[(unsigned char)c & 0x7F];

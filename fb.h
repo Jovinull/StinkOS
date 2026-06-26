@@ -10,6 +10,8 @@ unsigned int fb_getpixel(unsigned int x, unsigned int y);
 void fb_fill(unsigned int rgb);
 void fb_rect(unsigned int x0, unsigned int y0,
              unsigned int w, unsigned int h, unsigned int rgb);
+void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
+             const unsigned int *src);
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb);
 void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
 
