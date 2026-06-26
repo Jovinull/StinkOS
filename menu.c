@@ -11,6 +11,7 @@
 #include "elf.h"
 #include "fs.h"
 #include "rtc.h"
+#include "audio.h"
 
 extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
 
@@ -209,6 +210,11 @@ static void redraw(void)
 
 void menu_exit(void)
 {
+	/* The IRQ-driven mixer reads sample pointers that live in the app's user
+	 * pages. Once we longjmp out and reset the user heap (in launch()), those
+	 * pages get unmapped; if a sound is still queued the next IRQ would walk
+	 * freed memory. Cut every channel before tearing down. */
+	audio_mix_silence_all();
 	klongjmp(&exit_ctx, 1);                 /* jump back into launch() */
 }
 
