@@ -101,6 +101,30 @@ int mkdir(const char *path, mode_t mode)
 	return 0;                              /* no directories in StinkFS */
 }
 
+/* Cleanup handlers registered via atexit. The kernel returns control to the
+ * menu via SYS_EXIT (long-jump) without giving userland a chance to run, so
+ * the registration is silent and the functions are never invoked -- matches
+ * what other minimal hosts (soso, doomgeneric on raw fb) settle on. */
+int atexit(void (*func)(void))
+{
+	(void)func;
+	return 0;
+}
+
+int remove(const char *path)
+{
+	return sys_fdelete(path);
+}
+
+int rename(const char *oldpath, const char *newpath)
+{
+	(void)oldpath;
+	(void)newpath;
+	/* StinkFS has no rename primitive; ported code that hits this path
+	 * (Doom's atomic-save sequence) just falls back to a non-atomic save. */
+	return -1;
+}
+
 /* ASCII case-insensitive comparisons. Doom uses them on lump names and a few
  * config-file keys -- never on locale-aware text -- so the "C" locale
  * folding (uppercase A-Z only) is fine. */

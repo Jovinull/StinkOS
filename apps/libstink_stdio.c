@@ -288,3 +288,16 @@ int getchar(void)
 	/* No stdin yet -- no app forwards keyboard input through a FILE. */
 	return EOF;
 }
+
+int fileno(FILE *fp)
+{
+	if (!fp || !fp->in_use)
+		return -1;
+	return fp->fd;                                  /* -2 for serial, real fd otherwise */
+}
+
+int isatty(int fd)
+{
+	(void)fd;
+	return 0;                                       /* StinkOS has no controlling TTY */
+}

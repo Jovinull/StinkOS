@@ -40,6 +40,18 @@ static inline void sys_exit(void)                { __syscall(5, 0, 0, 0); }
  * to the menu, ignoring any provided status code. */
 static inline void exit(int status)              { (void)status; sys_exit(); for (;;) ; }
 static inline void abort(void)                   { sys_exit(); for (;;) ; }
+
+/* atexit registers a cleanup callback to run at exit time. The kernel always
+ * tears the app down via SYS_EXIT (long-jump back to the menu) without
+ * running anything, so we accept the registration and never call it -- the
+ * same behaviour the soso port and other minimal hosts settle on. */
+int atexit(void (*func)(void));
+
+/* File-name operations that exist outside the FILE* layer. rename is stubbed
+ * (StinkFS has no rename primitive) and returns -1; remove is an alias for
+ * sys_fdelete, matching POSIX remove() on a regular file. */
+int remove(const char *path);
+int rename(const char *oldpath, const char *newpath);
 static inline unsigned int sys_ticks(void)       { return (unsigned int)__syscall(6, 0, 0, 0); }
 static inline void sys_sound(unsigned int freq)  { __syscall(7, (int)freq, 0, 0); }
 
@@ -551,5 +563,13 @@ int          vfprintf(FILE *fp, const char *fmt, va_list args);
 int          puts(const char *s);
 int          putchar(int c);
 int          getchar(void);
+
+/* POSIX-style descriptor accessors. fileno returns the underlying VFS fd of
+ * a FILE* (or -1 for the serial stdout/stderr sentinels and closed slots).
+ * isatty always reports "not a terminal" -- StinkOS has no controlling TTY
+ * model -- which is the safe answer for ported code that gates output styling
+ * on it. */
+int fileno(FILE *fp);
+int isatty(int fd);
 
 #endif
