@@ -62,11 +62,11 @@ static void draw_progress(unsigned int done, unsigned int total)
 	int bar_x = 140, bar_y = 360, bar_w = 720, bar_h = 24;
 	sys_fillrect(bar_x, bar_y, bar_w, bar_h, 0x202830);
 
-	unsigned long long filled = (unsigned long long)done * (unsigned long long)bar_w;
+	unsigned int filled = 0;
 	if (total > 0)
-		filled /= (unsigned long long)total;
-	if ((unsigned int)filled > (unsigned int)bar_w)
-		filled = bar_w;
+		filled = done * (unsigned int)bar_w / total;
+	if (filled > (unsigned int)bar_w)
+		filled = (unsigned int)bar_w;
 	sys_fillrect(bar_x, bar_y, (int)filled, bar_h, COLOR_BAR);
 
 	char buf[64];
