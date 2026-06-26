@@ -26,6 +26,18 @@ static inline void outw(unsigned short port, unsigned short val)
 	__asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
 }
 
+static inline unsigned int inl(unsigned short port)
+{
+	unsigned int ret;
+	__asm__ volatile ("inl %1, %0" : "=a"(ret) : "Nd"(port));
+	return ret;
+}
+
+static inline void outl(unsigned short port, unsigned int val)
+{
+	__asm__ volatile ("outl %0, %1" : : "a"(val), "Nd"(port));
+}
+
 /* Brief delay by writing to an unused port; lets slow PICs settle. */
 static inline void io_wait(void)
 {

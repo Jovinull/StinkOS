@@ -12,6 +12,7 @@
 #include "menu.h"
 #include "mouse.h"
 #include "audio.h"
+#include "pci.h"
 
 void kernel_main(void)
 {
@@ -57,6 +58,7 @@ void kernel_main(void)
 		                                      the 8042, so IRQ12 must not race it */
 	audio_init();                              /* probes SB16; no-op if -device sb16 absent */
 	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
+	pci_scan();                                /* log every PCI device for visibility */
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 
