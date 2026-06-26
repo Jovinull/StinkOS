@@ -5,10 +5,10 @@
 #include "fs.h"
 #include "ata.h"
 
-/* Disk layout (must match the Makefile). The app region spans LBA 128..287;
+/* Disk layout (must match the Makefile). The app region spans LBA 128..327;
  * apps are placed at the LBAs recorded in the TOC (slot sizes need not be
  * uniform), and all metadata lives above the region. */
-#define TOC_LBA   304              /* app table-of-contents */
+#define TOC_LBA   328              /* app table-of-contents */
 #define MAX_APPS  32
 
 /* StinkFS layout. The data region is sized to hold the full Freedoom asset
@@ -16,9 +16,9 @@
  * freedm.wad (~22 MiB) ~= 78 MiB, plus ~20 MiB of headroom for save games
  * and any other files. */
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
-#define FS_DIR_LBA    305          /* directory sector */
-#define FS_DATA_LBA   306          /* first data sector */
-#define FS_DATA_END   200306       /* one past the last data sector (~100 MiB) */
+#define FS_DIR_LBA    329          /* directory sector */
+#define FS_DATA_LBA   330          /* first data sector */
+#define FS_DATA_END   200330       /* one past the last data sector (~100 MiB) */
 #define FS_MAX_FILES  16
 
 struct toc_entry {

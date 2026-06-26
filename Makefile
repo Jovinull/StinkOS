@@ -92,30 +92,31 @@ APP11_LBA = 208
 APP12_LBA = 216
 APP13_LBA = 224
 APP14_LBA = 232
-APP15_LBA = 240           # SHELL  — 16-sector slot (240..255)
-APP16_LBA = 256           # ARROWS — 8-sector slot  (256..263)
-APP17_LBA = 264           # SNAKE  — 16-sector slot (264..279)
-APP18_LBA = 280           # PONG   — 16-sector slot (280..295)
-APP19_LBA = 296           # INSTALL — 8-sector slot  (296..303)
+APP15_LBA = 240           # SHELL   — 24-sector slot (240..263)
+APP16_LBA = 264           # ARROWS  — 8-sector slot  (264..271)
+APP17_LBA = 272           # SNAKE   — 16-sector slot (272..287)
+APP18_LBA = 288           # PONG    — 16-sector slot (288..303)
+APP19_LBA = 304           # INSTALL — 8-sector slot  (304..311)
+APP20_LBA = 312           # EDIT    — 16-sector slot (312..327)
 
-# The small-app region spans LBA 128..303. Metadata: the app TOC at LBA 304,
-# the StinkFS directory at 305, and a ~100 MiB StinkFS data region at 306+.
+# The small-app region spans LBA 128..327. Metadata: the app TOC at LBA 328,
+# the StinkFS directory at 329, and a ~100 MiB StinkFS data region at 330+.
 # The Doom slots live just past that data region.
-TOC_LBA      = 304
-FS_DIR_LBA   = 305
-FS_DATA_LBA  = 306
-FS_DATA_END  = 200306       # must match FS_DATA_END in fs.c (~100 MiB)
+TOC_LBA      = 328
+FS_DIR_LBA   = 329
+FS_DATA_LBA  = 330
+FS_DATA_END  = 200330       # must match FS_DATA_END in fs.c (~100 MiB)
 # Each Doom variant gets its own 1 MiB slot just past the StinkFS data region:
 #   freedoom1 (Doom 1 set)   -> DOOM1_LBA
 #   freedoom2 (Doom 2 set)   -> DOOM2_LBA
 #   freedm    (deathmatch)   -> FREEDM_LBA
 DOOM_SECTORS    = 2048
-DOOM1_LBA       = 200306
-DOOM2_LBA       = 202354        # DOOM1_LBA + DOOM_SECTORS
-FREEDM_LBA      = 204402        # DOOM2_LBA + DOOM_SECTORS
-STINKPKG_LBA    = 206450        # FREEDM_LBA + DOOM_SECTORS
+DOOM1_LBA       = 200330
+DOOM2_LBA       = 202378        # DOOM1_LBA + DOOM_SECTORS
+FREEDM_LBA      = 204426        # DOOM2_LBA + DOOM_SECTORS
+STINKPKG_LBA    = 206474        # FREEDM_LBA + DOOM_SECTORS
 STINKPKG_SECTORS = 256          # 128 KiB -- HTTP client + UI + pkg parser
-DISK_END        = 105830400     # (STINKPKG_LBA + STINKPKG_SECTORS) * 512 = 206706 * 512
+DISK_END        = 105845760     # (STINKPKG_LBA + STINKPKG_SECTORS) * 512 = 206730 * 512
 
 # WAD bundling. Defaults look under wads/ for the three Freedoom releases the
 # fetch-wads.sh script downloads; override on the command line to point at a
@@ -256,6 +257,11 @@ $(BUILD)/installer.elf: apps/crt0.s apps/installer.c apps/libstink.h apps/app.ld
 	$(CC) $(CFLAGS) -c apps/installer.c -o $(BUILD)/installer_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/installer.elf $(BUILD)/crt0.o $(BUILD)/installer_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/edit.elf: apps/crt0.s apps/edit.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/edit.c -o $(BUILD)/edit_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/edit.elf $(BUILD)/crt0.o $(BUILD)/edit_app.o $(LIBSTINK_OBJS)
+
 $(BUILD)/stinkpkg.elf: apps/crt0.s apps/stinkpkg.c apps/stinkpkg.h apps/libstink.h apps/libstink_http.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/stinkpkg.c -o $(BUILD)/stinkpkg_app.o
@@ -296,7 +302,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
@@ -321,6 +327,7 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/pong.elf      of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/installer.elf of=os.bin bs=512 seek=$(APP19_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/edit.elf      of=os.bin bs=512 seek=$(APP20_LBA) conv=notrunc status=none
 	@for v in doom1 doom2 freedm; do \
 	  size=$$(stat -c%s $(BUILD)/$$v.elf); max=$$(($(DOOM_SECTORS) * 512)); \
 	  if [ $$size -gt $$max ]; then \
@@ -357,10 +364,11 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
 		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf" \
 		"19 INSTALL:$(APP19_LBA):$(BUILD)/installer.elf" \
-		"20 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
-		"21 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
-		"22 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf" \
-		"23 PKG:$(STINKPKG_LBA):$(BUILD)/stinkpkg.elf"
+		"20 EDIT:$(APP20_LBA):$(BUILD)/edit.elf" \
+		"21 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
+		"22 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
+		"23 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf" \
+		"24 PKG:$(STINKPKG_LBA):$(BUILD)/stinkpkg.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 	@stinkfs_args=""; \
