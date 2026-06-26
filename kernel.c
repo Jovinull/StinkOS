@@ -14,6 +14,7 @@
 #include "audio.h"
 #include "pci.h"
 #include "e1000.h"
+#include "net.h"
 
 void kernel_main(void)
 {
@@ -61,6 +62,7 @@ void kernel_main(void)
 	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
 	pci_scan();                                /* log every PCI device for visibility */
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
+	net_init();                                /* caches local MAC for L2 emit */
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 
