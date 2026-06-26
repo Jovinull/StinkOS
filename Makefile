@@ -5,6 +5,18 @@ AS = i386-elf-as
 LD = i386-elf-ld
 CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
          -ffunction-sections -fdata-sections
+
+# Kernel source tree. Sources live under boot/ and kernel/<subsystem>/; objects
+# stay flat in build/ (basenames are unique across the tree). VPATH lets the
+# pattern rules resolve a bare source name to whichever subdirectory holds it,
+# and KINCLUDES puts every kernel header dir on the include path so the existing
+# bare `#include "foo.h"` lines keep resolving without per-file edits.
+VPATH = boot kernel/arch kernel/drivers/video kernel/drivers/input \
+        kernel/drivers/storage kernel/drivers/audio kernel/drivers/net \
+        kernel/drivers/misc kernel/fs kernel/sys kernel/ui
+KINCLUDES = -Ikernel/arch -Ikernel/drivers/video -Ikernel/drivers/input \
+            -Ikernel/drivers/storage -Ikernel/drivers/audio -Ikernel/drivers/net \
+            -Ikernel/drivers/misc -Ikernel/fs -Ikernel/sys -Ikernel/ui
 # App link flags: omagic (-N) packs the loadable segment with no page-alignment
 # gap, and -s strips the symbol tables, keeping each app ELF down to one sector.
 # Apps are a single flat code+data region (one set of user pages), so the load
@@ -101,7 +113,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 $(BUILD)/%.o: %.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(KINCLUDES) -c $< -o $@
 
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(AS) -O0 $< -o $@
@@ -272,8 +284,8 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
-	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
+os: $(LINK_OBJS) boot/linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+	$(LD) -T boot/linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
 		exit 1; fi
