@@ -276,6 +276,61 @@ static void cmd_search(void)
 
 /* ---- install ---- */
 
+/* True if `target` matches the start of any line of `text` followed by NUL
+ * or newline. Used to test if a candidate filename appears in a manifest. */
+static int line_starts_with(const char *text, int text_len, const char *target)
+{
+	int ls = 0;
+	for (int i = 0; i <= text_len; i++) {
+		if (i == text_len || text[i] == '\n' || text[i] == '\0') {
+			int k = 0;
+			while (target[k] && (ls + k) < i && text[ls + k] == target[k])
+				k++;
+			if (target[k] == '\0' && (ls + k == i))
+				return 1;
+			ls = i + 1;
+		}
+	}
+	return 0;
+}
+
+/* Return 1 if any pkg-*.lst manifest other than `self_pkg`'s already claims
+ * `fname`. Walks every StinkFS file via sys_finfo, fread()s any pkg-*.lst
+ * (cap 1024 bytes per manifest) and scans line-by-line. */
+static int filename_claimed_elsewhere(const char *fname, const char *self_pkg)
+{
+	int count = sys_fcount();
+	for (int i = 0; i < count; i++) {
+		char en[16];
+		if (sys_finfo(i, en) < 0)
+			continue;
+		/* match pkg-<*>.lst pattern; ignore other StinkFS entries */
+		if (en[0] != 'p' || en[1] != 'k' || en[2] != 'g' || en[3] != '-')
+			continue;
+		int el = 0;
+		while (en[el] && el < 16) el++;
+		if (el < 8) continue;
+		if (en[el - 4] != '.' || en[el - 3] != 'l' ||
+		    en[el - 2] != 's' || en[el - 1] != 't')
+			continue;
+
+		/* Skip self: en = "pkg-<self_pkg>.lst" */
+		int s = 0;
+		while (self_pkg[s] && (4 + s) < el && en[4 + s] == self_pkg[s])
+			s++;
+		if (self_pkg[s] == '\0' && (4 + s) == (el - 4))
+			continue;
+
+		char manifest[1024];
+		int n = sys_fread(en, manifest, sizeof(manifest));
+		if (n <= 0)
+			continue;
+		if (line_starts_with(manifest, n, fname))
+			return 1;
+	}
+	return 0;
+}
+
 static int unpack_package(const unsigned char *data, unsigned int len)
 {
 	if (len < sizeof(struct stinkpkg_hdr))
@@ -289,6 +344,22 @@ static int unpack_package(const unsigned char *data, unsigned int len)
 	const unsigned char *cur = data + sizeof(*h) +
 	                           h->dep_count * sizeof(struct stinkpkg_dep);
 	const struct stinkpkg_file *files = (const struct stinkpkg_file *)cur;
+
+	/* Conflict detection: refuse to clobber a file claimed by another
+	 * package. Two packages co-installing the same filename almost always
+	 * means one overwrites the other on next upgrade, breaking remove(). */
+	char this_pkg[STINKPKG_NAME_LEN];
+	for (int k = 0; k < STINKPKG_NAME_LEN; k++)
+		this_pkg[k] = h->name[k];
+	this_pkg[STINKPKG_NAME_LEN - 1] = '\0';
+	for (unsigned int i = 0; i < h->file_count; i++) {
+		char fname[STINKPKG_FILE_LEN + 1];
+		for (int k = 0; k < STINKPKG_FILE_LEN; k++)
+			fname[k] = files[i].name[k];
+		fname[STINKPKG_FILE_LEN] = '\0';
+		if (filename_claimed_elsewhere(fname, this_pkg))
+			return -1;
+	}
 
 	/* Write a "pkg-<name>.lst" with the file names so cmd_remove can
 	 * clean up later. */
