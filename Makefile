@@ -34,7 +34,7 @@ DOOM_SHIMS  = apps/doom-shims
 DOOM_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
               -ffunction-sections -fdata-sections \
               -fno-builtin -fno-strict-aliasing \
-              -DNORMALUNIX -DLINUX -D_DEFAULT_SOURCE \
+              -DNORMALUNIX -DLINUX -D_DEFAULT_SOURCE -DFEATURE_SOUND \
               -I $(DOOM_SHIMS) -I apps -I $(DOOM_DIR) \
               -w
 
@@ -58,7 +58,7 @@ DOOM_SRCS = dummy.c am_map.c doomdef.c doomstat.c dstrings.c d_event.c \
             tables.c v_video.c wi_stuff.c \
             w_checksum.c w_file.c w_main.c w_wad.c w_file_stdc.c \
             z_zone.c \
-            doomgeneric.c doomgeneric_stink.c
+            doomgeneric.c doomgeneric_stink.c i_sound_stink.c
 
 DOOM_OBJS = $(addprefix $(BUILD)/doom/, $(DOOM_SRCS:.c=.o))
 
