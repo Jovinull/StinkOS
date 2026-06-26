@@ -32,4 +32,10 @@ int  e1000_get_mac(unsigned char *out);
  * delivered minus the trailing CRC (RCTL.SECRC strips it). */
 unsigned int e1000_poll_receive(void *buf, unsigned int max_len);
 
+/* Sends 'len' bytes from 'buf' on the wire as a single Ethernet frame.
+ * The chip prepends preamble and appends the CRC; caller supplies just the
+ * dst-mac/src-mac/ethertype/payload (14 bytes header + payload). Blocks on
+ * a full TX ring; returns the byte count on success or -1 on bad arguments. */
+int e1000_send_frame(const void *buf, unsigned int len);
+
 #endif
