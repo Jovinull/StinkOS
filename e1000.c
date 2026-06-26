@@ -34,7 +34,36 @@
 #define E1000_RAL0      0x5400     /* receive address low (entry 0)  */
 #define E1000_RAH0      0x5404     /* receive address high (entry 0) */
 
-#define E1000_CTRL_RST  0x04000000u   /* chip reset (self-clearing) */
+#define E1000_CTRL_RST  0x04000000u   /* chip reset (self-clearing)  */
+
+/* RCTL (receive control) bits. */
+#define E1000_RCTL_EN          0x00000002u   /* receiver enable          */
+#define E1000_RCTL_SBP         0x00000004u   /* store bad packets        */
+#define E1000_RCTL_UPE         0x00000008u   /* unicast promiscuous      */
+#define E1000_RCTL_MPE         0x00000010u   /* multicast promiscuous    */
+#define E1000_RCTL_BAM         0x00008000u   /* broadcast accept         */
+#define E1000_RCTL_BSIZE_2048  0x00000000u   /* 2 KiB receive buffer     */
+#define E1000_RCTL_SECRC       0x04000000u   /* strip CRC from packets   */
+
+/* RX descriptor status bits. */
+#define E1000_RXD_STAT_DD      0x01u         /* descriptor done          */
+#define E1000_RXD_STAT_EOP     0x02u         /* end of packet            */
+
+#define RX_RING_COUNT  32
+#define RX_BUF_SIZE    2048
+
+struct rx_desc {
+	unsigned long long addr;
+	unsigned short     length;
+	unsigned short     checksum;
+	unsigned char      status;
+	unsigned char      errors;
+	unsigned short     special;
+} __attribute__((packed));
+
+static struct rx_desc  rx_ring[RX_RING_COUNT] __attribute__((aligned(16)));
+static unsigned char   rx_buffers[RX_RING_COUNT][RX_BUF_SIZE] __attribute__((aligned(16)));
+static unsigned int    rx_cursor;          /* next descriptor we'll consume */
 
 static volatile unsigned int *e1000_mmio;
 static int                    e1000_initialised;
@@ -112,8 +141,10 @@ int e1000_init(void)
 	}
 
 	read_mac_from_rar();
+	setup_rx();
 	e1000_initialised = 1;
 	log_mac();
+	serial_write("e1000: RX ring armed\n");
 	return 1;
 }
 
@@ -126,4 +157,60 @@ int e1000_get_mac(unsigned char *out)
 	for (int i = 0; i < 6; i++)
 		out[i] = e1000_mac[i];
 	return 0;
+}
+
+/* Wire each RX descriptor at its dedicated 2 KiB buffer and tell the chip
+ * about the ring. Identity-mapped kernel memory means the virtual address
+ * of rx_ring / rx_buffers is the physical address the controller will DMA
+ * to. RDT is set one slot behind RDH so the device sees a fully-populated
+ * ring (32 buffers ready to fill). */
+static void setup_rx(void)
+{
+	for (int i = 0; i < RX_RING_COUNT; i++) {
+		rx_ring[i].addr     = (unsigned long long)(unsigned int)rx_buffers[i];
+		rx_ring[i].status   = 0;
+	}
+	rx_cursor = 0;
+
+	e1000_write(E1000_RDBAL, (unsigned int)rx_ring);
+	e1000_write(E1000_RDBAH, 0);
+	e1000_write(E1000_RDLEN, RX_RING_COUNT * sizeof(struct rx_desc));
+	e1000_write(E1000_RDH,   0);
+	e1000_write(E1000_RDT,   RX_RING_COUNT - 1);
+
+	/* Zero the multicast table so spurious group MACs don't trigger us. */
+	for (int i = 0; i < 128; i++)
+		e1000_write(E1000_MTA + i * 4, 0);
+
+	e1000_write(E1000_RCTL,
+	            E1000_RCTL_EN  | E1000_RCTL_BAM   |
+	            E1000_RCTL_UPE | E1000_RCTL_MPE   |
+	            E1000_RCTL_BSIZE_2048 | E1000_RCTL_SECRC);
+}
+
+/* Polls the next RX descriptor for a completed packet. Returns the frame
+ * length on success (0..len_max) and copies the payload into 'buf'; returns
+ * 0 when no packet is ready. Advances RDT so the chip can refill the slot. */
+unsigned int e1000_poll_receive(void *buf, unsigned int max_len)
+{
+	if (!e1000_initialised || !buf || max_len == 0)
+		return 0;
+
+	struct rx_desc *d = &rx_ring[rx_cursor];
+	if (!(d->status & E1000_RXD_STAT_DD))
+		return 0;
+
+	unsigned int len = d->length;
+	if (len > max_len)
+		len = max_len;
+
+	const unsigned char *src = rx_buffers[rx_cursor];
+	unsigned char       *dst = (unsigned char *)buf;
+	for (unsigned int i = 0; i < len; i++)
+		dst[i] = src[i];
+
+	d->status = 0;
+	e1000_write(E1000_RDT, rx_cursor);
+	rx_cursor = (rx_cursor + 1) % RX_RING_COUNT;
+	return len;
 }
