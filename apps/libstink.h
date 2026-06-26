@@ -139,6 +139,49 @@ static inline void sys_audio_stop(int handle)    { __syscall(29, handle, 0, 0); 
 static inline void sys_audio_set_volume(int handle, int volume)
                                                  { __syscall(30, handle, volume, 0); }
 
+/* TCP socket-like syscalls. Each connection gets a kernel-side handle
+ * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
+ * ports in host byte order. The DNS helpers below convert a hostname into
+ * an IP via the DHCP-discovered resolver.
+ *
+ * Typical client flow:
+ *
+ *   int h = sys_sock_connect(server_ip, 80);
+ *   while (sys_sock_state(h) != SYS_TCP_ESTABLISHED) sys_net_poll();
+ *   sys_sock_send(h, request, request_len);
+ *   while (got = sys_sock_recv(h, buf, sizeof(buf)), got >= 0) {
+ *       if (got > 0) consume(buf, got);
+ *       else         sys_net_poll();
+ *   }
+ *   sys_sock_close(h);
+ */
+#define SYS_TCP_CLOSED       0
+#define SYS_TCP_SYN_SENT     2
+#define SYS_TCP_ESTABLISHED  4
+#define SYS_TCP_CLOSE_WAIT   7
+#define SYS_TCP_TIME_WAIT    10
+
+static inline int sys_sock_connect(unsigned int ip, unsigned short port)
+                                                 { return __syscall(31, (int)ip, (int)port, 0); }
+static inline int sys_sock_send(int h, const void *buf, unsigned int len)
+                                                 { return __syscall(32, h, (int)buf, (int)len); }
+static inline int sys_sock_recv(int h, void *buf, unsigned int max)
+                                                 { return __syscall(33, h, (int)buf, (int)max); }
+static inline void sys_sock_close(int h)         { __syscall(34, h, 0, 0); }
+static inline int sys_sock_state(int h)          { return __syscall(35, h, 0, 0); }
+
+/* DNS: async request + poll. Most callers spin on sys_dns_poll(&ip) while
+ * pumping sys_net_poll() between checks. */
+static inline int sys_dns_request(const char *name)
+                                                 { return __syscall(36, (int)name, 0, 0); }
+static inline int sys_dns_poll(unsigned int *out_ip)
+                                                 { return __syscall(37, (int)out_ip, 0, 0); }
+
+/* Drive the receive path one frame at a time. Returns 1 if a packet was
+ * processed, 0 if the NIC queue was empty. Apps that do networking should
+ * call this in their main loop. */
+static inline int sys_net_poll(void)             { return __syscall(38, 0, 0, 0); }
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is
