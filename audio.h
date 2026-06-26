@@ -32,4 +32,19 @@ void audio_handle_irq(void);
  * mixer use this to verify the DSP is actually clocking through DMA. */
 unsigned int audio_irq_count_get(void);
 
+/* Start the SB16's auto-init DMA loop, streaming whatever sits in the kernel
+ * audio ring buffer at AUDIO_RATE_HZ mono unsigned 8-bit. Returns 0 on
+ * success, -1 if no DSP is present. Idempotent (no-op when already running). */
+int  audio_start_output(void);
+
+/* Pause the DSP + cut the speaker. The DMA channel remains armed so a
+ * subsequent audio_start_output picks back up cleanly. */
+void audio_stop_output(void);
+
+/* DMA ring buffer accessors. The mixer fills audio_buffer_ptr()[0..size)
+ * with mixed mono 8-bit unsigned samples; the SB16 reads them in lockstep. */
+unsigned char *audio_buffer_ptr(void);
+unsigned int   audio_buffer_size(void);
+unsigned int   audio_sample_rate(void);
+
 #endif

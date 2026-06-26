@@ -56,6 +56,7 @@ void kernel_main(void)
 		mouse_init(vm.width, vm.height);   /* before sti: the PS/2 handshake polls
 		                                      the 8042, so IRQ12 must not race it */
 	audio_init();                              /* probes SB16; no-op if -device sb16 absent */
+	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 

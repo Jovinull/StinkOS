@@ -9,6 +9,7 @@
  * when started with -device sb16. The existing PC-speaker driver coexists;
  * it just can't mix or play PCM, which is what this driver is for. */
 #include "audio.h"
+#include "dma.h"
 #include "io.h"
 #include "serial.h"
 
@@ -27,6 +28,31 @@
 
 #define DSP_RESET_RESPONSE 0xAAu
 #define DSP_GET_VERSION    0xE1u
+#define DSP_SET_RATE       0x41u   /* output sample rate in Hz (HIGH then LOW) */
+#define DSP_SPEAKER_ON     0xD1u
+#define DSP_SPEAKER_OFF    0xD3u
+#define DSP_PAUSE_8BIT     0xD0u
+#define DSP_RESUME_8BIT    0xD4u
+#define DSP_OUTPUT_8BIT_AI 0xC6u   /* SB16 PIO: 8-bit DAC, auto-init, FIFO */
+#define DSP_MODE_MONO_U8   0x00u   /* mono, unsigned 8-bit samples           */
+
+/* Audio sample rate for the kernel DMA loop. Doom internally renders at
+ * 11025 Hz; 22050 gives headroom for fixed-point mixing without aliasing
+ * and is well inside what SB16 handles. */
+#define AUDIO_RATE_HZ      22050u
+
+/* DMA ring buffer. Sized + aligned so the chip's address+page register pair
+ * can never roll over a 64 KiB boundary mid-transfer: a 16 KiB block aligned
+ * to 16 KiB sits at offset 0x0000 / 0x4000 / 0x8000 / 0xC000 within any
+ * 64 KiB page, none of which can straddle. Living in kernel BSS keeps it
+ * identity-mapped (physical address == virtual). */
+#define AUDIO_BUFFER_SIZE  16384u
+
+static volatile unsigned char audio_buffer[AUDIO_BUFFER_SIZE]
+	__attribute__((aligned(AUDIO_BUFFER_SIZE)));
+
+/* Set by audio_start_output once the DSP is actually clocking samples. */
+static int output_running;
 
 /* The reset sequence wants a hold of >= 3 microseconds with the reset line
  * high. Without a known clock, count IO reads on port 0x80 (the legacy
@@ -138,3 +164,55 @@ void audio_handle_irq(void)
 }
 
 unsigned int audio_irq_count_get(void) { return irq_count; }
+
+/* SB16 sample-rate command: two-byte HIGH-then-LOW big-endian rate. */
+static void dsp_set_output_rate(unsigned int hz)
+{
+	dsp_write(DSP_SET_RATE);
+	dsp_write((unsigned char)((hz >> 8) & 0xFF));
+	dsp_write((unsigned char)(hz & 0xFF));
+}
+
+/* Start an auto-init 8-bit mono PCM stream at AUDIO_RATE_HZ. The DMA chip
+ * walks audio_buffer endlessly; when the count register hits 0 the SB16
+ * fires IRQ5 and (because of auto-init) immediately restarts at the buffer
+ * base. Anything written into audio_buffer will play; the mixer fills it. */
+int audio_start_output(void)
+{
+	if (!sb_present)
+		return -1;
+	if (output_running)
+		return 0;
+
+	dma_channel1_program((unsigned int)audio_buffer,
+	                     AUDIO_BUFFER_SIZE,
+	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
+
+	dsp_write(DSP_SPEAKER_ON);
+	dsp_set_output_rate(AUDIO_RATE_HZ);
+
+	unsigned int count = AUDIO_BUFFER_SIZE - 1;
+	dsp_write(DSP_OUTPUT_8BIT_AI);
+	dsp_write(DSP_MODE_MONO_U8);
+	dsp_write((unsigned char)(count & 0xFF));
+	dsp_write((unsigned char)((count >> 8) & 0xFF));
+
+	output_running = 1;
+	serial_write("audio: SB16 output started, 22050 Hz mono u8\n");
+	return 0;
+}
+
+void audio_stop_output(void)
+{
+	if (!output_running)
+		return;
+	dsp_write(DSP_PAUSE_8BIT);
+	dsp_write(DSP_SPEAKER_OFF);
+	output_running = 0;
+}
+
+/* Returns the kernel-side DMA buffer the SB16 is currently streaming, plus
+ * its size. The mixer writes mixed samples here every IRQ tick. */
+unsigned char *audio_buffer_ptr(void) { return (unsigned char *)audio_buffer; }
+unsigned int   audio_buffer_size(void) { return AUDIO_BUFFER_SIZE; }
+unsigned int   audio_sample_rate(void) { return AUDIO_RATE_HZ; }
