@@ -15,6 +15,7 @@
 #include "pci.h"
 #include "e1000.h"
 #include "net.h"
+#include "dhcp.h"
 
 void kernel_main(void)
 {
@@ -63,6 +64,7 @@ void kernel_main(void)
 	pci_scan();                                /* log every PCI device for visibility */
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
 	net_init();                                /* caches local MAC for L2 emit */
+	dhcp_start();                              /* DISCOVER goes out; reply lands via UDP cb */
 	__asm__ volatile ("sti");
 	serial_write("StinkOS: interrupts enabled\n");
 
