@@ -78,10 +78,6 @@ dkms.conf
 .ionide
 
 # Custom additions ###
-# Ignore Kernel and Boot folders
-Kernel/
-Boot/
-
 # Build output dir (Makefile)
 build/
 
