@@ -38,47 +38,13 @@ static void term_print(const char *s, unsigned int col)
 	term_row++;
 }
 
-/* Minimal printf-to-screen: %s %c %d %u %x %% — same spec as sys_printf. */
 static void tprintf(const char *fmt, ...)
 {
 	char buf[TERM_COLS + 1];
-	unsigned int p = 0;
 	va_list args;
 	va_start(args, fmt);
-	for (const char *f = fmt; *f != '\0' && p < (unsigned int)(TERM_COLS); f++) {
-		if (*f != '%') { buf[p++] = *f; continue; }
-		f++;
-		if (*f == '\0') break;
-		char digs[32]; int n; int v;
-		switch (*f) {
-		case 's': {
-			const char *s = va_arg(args, const char *);
-			while (*s != '\0' && p < (unsigned int)(TERM_COLS)) buf[p++] = *s++;
-			break;
-		}
-		case 'c': buf[p++] = (char)va_arg(args, int); break;
-		case 'd':
-			v = va_arg(args, int);
-			if (v < 0 && p < (unsigned int)(TERM_COLS)) { buf[p++] = '-'; v = -v; }
-			n = uitoa((unsigned int)v, 10, digs);
-			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
-			break;
-		case 'u':
-			n = uitoa(va_arg(args, unsigned int), 10, digs);
-			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
-			break;
-		case 'x':
-			n = uitoa(va_arg(args, unsigned int), 16, digs);
-			for (int i = 0; i < n && p < (unsigned int)(TERM_COLS); i++) buf[p++] = digs[i];
-			break;
-		case '%': buf[p++] = '%'; break;
-		default: buf[p++] = '%';
-			if (p < (unsigned int)(TERM_COLS)) buf[p++] = *f;
-			break;
-		}
-	}
+	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
-	buf[p] = '\0';
 	term_print(buf, TERM_FG);
 }
 
