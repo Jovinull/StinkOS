@@ -32,7 +32,8 @@ APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
 # drops any unreferenced helpers so unused pieces cost nothing.
 LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_stdio.o $(BUILD)/libstink_posix.o \
-                $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o
+                $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
+                $(BUILD)/libstink_sha256.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -138,6 +139,9 @@ $(BUILD)/libstink_setjmp.o: apps/libstink_setjmp.s | $(BUILD)
 
 $(BUILD)/libstink_http.o: apps/libstink_http.c apps/libstink.h apps/libstink_http.h | $(BUILD)
 	$(CC) $(CFLAGS) -c apps/libstink_http.c -o $(BUILD)/libstink_http.o
+
+$(BUILD)/libstink_sha256.o: apps/libstink_sha256.c | $(BUILD)
+	$(CC) $(CFLAGS) -c apps/libstink_sha256.c -o $(BUILD)/libstink_sha256.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.

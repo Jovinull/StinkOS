@@ -246,6 +246,60 @@ static int unpack_package(const unsigned char *data, unsigned int len)
 	return 0;
 }
 
+/* Look up the SHA-256 hex digest the repo index publishes for 'name'. The
+ * cached index (written by 'u') has one "<name> <version> <sha256>" line per
+ * package. Copies the 64-char hash into out_hex (NUL-terminated). Returns 0
+ * on success, -1 if there is no index, no matching line, or a malformed hash
+ * (any of which must block the install). */
+static int index_sha(const char *name, char *out_hex)
+{
+	static char idx[4096];
+	int n = sys_fread("REPO_INDEX", idx, sizeof(idx) - 1);
+	if (n <= 0)
+		return -1;
+	idx[n] = '\0';
+
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (idx[i] != '\n' && idx[i] != '\0')
+			continue;
+		idx[i] = '\0';
+		const char *line = idx + ls;
+		ls = i + 1;
+
+		int k = 0;
+		while (name[k] && line[k] == name[k])
+			k++;
+		if (name[k] != '\0' || line[k] != ' ')
+			continue;                       /* first token != name */
+
+		const char *p = line + k;
+		while (*p == ' ') p++;                   /* skip to version    */
+		while (*p && *p != ' ') p++;             /* skip version       */
+		while (*p == ' ') p++;                   /* skip to sha256     */
+
+		int h = 0;
+		while (h < 64 && p[h] && p[h] != ' ') {
+			out_hex[h] = p[h];
+			h++;
+		}
+		out_hex[h] = '\0';
+		return h == 64 ? 0 : -1;
+	}
+	return -1;
+}
+
+/* Hex-encode a 32-byte digest into a 65-byte (64 + NUL) lowercase string. */
+static void hex32(const unsigned char *d, char *out)
+{
+	static const char hx[] = "0123456789abcdef";
+	for (int i = 0; i < 32; i++) {
+		out[i * 2]     = hx[d[i] >> 4];
+		out[i * 2 + 1] = hx[d[i] & 0x0f];
+	}
+	out[64] = '\0';
+}
+
 static void cmd_install(void)
 {
 	draw_header("install");
@@ -276,13 +330,34 @@ static void cmd_install(void)
 		return;
 	}
 
-	if (unpack_package(pkg_buf, (unsigned int)n) != 0) {
-		sys_drawtext(140, 220, "unpack failed (bad format).", COLOR_ERR);
+	/* Integrity gate: the package is unknown bytes off the network until it
+	 * matches the SHA-256 the repo index publishes for this name. Fail closed
+	 * -- a missing index, missing entry or any mismatch blocks the install so
+	 * a tampered or corrupted ELF never reaches the disk or Ring 3. */
+	char want[65];
+	if (index_sha(name, want) != 0) {
+		sys_drawtext(140, 220, "no published hash; run 'u'. refusing.", COLOR_ERR);
 		wait_any_key(250, "press any key.", COLOR_DIM);
 		return;
 	}
-	sys_drawtext(140, 220, "installed.", COLOR_OK);
-	wait_any_key(250, "press any key.", COLOR_DIM);
+	unsigned char digest[32];
+	sha256(pkg_buf, (unsigned int)n, digest);
+	char got[65];
+	hex32(digest, got);
+	if (strcasecmp(got, want) != 0) {
+		sys_drawtext(140, 220, "sha256 mismatch! refusing install.", COLOR_ERR);
+		wait_any_key(250, "press any key.", COLOR_DIM);
+		return;
+	}
+	sys_drawtext(140, 220, "sha256 verified.", COLOR_OK);
+
+	if (unpack_package(pkg_buf, (unsigned int)n) != 0) {
+		sys_drawtext(140, 240, "unpack failed (bad format).", COLOR_ERR);
+		wait_any_key(270, "press any key.", COLOR_DIM);
+		return;
+	}
+	sys_drawtext(140, 240, "installed.", COLOR_OK);
+	wait_any_key(270, "press any key.", COLOR_DIM);
 }
 
 /* ---- remove ---- */
