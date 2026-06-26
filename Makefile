@@ -92,7 +92,8 @@ APP14_LBA = 168
 APP15_LBA = 176           # SHELL  — 16-sector slot (176..191)
 APP16_LBA = 192           # ARROWS — 8-sector slot  (192..199)
 APP17_LBA = 200           # SNAKE  — 8-sector slot  (200..207)
-APP18_LBA = 208           # PONG   — 8-sector slot  (208..215)
+APP18_LBA = 208           # PONG    — 8-sector slot  (208..215)
+APP19_LBA = 216           # INSTALL — 8-sector slot  (216..223)
 
 # The small-app region spans LBA 64..223. Metadata: the app TOC at LBA 224,
 # the StinkFS directory at 225, and a ~32 MiB StinkFS data region at 226..65225
@@ -243,6 +244,11 @@ $(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld $(LIBSTIN
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/installer.elf: apps/crt0.s apps/installer.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/installer.c -o $(BUILD)/installer_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/installer.elf $(BUILD)/crt0.o $(BUILD)/installer_app.o $(LIBSTINK_OBJS)
+
 # Doom port: each translation unit compiles with DOOM_CFLAGS into its own
 # build/doom/ subdir so the per-app objects don't collide with kernel objects
 # in build/. The link is identical to the regular C-app pattern: crt0 first,
@@ -276,7 +282,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS)
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
@@ -299,7 +305,8 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/shell.elf  of=os.bin bs=512 seek=$(APP15_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/arrows.elf of=os.bin bs=512 seek=$(APP16_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/pong.elf   of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/pong.elf      of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
+	dd if=$(BUILD)/installer.elf of=os.bin bs=512 seek=$(APP19_LBA) conv=notrunc status=none
 	@for v in doom1 doom2 freedm; do \
 	  size=$$(stat -c%s $(BUILD)/$$v.elf); max=$$(($(DOOM_SECTORS) * 512)); \
 	  if [ $$size -gt $$max ]; then \
@@ -329,9 +336,10 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"16 ARROWS:$(APP16_LBA):$(BUILD)/arrows.elf" \
 		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
 		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf" \
-		"19 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
-		"20 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
-		"21 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf"
+		"19 INSTALL:$(APP19_LBA):$(BUILD)/installer.elf" \
+		"20 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
+		"21 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
+		"22 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 	@stinkfs_args=""; \
@@ -365,6 +373,30 @@ run: all
 	  -device sb16,audiodev=snd0 \
 	  -netdev user,id=net0 -device e1000,netdev=net0
 
+# Blank target disk for the installer app to clone the boot media onto.
+# Created on demand; ignored by git (*.bin in .gitignore). 64 MiB is enough
+# headroom for the full StinkOS image (~101 MiB will hit a "target too small"
+# guard, but a few apps + WADs fit comfortably under 64).
+INSTALL_TARGET_SIZE = 134217728     # 128 MiB
+target.bin:
+	truncate -s $(INSTALL_TARGET_SIZE) target.bin
+
+# Boot the install media (drive 0) with a blank target (drive 2) attached.
+# The boot menu's INSTALL entry clones os.bin sector-for-sector onto the
+# target; after success, run-installed boots from the target alone.
+run-install: all target.bin
+	qemu-system-i386 \
+	  -drive file=os.bin,format=raw,if=ide,index=0 \
+	  -drive file=target.bin,format=raw,if=ide,index=2 \
+	  -audiodev $(QEMU_AUDIO),id=snd0 -device sb16,audiodev=snd0 \
+	  -netdev user,id=net0 -device e1000,netdev=net0
+
+# Boot just the installed system (after run-install finished a clone).
+run-installed: target.bin
+	qemu-system-i386 -drive file=target.bin,format=raw \
+	  -audiodev $(QEMU_AUDIO),id=snd0 -device sb16,audiodev=snd0 \
+	  -netdev user,id=net0 -device e1000,netdev=net0
+
 # Headless verification: boots the image in qemu, reads the serial debug log and
 # injects keystrokes via the monitor to assert protected mode, the timer IRQ and
 # the keyboard IRQ all work. See tools/test-headless.py.
@@ -374,4 +406,4 @@ test-headless: all
 clean:
 	rm -rf $(BUILD) os.bin
 
-.PHONY: all hex dall run test-headless clean
+.PHONY: all hex dall run run-install run-installed test-headless clean
