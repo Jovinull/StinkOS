@@ -18,7 +18,7 @@
 #include "net.h"
 #include "dhcp.h"
 
-void kernel_main(void)
+void kmain(void)
 {
 	serial_init();
 	serial_write("StinkOS: protected mode active\n");
