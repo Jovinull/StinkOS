@@ -11,6 +11,13 @@
 #define KEY_DOWN  29
 #define KEY_LEFT  30
 #define KEY_RIGHT 31
+/* Navigation keys: stored as negative chars (high bytes) so they never collide
+ * with printable ASCII (32-126), Ctrl codes (1-26), arrow codes (28-31), or
+ * the zero sentinel that marks an empty kbuf. */
+#define KEY_HOME  (-6)
+#define KEY_END   (-5)
+#define KEY_PGUP  (-4)
+#define KEY_PGDN  (-3)
 
 void keyboard_init(void);     /* flush any pending byte from the controller */
 void keyboard_handle(void);   /* called from the IRQ1 handler */
