@@ -18,7 +18,7 @@ CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
 VPATH = boot kernel kernel/arch kernel/drivers/video kernel/drivers/input \
         kernel/drivers/storage kernel/drivers/audio kernel/drivers/net \
         kernel/drivers/misc kernel/fs kernel/sys kernel/ui
-KINCLUDES = -Ikernel/arch -Ikernel/drivers/video -Ikernel/drivers/input \
+KINCLUDES = -Ikernel -Ikernel/arch -Ikernel/drivers/video -Ikernel/drivers/input \
             -Ikernel/drivers/storage -Ikernel/drivers/audio -Ikernel/drivers/net \
             -Ikernel/drivers/misc -Ikernel/fs -Ikernel/sys -Ikernel/ui
 # App link flags: omagic (-N) packs the loadable segment with no page-alignment
