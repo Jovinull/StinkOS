@@ -419,6 +419,22 @@ static void syscall_dispatch(struct regs *r)
 	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
 		r->eax = keyboard_get_event();
 		break;
+	case 27: {                                 /* SYS_GETMOUSE: ebx=*dx ecx=*dy edx=*buttons */
+		if (!paging_user_range_ok(r->ebx, sizeof(int)) ||
+		    !paging_user_range_ok(r->ecx, sizeof(int)) ||
+		    !paging_user_range_ok(r->edx, sizeof(int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		int dx, dy;
+		unsigned char buttons;
+		mouse_consume_delta(&dx, &dy, &buttons);
+		*(int *)r->ebx = dx;
+		*(int *)r->ecx = dy;
+		*(int *)r->edx = (int)buttons;
+		r->eax = 0;
+		break;
+	}
 	case 26: {                                 /* SYS_BLIT: ebx=src, ecx=(x<<16|y), edx=(w<<16|h) */
 		unsigned int x = r->ecx >> 16;
 		unsigned int y = r->ecx & 0xFFFF;

@@ -102,6 +102,22 @@ static inline int sys_blit(int x, int y, int w, int h, const unsigned int *src)
                                                                     (x << 16) | (y & 0xFFFF),
                                                                     (w << 16) | (h & 0xFFFF)); }
 
+/* Drains the relative-motion accumulator from the kernel mouse driver: *dx
+ * and *dy receive screen-space deltas (+x = right, +y = down) since the last
+ * call, and *buttons receives the current button state (bit 0 = left,
+ * bit 1 = right, bit 2 = middle). The accumulator is reset on read, so back-
+ * to-back calls only see fresh motion. Returns 0 on success, -1 if any of
+ * the output pointers don't lie inside the app's mapped pages.
+ *
+ * The absolute cursor that the menu draws is a separate concept (clamped to
+ * the screen); apps doing mouselook want these raw deltas instead. */
+static inline int sys_get_mouse(int *dx, int *dy, int *buttons)
+                                                 { return __syscall(27, (int)dx, (int)dy, (int)buttons); }
+
+#define MOUSE_LEFT_BTN   0x01
+#define MOUSE_RIGHT_BTN  0x02
+#define MOUSE_MIDDLE_BTN 0x04
+
 /* Userland dynamic allocator (apps/libstink_alloc.c). K&R first-fit free list
  * over sys_sbrk; coalesces adjacent free blocks on free(). The allocator has
  * file-scope state, so it must live in its own translation unit -- which is
