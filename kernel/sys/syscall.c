@@ -280,6 +280,30 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 45: {                                 /* SYS_GETPID: -> caller's PID */
+		struct proc *cur = proc_current();
+		r->eax = (unsigned int)(cur ? cur->pid : 1);
+		break;
+	}
+	case 46: {                                 /* SYS_KILL: ebx=pid -> 0 or -1 */
+		int pid = (int)r->ebx;
+		if (pid <= 1) {                    /* PID 1 (kinit) is not killable */
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *target = proc_get(pid);
+		if (!target) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		target->state     = PROC_ZOMBIE;
+		target->exit_code = 137;           /* SIGKILL exit-code convention */
+		serial_write("proc: killed pid ");
+		serial_write_dec(pid);
+		serial_putc('\n');
+		r->eax = 0;
+		break;
+	}
 	case 44: {                                 /* SYS_PING: ebx=ipv4(net order) ecx=timeout_ms -> rtt_ms or -1 */
 		if (!e1000_present() || r->ebx == 0) {
 			r->eax = (unsigned int)-1;

@@ -243,6 +243,13 @@ static inline int sys_netinfo(struct sys_net_info *out)
 static inline int sys_ping(unsigned int ip, unsigned int timeout_ms)
                                                  { return __syscall(44, (int)ip, (int)timeout_ms, 0); }
 
+/* Process control. PIDs are dense small integers; 1 is the kernel boot
+ * process. sys_getpid never fails. sys_kill marks the target PROC_ZOMBIE
+ * with exit_code = 137 (SIGKILL convention) and returns 0 on success, -1
+ * if the PID is unknown or refers to the kernel boot process (PID 1). */
+static inline int sys_getpid(void)               { return __syscall(45, 0, 0, 0); }
+static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 0); }
+
 /* Compose a network-byte-order IPv4 address from four octets (a.b.c.d). */
 static inline unsigned int sys_ip4(unsigned int a, unsigned int b,
                                    unsigned int c, unsigned int d)
