@@ -250,6 +250,8 @@ The boot menu picks up three new entries — `DOOM1`, `DOOM2`, `FREEDM`. Pick on
 
 **How the port works under the hood:** vendored doomgeneric (Chocolate Doom derivative) lives in `apps/doom/`; `apps/doom-shims/` provides the POSIX headers Doom expects, and `lib/libstink_{alloc,stdio,printf,posix,setjmp}` are the corresponding runtime backends. The platform layer is `apps/doom/doomgeneric_stink.c` (~200 lines). One source tree, three ELFs — each compiled with a different `-DSTINKDOOM_IWAD` so the `DOOM1` / `DOOM2` / `FREEDM` menu entries auto-load the right WAD.
 
+**License notice (Doom):** the Doom engine source under `apps/doom/` is © id Software, released under the GNU General Public License v2.0 — see [`COPYING.GPL`](COPYING.GPL) (also at `apps/doom/LICENSE`). The doomgeneric port is © Jakub Świątek, same licence. Any binary StinkOS image you ship that bundles Doom carries that GPLv2 obligation: source must be made available to recipients. The IWADs themselves (Freedoom 1, Freedoom 2, FreeDM) are under their own permissive [BSD-3-Clause](https://github.com/freedoom/freedoom/blob/master/COPYING.adoc); the original commercial `DOOM.WAD` / `DOOM2.WAD` files are not redistributable -- buy them or use the Freedoom replacements `tools/fetch-wads.sh` downloads.
+
 ## Contributing
 
 PRs welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) — it's short. For anything bigger than a bug fix, open an issue first so we can agree on shape before you spend a weekend on it.
