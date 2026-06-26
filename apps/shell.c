@@ -198,7 +198,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("run <appname>  netinfo  history  exit", TERM_FG);
+			term_print("run <appname>  netinfo  ping <ip>  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -385,6 +385,29 @@ void main(void)
 				tprintf("gw:   %u.%u.%u.%u", gw[0], gw[1], gw[2], gw[3]);
 				tprintf("dns:  %u.%u.%u.%u", dn[0], dn[1], dn[2], dn[3]);
 				tprintf("dhcp: %s", ni.dhcp_state <= 4 ? st[ni.dhcp_state] : "?");
+			}
+		} else if (strcmp(line, "ping") == 0) {
+			unsigned int oct[4]; int seg = 0;
+			unsigned int cur = 0; int digits = 0, bad = 0;
+			for (const char *p = rest; ; p++) {
+				char ch = *p;
+				if (ch >= '0' && ch <= '9') {
+					cur = cur * 10 + (unsigned int)(ch - '0');
+					digits++;
+					if (cur > 255) { bad = 1; break; }
+				} else if (ch == '.' || ch == '\0') {
+					if (!digits || seg >= 4) { bad = 1; break; }
+					oct[seg++] = cur; cur = 0; digits = 0;
+					if (ch == '\0') break;
+				} else { bad = 1; break; }
+			}
+			if (bad || seg != 4) {
+				term_print("usage: ping <a.b.c.d>", TERM_ERR);
+			} else {
+				unsigned int ip = sys_ip4(oct[0], oct[1], oct[2], oct[3]);
+				int rtt = sys_ping(ip, 1000);
+				if (rtt < 0) tprintf("%s: no reply", rest);
+				else         tprintf("reply from %s: %d ms", rest, rtt);
 			}
 		} else {
 			tprintf("unknown command: %s", line);
