@@ -78,6 +78,11 @@ static inline void *sys_sbrk(int delta)
 	return (void *)(unsigned int)r;
 }
 
+/* Launch an app by name (case-insensitive, prefix ignored). Replaces the
+ * current process image; on success this call does not return. Returns -1 if
+ * no matching app is found in the disk TOC. */
+static inline int sys_exec(const char *name) { return __syscall(41, (int)name, 0, 0); }
+
 /* Returns the next raw PS/2 key event, or 0 if the queue is empty. The result
  * has bit 31 set (so non-zero unambiguously means "got an event"), with:
  *   bit 15    : pressed (1) / released (0)          -- KEY_EV_PRESSED below

@@ -232,7 +232,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("history  exit", TERM_FG);
+			term_print("run <appname>  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -390,6 +390,14 @@ void main(void)
 			int freq = atoi(rest);
 			sys_tone((unsigned int)freq, 20);
 			tprintf("played %d Hz", freq);
+		} else if (strcmp(line, "run") == 0) {
+			if (*rest == '\0') {
+				term_print("usage: run <appname>", TERM_ERR);
+			} else {
+				tprintf("launching %s...", rest);
+				if (sys_exec(rest) < 0)
+					tprintf("not found: %s", rest);
+			}
 		} else {
 			tprintf("unknown command: %s", line);
 		}
