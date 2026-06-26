@@ -137,8 +137,9 @@ static void show_menu(void)
 	sys_drawtext(140, 170, "u  update repo index",             COLOR_TEXT);
 	sys_drawtext(140, 190, "s  search repo for a name",        COLOR_TEXT);
 	sys_drawtext(140, 210, "i  install a package by name",     COLOR_TEXT);
-	sys_drawtext(140, 230, "r  remove an installed package",   COLOR_TEXT);
-	sys_drawtext(140, 270, "esc / q  exit",                    COLOR_DIM);
+	sys_drawtext(140, 230, "g  upgrade installed packages",    COLOR_TEXT);
+	sys_drawtext(140, 250, "r  remove an installed package",   COLOR_TEXT);
+	sys_drawtext(140, 290, "esc / q  exit",                    COLOR_DIM);
 }
 
 /* Read a typed line into 'out', echoing each char at (x,y) as it comes in.
@@ -453,14 +454,16 @@ static int fetch_and_verify(const char *name, int y)
  * missing from STINKDB depth-first, then unpacks the requested package.
  * Re-fetches the requested package after the dep loop because the recursive
  * dep installs share pkg_buf and clobber its contents. Depth cap blocks
- * cyclic dependency graphs. */
-static int install_pkg(const char *name, int depth, int progress_y)
+ * cyclic dependency graphs. `force` skips the already-installed check so
+ * the upgrade path can re-pull a package even if it already appears in
+ * STINKDB. */
+static int install_pkg(const char *name, int depth, int progress_y, int force)
 {
 	if (depth >= INSTALL_MAX_DEPTH) {
 		sys_drawtext(140, progress_y, "dep depth limit reached.", COLOR_ERR);
 		return -1;
 	}
-	if (pkg_installed(name)) {
+	if (!force && pkg_installed(name)) {
 		sys_drawtext(140, progress_y, "already installed.", COLOR_DIM);
 		sys_drawtext(280, progress_y, name, COLOR_DIM);
 		return 0;
@@ -484,7 +487,7 @@ static int install_pkg(const char *name, int depth, int progress_y)
 	}
 
 	for (unsigned int i = 0; i < dc; i++) {
-		if (install_pkg(deps[i], depth + 1, progress_y + 20) != 0)
+		if (install_pkg(deps[i], depth + 1, progress_y + 20, 0) != 0)
 			return -1;
 	}
 
@@ -510,9 +513,137 @@ static void cmd_install(void)
 	if (read_line(280, 150, name, sizeof(name)) < 0)
 		return;
 
-	if (install_pkg(name, 0, 180) == 0)
+	if (install_pkg(name, 0, 180, 0) == 0)
 		sys_drawtext(140, 280, "installed.", COLOR_OK);
 	wait_any_key(310, "press any key.", COLOR_DIM);
+}
+
+/* ---- upgrade ---- */
+
+/* Strip every line of STINKDB whose first token equals `name`. Writes the
+ * filtered text back (truncating). No-op if STINKDB is missing. */
+static void stinkdb_remove(const char *name)
+{
+	char db[2048];
+	int  dn = sys_fread("STINKDB", db, sizeof(db) - 1);
+	if (dn <= 0)
+		return;
+	db[dn] = '\0';
+
+	char out[2048];
+	int  on = 0, ls = 0;
+	for (int i = 0; i <= dn; i++) {
+		if (db[i] != '\n' && db[i] != '\0')
+			continue;
+		db[i] = '\0';
+		int k = 0;
+		while (name[k] && db[ls + k] == name[k]) k++;
+		int match = (name[k] == '\0' && db[ls + k] == ' ');
+		if (!match) {
+			for (int j = ls; j < i && on < (int)sizeof(out) - 1; j++)
+				out[on++] = db[j];
+			if (on < (int)sizeof(out)) out[on++] = '\n';
+		}
+		ls = i + 1;
+	}
+	sys_fwrite("STINKDB", out, (unsigned int)on);
+}
+
+/* Look up `name` in REPO_INDEX and copy its version into out_ver (cap bytes).
+ * Returns 0 on success, -1 if no index or no entry. */
+static int index_version(const char *name, char *out_ver, unsigned int cap)
+{
+	char idx[4096];
+	int  n = sys_fread("REPO_INDEX", idx, sizeof(idx) - 1);
+	if (n <= 0)
+		return -1;
+	idx[n] = '\0';
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (idx[i] != '\n' && idx[i] != '\0')
+			continue;
+		idx[i] = '\0';
+		const char *line = idx + ls;
+		int k = 0;
+		while (name[k] && line[k] == name[k]) k++;
+		if (name[k] == '\0' && line[k] == ' ') {
+			const char *p = line + k + 1;       /* version starts here */
+			unsigned int w = 0;
+			while (*p && *p != ' ' && w + 1 < cap)
+				out_ver[w++] = *p++;
+			out_ver[w] = '\0';
+			return 0;
+		}
+		ls = i + 1;
+	}
+	return -1;
+}
+
+static void cmd_upgrade(void)
+{
+	draw_header("upgrade");
+
+	char db[2048];
+	int dn = sys_fread("STINKDB", db, sizeof(db) - 1);
+	if (dn <= 0) {
+		sys_drawtext(140, 150, "nothing installed.", COLOR_DIM);
+		wait_any_key(180, "press any key.", COLOR_DIM);
+		return;
+	}
+	db[dn] = '\0';
+
+	int y = 150;
+	int upgraded = 0;
+	int ls = 0;
+	for (int i = 0; i <= dn; i++) {
+		if (db[i] != '\n' && db[i] != '\0')
+			continue;
+		db[i] = '\0';
+		if (i > ls) {
+			/* parse "<name> <version>" */
+			char name[32];
+			char cur_ver[16];
+			int  ni = 0, j = ls;
+			while (j < i && db[j] != ' ' && ni + 1 < (int)sizeof(name))
+				name[ni++] = db[j++];
+			name[ni] = '\0';
+			while (j < i && db[j] == ' ') j++;
+			int vi = 0;
+			while (j < i && vi + 1 < (int)sizeof(cur_ver))
+				cur_ver[vi++] = db[j++];
+			cur_ver[vi] = '\0';
+
+			char idx_ver[16];
+			if (name[0] && index_version(name, idx_ver, sizeof(idx_ver)) == 0) {
+				int same = 1;
+				for (int k = 0; k < (int)sizeof(cur_ver); k++) {
+					if (cur_ver[k] != idx_ver[k]) { same = 0; break; }
+					if (cur_ver[k] == '\0') break;
+				}
+				if (!same) {
+					sys_drawtext(140, y, name, COLOR_TEXT);
+					sys_drawtext(280, y, cur_ver, COLOR_DIM);
+					sys_drawtext(360, y, "->", COLOR_DIM);
+					sys_drawtext(400, y, idx_ver, COLOR_OK);
+					stinkdb_remove(name);
+					if (install_pkg(name, 0, y + 20, 1) == 0)
+						upgraded++;
+					y += 60;
+					if (y > 600) break;
+				}
+			}
+		}
+		ls = i + 1;
+	}
+
+	if (upgraded == 0)
+		sys_drawtext(140, y, "everything up to date.", COLOR_OK);
+	else {
+		sys_drawtext(140, y, "upgraded packages:", COLOR_OK);
+		char num[16]; uitoa((unsigned int)upgraded, 10, num);
+		sys_drawtext(340, y, num, COLOR_TEXT);
+	}
+	wait_any_key(y + 30, "press any key.", COLOR_DIM);
 }
 
 /* ---- remove ---- */
@@ -615,6 +746,7 @@ void main(void)
 		case 'u': cmd_update();  break;
 		case 's': cmd_search();  break;
 		case 'i': cmd_install(); break;
+		case 'g': cmd_upgrade(); break;
 		case 'r': cmd_remove();  break;
 		case 27:
 		case 'q':
