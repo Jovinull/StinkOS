@@ -139,7 +139,8 @@ static void show_menu(void)
 	sys_drawtext(140, 210, "i  install a package by name",     COLOR_TEXT);
 	sys_drawtext(140, 230, "g  upgrade installed packages",    COLOR_TEXT);
 	sys_drawtext(140, 250, "r  remove an installed package",   COLOR_TEXT);
-	sys_drawtext(140, 290, "esc / q  exit",                    COLOR_DIM);
+	sys_drawtext(140, 270, "y  inspect a .stinkpkg in StinkFS",COLOR_TEXT);
+	sys_drawtext(140, 310, "esc / q  exit",                    COLOR_DIM);
 }
 
 /* Read a typed line into 'out', echoing each char at (x,y) as it comes in.
@@ -646,6 +647,94 @@ static void cmd_upgrade(void)
 	wait_any_key(y + 30, "press any key.", COLOR_DIM);
 }
 
+/* ---- query (inspect a downloaded .stinkpkg without installing) ---- */
+
+static void cmd_query(void)
+{
+	draw_header("inspect");
+	sys_drawtext(140, 150, "StinkFS filename:", COLOR_DIM);
+	char fname[32];
+	if (read_line(280, 150, fname, sizeof(fname)) < 0)
+		return;
+
+	int n = sys_fread(fname, pkg_buf, MAX_PKG_BYTES);
+	if (n <= 0) {
+		sys_drawtext(140, 190, "file not found in StinkFS.", COLOR_ERR);
+		wait_any_key(220, "press any key.", COLOR_DIM);
+		return;
+	}
+
+	if ((unsigned)n < sizeof(struct stinkpkg_hdr)) {
+		sys_drawtext(140, 190, "too small to be a stinkpkg.", COLOR_ERR);
+		wait_any_key(220, "press any key.", COLOR_DIM);
+		return;
+	}
+	const struct stinkpkg_hdr *h = (const struct stinkpkg_hdr *)pkg_buf;
+	if (h->magic != STINKPKG_MAGIC) {
+		sys_drawtext(140, 190, "bad magic (not a stinkpkg).", COLOR_ERR);
+		wait_any_key(220, "press any key.", COLOR_DIM);
+		return;
+	}
+	if (h->format_ver != STINKPKG_VERSION) {
+		sys_drawtext(140, 190, "unsupported format version.", COLOR_ERR);
+		wait_any_key(220, "press any key.", COLOR_DIM);
+		return;
+	}
+
+	int y = 190;
+	char buf[16];
+
+	sys_drawtext(140, y, "name", COLOR_DIM);
+	sys_drawtext(220, y, (const char *)h->name, COLOR_TEXT);
+	y += 18;
+
+	sys_drawtext(140, y, "version", COLOR_DIM);
+	sys_drawtext(220, y, (const char *)h->version, COLOR_TEXT);
+	y += 18;
+
+	sys_drawtext(140, y, "desc", COLOR_DIM);
+	sys_drawtext(220, y, (const char *)h->description, COLOR_TEXT);
+	y += 18;
+
+	uitoa(h->dep_count, 10, buf);
+	sys_drawtext(140, y, "deps", COLOR_DIM);
+	sys_drawtext(220, y, buf, COLOR_TEXT);
+	y += 18;
+
+	uitoa(h->file_count, 10, buf);
+	sys_drawtext(140, y, "files", COLOR_DIM);
+	sys_drawtext(220, y, buf, COLOR_TEXT);
+	y += 18;
+
+	uitoa(h->payload_size, 10, buf);
+	sys_drawtext(140, y, "payload bytes", COLOR_DIM);
+	sys_drawtext(280, y, buf, COLOR_TEXT);
+	y += 24;
+
+	/* List deps (one per line, capped to screen). */
+	const struct stinkpkg_dep *deps = (const struct stinkpkg_dep *)
+	                                  (pkg_buf + sizeof(*h));
+	for (unsigned int i = 0; i < h->dep_count && y < 600; i++) {
+		sys_drawtext(160, y, "dep", COLOR_DIM);
+		sys_drawtext(220, y, (const char *)deps[i].name, COLOR_TEXT);
+		y += 16;
+	}
+
+	/* List files with sizes. */
+	const struct stinkpkg_file *files = (const struct stinkpkg_file *)
+	                                    ((const unsigned char *)deps +
+	                                     h->dep_count * sizeof(struct stinkpkg_dep));
+	for (unsigned int i = 0; i < h->file_count && y < 600; i++) {
+		sys_drawtext(160, y, (const char *)files[i].name, COLOR_TEXT);
+		uitoa(files[i].size, 10, buf);
+		sys_drawtext(380, y, buf, COLOR_DIM);
+		sys_drawtext(440, y, "bytes", COLOR_DIM);
+		y += 16;
+	}
+
+	wait_any_key(620, "press any key.", COLOR_DIM);
+}
+
 /* ---- remove ---- */
 
 static int starts_with(const char *s, const char *prefix)
@@ -747,6 +836,7 @@ void main(void)
 		case 's': cmd_search();  break;
 		case 'i': cmd_install(); break;
 		case 'g': cmd_upgrade(); break;
+		case 'y': cmd_query();   break;
 		case 'r': cmd_remove();  break;
 		case 27:
 		case 'q':
