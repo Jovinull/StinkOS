@@ -67,6 +67,49 @@ static void draw_clock_from(const struct rtc_time *t)
 
 static unsigned int last_rtc_second = 0xFF;   /* sentinel: invalid second */
 
+/* App list built from StinkFS at boot: only .ELF files shown in the menu. */
+#define MAX_APP_LIST 40
+static char app_names[MAX_APP_LIST][16];
+static int  app_count;
+
+static int is_elf_name(const char *name)
+{
+	int len = 0;
+	while (len < 16 && name[len]) len++;
+	if (len < 5) return 0;
+	const char *sfx = ".ELF";
+	for (int k = 0; k < 4; k++) {
+		char c = name[len - 4 + k];
+		if (c >= 'a' && c <= 'z') c -= 32;
+		if (c != sfx[k]) return 0;
+	}
+	return 1;
+}
+
+static void load_app_list(void)
+{
+	app_count = 0;
+	int fc = fs_file_count();
+	for (int i = 0; i < fc && app_count < MAX_APP_LIST; i++) {
+		char name[16];
+		if (fs_file_info(i, name) < 0) continue;
+		if (!is_elf_name(name)) continue;
+		for (int k = 0; k < 16; k++)
+			app_names[app_count][k] = name[k];
+		app_count++;
+	}
+}
+
+/* Copy the app display name (strip ".ELF" suffix) into out (NUL-terminated). */
+static void display_name(const char *full, char *out)
+{
+	int len = 0;
+	while (len < 16 && full[len]) len++;
+	if (len >= 4) len -= 4;   /* strip ".ELF" */
+	for (int i = 0; i < len; i++) out[i] = full[i];
+	out[len] = '\0';
+}
+
 static int point_in_box(int x, int y, int bx, int by, int bw, int bh)
 {
 	return x >= bx && x < bx + bw && y >= by && y < by + bh;
@@ -78,8 +121,10 @@ static void draw(int selected)
 	fb_rect(112, 84, 800, 400, 0x3050C0);
 	fb_text(120, 90, "STINKOS", 0xFFFFFF);
 
-	for (int i = 0; i < fs_count(); i++) {
-		fb_text(140, 120 + i * 20, fs_name(i), 0xFFFFFF);
+	for (int i = 0; i < app_count; i++) {
+		char dname[16];
+		display_name(app_names[i], dname);
+		fb_text(140, 120 + i * 20, dname, 0xFFFFFF);
 		if (i == selected)
 			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
 	}
@@ -226,12 +271,18 @@ static void launch(int index)
 
 	paging_reset_user_heap();
 
+	unsigned int lba, sectors;
+	if (fs_file_lba_sectors(app_names[index], &lba, &sectors) != 0) {
+		serial_write("loader: app not found in fs\n");
+		return;
+	}
+
 	unsigned int entry;
-	if (elf_load(fs_lba(index), fs_sectors(index), &entry) != 0) {
+	if (elf_load(lba, sectors, &entry) != 0) {
 		serial_write("loader: bad ELF image\n");
 		return;
 	}
-	serial_write("loader: app loaded from disk slot\n");
+	serial_write("loader: app loaded from fs\n");
 	enter_user_mode(entry, paging_user_stack_top());
 }
 
@@ -241,6 +292,7 @@ void menu_run(void)
 	view = VIEW_MENU;
 
 	fs_init();
+	load_app_list();
 	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
 	redraw();
 	serial_write("menu: ready\n");
@@ -334,7 +386,7 @@ void menu_run(void)
 			continue;
 		}
 
-		if (c == 's' && selected < fs_count() - 1) {
+		if (c == 's' && selected < app_count - 1) {
 			selected++;
 			redraw();
 		} else if (c == 'w' && selected > 0) {
@@ -356,7 +408,7 @@ void menu_run(void)
 			redraw();
 		} else if (clicked) {
 			int hit = -1;
-			for (int i = 0; i < fs_count(); i++)
+			for (int i = 0; i < app_count; i++)
 				if (point_in_box(mx, my, ITEM_X, ITEM_Y(i), ITEM_W, ITEM_H))
 					hit = i;
 			if (hit >= 0) {

@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 # Bundle a set of files into a fresh StinkFS region in an existing disk image.
-# Replaces the StinkFS directory sector and the data area starting at the data
-# LBA; everything else in the image (boot sector, kernel, raw app slots, TOC)
-# is left untouched.
+# Replaces the StinkFS directory sectors and the data area starting at the data
+# LBA; everything else in the image (boot sector, kernel) is left untouched.
 #
 # Layout written (must match the kernel's fs.c):
-#   dir sector  -> [u32 magic][u32 count][u32 next_free][16 * fs_file_entry]
-#   fs_file     -> [16-byte name][u32 start_lba][u32 size_bytes]
+#   2 dir sectors -> [u32 magic][u32 count][u32 next_free][FS_MAX_FILES * fs_file_entry]
+#   fs_file        -> [16-byte name][u32 start_lba][u32 size_bytes]
 #
 # Usage:
 #   make-stinkfs.py <image> <dir_lba> <data_lba> <data_end_lba> \
 #                   NAME1=path1 NAME2=path2 ...
 #
-# Each NAME is uppercased and truncated to 16 bytes (NUL-padded). The data is
-# written contiguously starting at <data_lba>; rejects with an error if the
-# total would overflow the region.
+# Each NAME is truncated to 16 bytes (NUL-padded). The data is written
+# contiguously starting at <data_lba>; rejects with an error if the total
+# would overflow the region.
 import os
 import struct
 import sys
 
 STINKFS_MAGIC = 0x4B4E5453   # 'S','T','N','K' little-endian
 SECTOR = 512
+DIR_SECTORS = 2              # directory spans two 512-byte sectors
 NAME_LEN = 16
-MAX_FILES = 16
+MAX_FILES = 40
 
 def main():
     if len(sys.argv) < 5:
@@ -65,7 +65,7 @@ def main():
             padded_len = ((size + SECTOR - 1) // SECTOR) * SECTOR
             f.write(data + b'\x00' * (padded_len - size))
 
-        # Build the directory sector.
+        # Build the directory (two sectors = 1024 bytes).
         dir_bytes = struct.pack('<III', STINKFS_MAGIC, len(entries), next_free)
         for name, _path, start_lba, size in entries:
             name_bytes = name.encode('ascii')[:NAME_LEN].ljust(NAME_LEN, b'\x00')
@@ -73,10 +73,12 @@ def main():
         # Pad unused file slots so the kernel reads zeros.
         empty_entry = b'\x00' * (NAME_LEN + 8)
         dir_bytes += empty_entry * (MAX_FILES - len(entries))
-        # Pad the rest of the sector.
-        if len(dir_bytes) > SECTOR:
-            sys.exit(f"stinkfs: directory ({len(dir_bytes)} B) exceeds one sector")
-        dir_bytes += b'\x00' * (SECTOR - len(dir_bytes))
+        # Pad to exactly two sectors.
+        dir_total = SECTOR * DIR_SECTORS
+        if len(dir_bytes) > dir_total:
+            sys.exit(f"stinkfs: directory ({len(dir_bytes)} B) exceeds {dir_total} B "
+                     f"({DIR_SECTORS} sectors)")
+        dir_bytes += b'\x00' * (dir_total - len(dir_bytes))
 
         f.seek(dir_lba * SECTOR)
         f.write(dir_bytes)

@@ -74,53 +74,18 @@ IMG_MIN = 65536
 # (boot + code + data, up to __bss_start) must fit here or it boots truncated.
 KERNEL_LOAD_MAX = 65536
 
-# Userland apps stored on raw disk slots, loaded by the kernel at runtime.
-# Small-app region starts at LBA 128 (= first sector past the 64 KiB kernel
-# load area) so the kernel binary can grow up to ~63.5 KiB without overlapping
-# the app area.
-APP1_LBA = 128
-APP2_LBA = 136
-APP3_LBA = 144
-APP4_LBA = 152
-APP5_LBA = 160
-APP6_LBA = 168
-APP7_LBA = 176
-APP8_LBA = 184
-APP9_LBA = 192
-APP10_LBA = 200
-APP11_LBA = 208
-APP12_LBA = 216
-APP13_LBA = 224
-APP14_LBA = 232
-APP15_LBA = 240           # SHELL   — 24-sector slot (240..263)
-APP16_LBA = 264           # ARROWS  — 8-sector slot  (264..271)
-APP17_LBA = 272           # SNAKE   — 16-sector slot (272..287)
-APP18_LBA = 288           # PONG    — 16-sector slot (288..303)
-APP19_LBA = 304           # INSTALL — 8-sector slot  (304..311)
-APP20_LBA = 312           # EDIT    — 16-sector slot (312..327)
-
-# The small-app region spans LBA 128..327. Metadata: the app TOC at LBA 328,
-# the StinkFS directory at 329, and a ~100 MiB StinkFS data region at 330+.
-# The Doom slots live just past that data region.
-TOC_LBA      = 328
-FS_DIR_LBA   = 329
-FS_DATA_LBA  = 330
-FS_DATA_END  = 200330       # must match FS_DATA_END in fs.c (~100 MiB)
-# Each Doom variant gets its own 1 MiB slot just past the StinkFS data region:
-#   freedoom1 (Doom 1 set)   -> DOOM1_LBA
-#   freedoom2 (Doom 2 set)   -> DOOM2_LBA
-#   freedm    (deathmatch)   -> FREEDM_LBA
-DOOM_SECTORS    = 2048
-DOOM1_LBA       = 200330
-DOOM2_LBA       = 202378        # DOOM1_LBA + DOOM_SECTORS
-FREEDM_LBA      = 204426        # DOOM2_LBA + DOOM_SECTORS
-STINKPKG_LBA    = 206474        # FREEDM_LBA + DOOM_SECTORS
-STINKPKG_SECTORS = 256          # 128 KiB -- HTTP client + UI + pkg parser
-DISK_END        = 105845760     # (STINKPKG_LBA + STINKPKG_SECTORS) * 512 = 206730 * 512
+# All userland apps are stored as named ELF files inside StinkFS (no fixed-LBA
+# slots). The StinkFS directory occupies LBA 128-129 (2 sectors); the data
+# region starts at LBA 130 and extends ~100 MiB. App ELFs are written in order
+# by make-stinkfs.py so that the menu's positional navigation matches the test.
+FS_DIR_LBA  = 128
+FS_DATA_LBA = 130
+FS_DATA_END = 200130      # must match FS_DATA_END in fs.c (~100 MiB)
+DISK_END    = 102466560   # FS_DATA_END * 512
 
 # WAD bundling. Defaults look under wads/ for the three Freedoom releases the
 # fetch-wads.sh script downloads; override on the command line to point at a
-# specific WAD or to disable a slot. Missing files just skip silently.
+# specific WAD or to disable a slot. Missing files are skipped silently.
 FREEDOOM1_WAD ?= wads/freedoom1.wad
 FREEDOOM2_WAD ?= wads/freedoom2.wad
 FREEDM_WAD    ?= wads/freedm.wad
@@ -262,6 +227,11 @@ $(BUILD)/edit.elf: apps/crt0.s apps/edit.c apps/libstink.h apps/app.ld $(LIBSTIN
 	$(CC) $(CFLAGS) -c apps/edit.c -o $(BUILD)/edit_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/edit.elf $(BUILD)/crt0.o $(BUILD)/edit_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/fbdemo.elf: apps/crt0.s apps/fbdemo.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/fbdemo.c -o $(BUILD)/fbdemo_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fbdemo.elf $(BUILD)/crt0.o $(BUILD)/fbdemo_app.o $(LIBSTINK_OBJS)
+
 $(BUILD)/stinkpkg.elf: apps/crt0.s apps/stinkpkg.c apps/stinkpkg.h apps/libstink.h apps/libstink_http.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/stinkpkg.c -o $(BUILD)/stinkpkg_app.o
@@ -302,85 +272,42 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
 		exit 1; fi
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
-	dd if=$(BUILD)/hello.elf of=os.bin bs=512 seek=$(APP1_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/box.elf   of=os.bin bs=512 seek=$(APP2_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/fault.elf of=os.bin bs=512 seek=$(APP3_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/game.elf  of=os.bin bs=512 seek=$(APP4_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/hi.elf    of=os.bin bs=512 seek=$(APP5_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/anim.elf  of=os.bin bs=512 seek=$(APP6_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/beep.elf  of=os.bin bs=512 seek=$(APP7_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/save.elf  of=os.bin bs=512 seek=$(APP8_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/files.elf of=os.bin bs=512 seek=$(APP9_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/ls.elf    of=os.bin bs=512 seek=$(APP10_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/del.elf   of=os.bin bs=512 seek=$(APP11_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/play.elf  of=os.bin bs=512 seek=$(APP12_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/seek.elf  of=os.bin bs=512 seek=$(APP13_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/fd.elf    of=os.bin bs=512 seek=$(APP14_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/shell.elf  of=os.bin bs=512 seek=$(APP15_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/arrows.elf of=os.bin bs=512 seek=$(APP16_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/pong.elf      of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/installer.elf of=os.bin bs=512 seek=$(APP19_LBA) conv=notrunc status=none
-	dd if=$(BUILD)/edit.elf      of=os.bin bs=512 seek=$(APP20_LBA) conv=notrunc status=none
-	@for v in doom1 doom2 freedm; do \
-	  size=$$(stat -c%s $(BUILD)/$$v.elf); max=$$(($(DOOM_SECTORS) * 512)); \
-	  if [ $$size -gt $$max ]; then \
-	    echo "ERROR: $$v.elf $$size B > DOOM_SECTORS=$(DOOM_SECTORS) ($$max B); bump DOOM_SECTORS"; \
-	    exit 1; \
-	  fi; \
-	done
-	dd if=$(BUILD)/doom1.elf  of=os.bin bs=512 seek=$(DOOM1_LBA)  conv=notrunc status=none
-	dd if=$(BUILD)/doom2.elf  of=os.bin bs=512 seek=$(DOOM2_LBA)  conv=notrunc status=none
-	dd if=$(BUILD)/freedm.elf of=os.bin bs=512 seek=$(FREEDM_LBA) conv=notrunc status=none
-	@size=$$(stat -c%s $(BUILD)/stinkpkg.elf); max=$$(($(STINKPKG_SECTORS) * 512)); \
-	  if [ $$size -gt $$max ]; then \
-	    echo "ERROR: stinkpkg.elf $$size B > STINKPKG_SECTORS=$(STINKPKG_SECTORS) ($$max B); bump STINKPKG_SECTORS"; \
-	    exit 1; \
-	  fi
-	dd if=$(BUILD)/stinkpkg.elf of=os.bin bs=512 seek=$(STINKPKG_LBA) conv=notrunc status=none
-	python3 tools/make-toc.py $(BUILD)/toc.bin \
-		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
-		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
-		"3 FAULT:$(APP3_LBA):$(BUILD)/fault.elf" \
-		"4 GAME:$(APP4_LBA):$(BUILD)/game.elf" \
-		"5 HIC:$(APP5_LBA):$(BUILD)/hi.elf" \
-		"6 ANIM:$(APP6_LBA):$(BUILD)/anim.elf" \
-		"7 BEEP:$(APP7_LBA):$(BUILD)/beep.elf" \
-		"8 SAVE:$(APP8_LBA):$(BUILD)/save.elf" \
-		"9 FILES:$(APP9_LBA):$(BUILD)/files.elf" \
-		"10 LS:$(APP10_LBA):$(BUILD)/ls.elf" \
-		"11 DEL:$(APP11_LBA):$(BUILD)/del.elf" \
-		"12 PLAY:$(APP12_LBA):$(BUILD)/play.elf" \
-		"13 SEEK:$(APP13_LBA):$(BUILD)/seek.elf" \
-		"14 FD:$(APP14_LBA):$(BUILD)/fd.elf" \
-		"15 SHELL:$(APP15_LBA):$(BUILD)/shell.elf" \
-		"16 ARROWS:$(APP16_LBA):$(BUILD)/arrows.elf" \
-		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
-		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf" \
-		"19 INSTALL:$(APP19_LBA):$(BUILD)/installer.elf" \
-		"20 EDIT:$(APP20_LBA):$(BUILD)/edit.elf" \
-		"21 DOOM1:$(DOOM1_LBA):$(BUILD)/doom1.elf" \
-		"22 DOOM2:$(DOOM2_LBA):$(BUILD)/doom2.elf" \
-		"23 FREEDM:$(FREEDM_LBA):$(BUILD)/freedm.elf" \
-		"24 PKG:$(STINKPKG_LBA):$(BUILD)/stinkpkg.elf"
-	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
-	@stinkfs_args=""; \
-	  if [ -f "$(FREEDOOM1_WAD)" ]; then stinkfs_args="$$stinkfs_args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
-	  if [ -f "$(FREEDOOM2_WAD)" ]; then stinkfs_args="$$stinkfs_args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
-	  if [ -f "$(FREEDM_WAD)" ];    then stinkfs_args="$$stinkfs_args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
-	  if [ -n "$$stinkfs_args" ]; then \
-	    echo "stinkfs: bundling$$stinkfs_args"; \
-	    python3 tools/make-stinkfs.py os.bin $(FS_DIR_LBA) $(FS_DATA_LBA) $(FS_DATA_END) $$stinkfs_args; \
-	  else \
-	    echo "stinkfs: no WADs under wads/ (run 'bash tools/fetch-wads.sh' to download)"; \
-	  fi
+	@args="HELLO.ELF=$(BUILD)/hello.elf \
+	  BOX.ELF=$(BUILD)/box.elf \
+	  FAULT.ELF=$(BUILD)/fault.elf \
+	  GAME.ELF=$(BUILD)/game.elf \
+	  HI.ELF=$(BUILD)/hi.elf \
+	  ANIM.ELF=$(BUILD)/anim.elf \
+	  BEEP.ELF=$(BUILD)/beep.elf \
+	  SAVE.ELF=$(BUILD)/save.elf \
+	  FILES.ELF=$(BUILD)/files.elf \
+	  LS.ELF=$(BUILD)/ls.elf \
+	  DEL.ELF=$(BUILD)/del.elf \
+	  PLAY.ELF=$(BUILD)/play.elf \
+	  SEEK.ELF=$(BUILD)/seek.elf \
+	  FD.ELF=$(BUILD)/fd.elf \
+	  SHELL.ELF=$(BUILD)/shell.elf \
+	  ARROWS.ELF=$(BUILD)/arrows.elf \
+	  SNAKE.ELF=$(BUILD)/snake.elf \
+	  PONG.ELF=$(BUILD)/pong.elf \
+	  INSTALLER.ELF=$(BUILD)/installer.elf \
+	  EDIT.ELF=$(BUILD)/edit.elf \
+	  STINKPKG.ELF=$(BUILD)/stinkpkg.elf \
+	  DOOM1.ELF=$(BUILD)/doom1.elf \
+	  DOOM2.ELF=$(BUILD)/doom2.elf \
+	  FREEDM.ELF=$(BUILD)/freedm.elf \
+	  FBDEMO.ELF=$(BUILD)/fbdemo.elf"; \
+	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
+	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
+	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
+	  python3 tools/make-stinkfs.py os.bin $(FS_DIR_LBA) $(FS_DATA_LBA) $(FS_DATA_END) $$args
 
 hex:
 	hexdump os.bin
