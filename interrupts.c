@@ -317,10 +317,12 @@ static int name_ci_eq(const char *a, const char *b)
  * returns 0 on success, -1 if the name is too long or the file is not found. */
 static int find_app_elf(const char *name, char *elf_out)
 {
-	/* Convert to uppercase and measure length. */
-	char upper[12];
+	/* Convert to uppercase and measure length. StinkFS name field is 16 bytes
+	 * (max 15 visible chars + NUL), so a base name can be at most 11 chars
+	 * before ".ELF" is appended (11+4=15). */
+	char upper[16];
 	int k;
-	for (k = 0; k < 11 && name[k]; k++) {
+	for (k = 0; k < 15 && name[k]; k++) {
 		char c = name[k];
 		if (c >= 'a' && c <= 'z') c -= 32;
 		upper[k] = c;
@@ -337,7 +339,7 @@ static int find_app_elf(const char *name, char *elf_out)
 		for (int i = 0; i < 16; i++)
 			candidate[i] = (i < k) ? upper[i] : 0;
 	} else {
-		if (k + 4 > 11) return -1;
+		if (k + 4 > 15) return -1;
 		for (int i = 0; i < k; i++) candidate[i] = upper[i];
 		candidate[k]   = '.'; candidate[k+1] = 'E';
 		candidate[k+2] = 'L'; candidate[k+3] = 'F';
