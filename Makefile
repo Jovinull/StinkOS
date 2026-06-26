@@ -22,6 +22,46 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_stdio.o $(BUILD)/libstink_posix.o \
                 $(BUILD)/libstink_setjmp.o
 
+# Doom port build configuration. The doomgeneric core wants the POSIX-ish
+# headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
+# Doom code path closest to a generic 32-bit Unix. -O2 is necessary -- without
+# it Doom's renderer drops below playable frame rate -- but it is scoped to
+# Doom only; libstink and the kernel stay at -O0. -w silences the wall of
+# legacy-K&R warnings; -fno-strict-aliasing keeps the original type-punning
+# code (Doom is famously not strict-aliasing-clean) functioning correctly.
+DOOM_DIR    = apps/doom
+DOOM_SHIMS  = apps/doom-shims
+DOOM_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
+              -ffunction-sections -fdata-sections \
+              -fno-builtin -fno-strict-aliasing \
+              -DNORMALUNIX -DLINUX -D_DEFAULT_SOURCE \
+              -I $(DOOM_SHIMS) -I apps -I $(DOOM_DIR) \
+              -w
+
+# Doom translation units. Mirrors doomgeneric's Makefile.soso minus the SDL,
+# X11, Allegro and Emscripten backends we don't link in. doomgeneric_stink.c
+# is our own platform layer (apps/doom/doomgeneric_stink.c).
+DOOM_SRCS = dummy.c am_map.c doomdef.c doomstat.c dstrings.c d_event.c \
+            d_items.c d_iwad.c d_loop.c d_main.c d_mode.c d_net.c \
+            f_finale.c f_wipe.c g_game.c hu_lib.c hu_stuff.c info.c \
+            i_cdmus.c i_endoom.c i_input.c i_joystick.c i_scale.c i_sound.c \
+            i_system.c i_timer.c i_video.c \
+            memio.c m_argv.c m_bbox.c m_cheat.c m_config.c m_controls.c \
+            m_fixed.c m_menu.c m_misc.c m_random.c \
+            p_ceilng.c p_doors.c p_enemy.c p_floor.c p_inter.c p_lights.c \
+            p_map.c p_maputl.c p_mobj.c p_plats.c p_pspr.c p_saveg.c \
+            p_setup.c p_sight.c p_spec.c p_switch.c p_telept.c p_tick.c \
+            p_user.c \
+            r_bsp.c r_data.c r_draw.c r_main.c r_plane.c r_segs.c r_sky.c \
+            r_things.c \
+            sha1.c sounds.c statdump.c st_lib.c st_stuff.c s_sound.c \
+            tables.c v_video.c wi_stuff.c \
+            w_checksum.c w_file.c w_main.c w_wad.c w_file_stdc.c \
+            z_zone.c \
+            doomgeneric.c doomgeneric_stink.c
+
+DOOM_OBJS = $(addprefix $(BUILD)/doom/, $(DOOM_SRCS:.c=.o))
+
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
 # Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
 IMG_MIN = 29184
@@ -182,7 +222,21 @@ $(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld $(LIBSTIN
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
-os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf
+# Doom port: each translation unit compiles with DOOM_CFLAGS into its own
+# build/doom/ subdir so the per-app objects don't collide with kernel objects
+# in build/. The link is identical to the regular C-app pattern: crt0 first,
+# all Doom objects, then the shared libstink helpers.
+$(BUILD)/doom:
+	mkdir -p $(BUILD)/doom
+
+$(BUILD)/doom/%.o: $(DOOM_DIR)/%.c | $(BUILD)/doom
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+
+$(BUILD)/doom.elf: apps/crt0.s apps/app.ld $(DOOM_OBJS) $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom.elf $(BUILD)/crt0.o $(DOOM_OBJS) $(LIBSTINK_OBJS)
+
+os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/doom.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
@@ -206,6 +260,12 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 	dd if=$(BUILD)/arrows.elf of=os.bin bs=512 seek=$(APP16_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/snake.elf  of=os.bin bs=512 seek=$(APP17_LBA) conv=notrunc status=none
 	dd if=$(BUILD)/pong.elf   of=os.bin bs=512 seek=$(APP18_LBA) conv=notrunc status=none
+	@size=$$(stat -c%s $(BUILD)/doom.elf); max=$$(($(DOOM_SECTORS) * 512)); \
+	  if [ $$size -gt $$max ]; then \
+	    echo "ERROR: doom.elf $$size B > DOOM_SECTORS=$(DOOM_SECTORS) ($$max B); bump DOOM_SECTORS"; \
+	    exit 1; \
+	  fi
+	dd if=$(BUILD)/doom.elf   of=os.bin bs=512 seek=$(DOOM_LBA)  conv=notrunc status=none
 	python3 tools/make-toc.py $(BUILD)/toc.bin \
 		"1 HELLO:$(APP1_LBA):$(BUILD)/hello.elf" \
 		"2 BOX:$(APP2_LBA):$(BUILD)/box.elf" \
@@ -224,7 +284,8 @@ os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.el
 		"15 SHELL:$(APP15_LBA):$(BUILD)/shell.elf" \
 		"16 ARROWS:$(APP16_LBA):$(BUILD)/arrows.elf" \
 		"17 SNAKE:$(APP17_LBA):$(BUILD)/snake.elf" \
-		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf"
+		"18 PONG:$(APP18_LBA):$(BUILD)/pong.elf" \
+		"19 DOOM:$(DOOM_LBA):$(BUILD)/doom.elf"
 	dd if=$(BUILD)/toc.bin   of=os.bin bs=512 seek=$(TOC_LBA) conv=notrunc status=none
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 
