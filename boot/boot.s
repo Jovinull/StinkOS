@@ -173,7 +173,7 @@ pm_entry:
 	xor %eax, %eax
 	rep stosb
 
-	call kernel_main
+	call kmain
 hang32:
 	cli
 	hlt

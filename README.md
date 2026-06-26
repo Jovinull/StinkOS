@@ -151,7 +151,7 @@ subdirectory via `VPATH` and `-I` include paths.
 | Area | Files |
 |------|-------|
 | Boot, protected-mode entry           | `boot/boot.s`, `boot/linker.ld` |
-| Kernel entry                         | `kernel.c` |
+| Kernel entry                         | `kernel/main.c` (`kmain`) |
 | Interrupts (IDT, PIC, PIT, syscalls) | `kernel/sys/interrupts.c`, `boot/interrupts_asm.s` |
 | GDT + TSS                            | `kernel/arch/gdt.c`, `boot/gdt_asm.s` |
 | Paging, physical memory              | `kernel/arch/paging.c`, `kernel/arch/pmm.c` |
