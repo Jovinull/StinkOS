@@ -106,7 +106,7 @@ Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `eb
 | 12 | `fdelete`| `ebx`=name                        | Delete a file |
 | 13 | `fappend`| `ebx`=name `ecx`=buf `edx`=size   | Append to an existing file |
 
-C apps don't write `int 0x80` by hand — `apps/libstink.h` wraps each call as a static inline. Drop it in and call `sys_draw(x, y, 0xff00ff)`.
+C apps don't write `int 0x80` by hand — `lib/libstink.h` wraps each call as a static inline. Drop it in and call `sys_draw(x, y, 0xff00ff)`.
 
 ## Userland apps
 
@@ -161,7 +161,7 @@ subdirectory via `VPATH` and `-I` include paths.
 | Network stack                        | `kernel/drivers/net/` (e1000, ethernet, arp, ipv4, icmp, udp, tcp, dhcp, dns, pci) |
 | StinkFS + VFS                        | `kernel/fs/{fs,vfs,mbr}.c` |
 | ELF loader + Ring 3 entry            | `kernel/sys/elf.c`, `kernel/ui/menu.c`, `boot/usermode_asm.s` |
-| Userland C library                   | `apps/libstink.h`, `apps/crt0.s` |
+| Userland C library                   | `lib/libstink.h`, `apps/crt0.s` |
 
 ## Toolchain — why a cross-compiler?
 
@@ -235,7 +235,7 @@ The boot menu picks up three new entries — `DOOM1`, `DOOM2`, `FREEDM`. Pick on
 
 **What doesn't (yet):** music and sound effects (no audio driver), mouse aim (driver exists but isn't wired to the input event queue), networking (no stack).
 
-**How the port works under the hood:** vendored doomgeneric (Chocolate Doom derivative) lives in `apps/doom/`; `apps/doom-shims/` provides the POSIX headers Doom expects, and `apps/libstink_{alloc,stdio,printf,posix,setjmp}` are the corresponding runtime backends. The platform layer is `apps/doom/doomgeneric_stink.c` (~200 lines). One source tree, three ELFs — each compiled with a different `-DSTINKDOOM_IWAD` so the `DOOM1` / `DOOM2` / `FREEDM` menu entries auto-load the right WAD.
+**How the port works under the hood:** vendored doomgeneric (Chocolate Doom derivative) lives in `apps/doom/`; `apps/doom-shims/` provides the POSIX headers Doom expects, and `lib/libstink_{alloc,stdio,printf,posix,setjmp}` are the corresponding runtime backends. The platform layer is `apps/doom/doomgeneric_stink.c` (~200 lines). One source tree, three ELFs — each compiled with a different `-DSTINKDOOM_IWAD` so the `DOOM1` / `DOOM2` / `FREEDM` menu entries auto-load the right WAD.
 
 ## Contributing
 

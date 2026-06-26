@@ -4,7 +4,11 @@ CC = i386-elf-gcc
 AS = i386-elf-as
 LD = i386-elf-ld
 CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
-         -ffunction-sections -fdata-sections
+         -ffunction-sections -fdata-sections -Ilib
+
+# -Ilib above puts the userland C library (lib/libstink.h) on the include path
+# so apps keep using bare `#include "libstink.h"` after the move out of apps/.
+# The kernel never includes libstink, so the extra -I is a harmless no-op there.
 
 # Kernel source tree. Sources live under boot/ and kernel/<subsystem>/; objects
 # stay flat in build/ (basenames are unique across the tree). VPATH lets the
@@ -48,7 +52,7 @@ DOOM_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
               -ffunction-sections -fdata-sections \
               -fno-builtin -fno-strict-aliasing \
               -DNORMALUNIX -DLINUX -D_DEFAULT_SOURCE -DFEATURE_SOUND \
-              -I $(DOOM_SHIMS) -I apps -I $(DOOM_DIR) \
+              -I $(DOOM_SHIMS) -I lib -I apps -I $(DOOM_DIR) \
               -w
 
 # Doom translation units. Mirrors doomgeneric's Makefile.soso minus the SDL,
@@ -120,28 +124,28 @@ $(BUILD)/%.o: %.s | $(BUILD)
 	$(AS) -O0 $< -o $@
 
 # Userland support library: compiled once, linked into every C app.
-$(BUILD)/libstink_alloc.o: apps/libstink_alloc.c apps/libstink.h | $(BUILD)
-	$(CC) $(CFLAGS) -c apps/libstink_alloc.c -o $(BUILD)/libstink_alloc.o
+$(BUILD)/libstink_alloc.o: lib/libstink_alloc.c lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_alloc.c -o $(BUILD)/libstink_alloc.o
 
-$(BUILD)/libstink_printf.o: apps/libstink_printf.c apps/libstink.h | $(BUILD)
-	$(CC) $(CFLAGS) -c apps/libstink_printf.c -o $(BUILD)/libstink_printf.o
+$(BUILD)/libstink_printf.o: lib/libstink_printf.c lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_printf.c -o $(BUILD)/libstink_printf.o
 
-$(BUILD)/libstink_stdio.o: apps/libstink_stdio.c apps/libstink.h | $(BUILD)
-	$(CC) $(CFLAGS) -c apps/libstink_stdio.c -o $(BUILD)/libstink_stdio.o
+$(BUILD)/libstink_stdio.o: lib/libstink_stdio.c lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_stdio.c -o $(BUILD)/libstink_stdio.o
 
 # POSIX glue needs the doom-shims headers on its include path so its <time.h>
 # and <sys/stat.h> includes find the layout it implements against.
-$(BUILD)/libstink_posix.o: apps/libstink_posix.c apps/libstink.h apps/doom-shims/time.h apps/doom-shims/sys/stat.h | $(BUILD)
-	$(CC) $(CFLAGS) -I apps -I apps/doom-shims -c apps/libstink_posix.c -o $(BUILD)/libstink_posix.o
+$(BUILD)/libstink_posix.o: lib/libstink_posix.c lib/libstink.h apps/doom-shims/time.h apps/doom-shims/sys/stat.h | $(BUILD)
+	$(CC) $(CFLAGS) -I apps -I apps/doom-shims -c lib/libstink_posix.c -o $(BUILD)/libstink_posix.o
 
-$(BUILD)/libstink_setjmp.o: apps/libstink_setjmp.s | $(BUILD)
-	$(AS) -O0 apps/libstink_setjmp.s -o $(BUILD)/libstink_setjmp.o
+$(BUILD)/libstink_setjmp.o: lib/libstink_setjmp.s | $(BUILD)
+	$(AS) -O0 lib/libstink_setjmp.s -o $(BUILD)/libstink_setjmp.o
 
-$(BUILD)/libstink_http.o: apps/libstink_http.c apps/libstink.h apps/libstink_http.h | $(BUILD)
-	$(CC) $(CFLAGS) -c apps/libstink_http.c -o $(BUILD)/libstink_http.o
+$(BUILD)/libstink_http.o: lib/libstink_http.c lib/libstink.h lib/libstink_http.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_http.c -o $(BUILD)/libstink_http.o
 
-$(BUILD)/libstink_sha256.o: apps/libstink_sha256.c | $(BUILD)
-	$(CC) $(CFLAGS) -c apps/libstink_sha256.c -o $(BUILD)/libstink_sha256.o
+$(BUILD)/libstink_sha256.o: lib/libstink_sha256.c | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_sha256.c -o $(BUILD)/libstink_sha256.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
@@ -163,92 +167,92 @@ $(BUILD)/game.elf: apps/game.s apps/app.ld | $(BUILD)
 
 # C userland apps: crt0 (entry) linked first, then the compiled C object, then
 # the shared libstink support objects.
-$(BUILD)/hi.elf: apps/crt0.s apps/hi.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/hi.elf: apps/crt0.s apps/hi.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/hi.c -o $(BUILD)/hi_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/hi.elf $(BUILD)/crt0.o $(BUILD)/hi_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/anim.elf: apps/crt0.s apps/anim.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/anim.elf: apps/crt0.s apps/anim.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/anim.elf $(BUILD)/crt0.o $(BUILD)/anim_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/beep.elf: apps/crt0.s apps/beep.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/beep.elf: apps/crt0.s apps/beep.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/beep.c -o $(BUILD)/beep_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/beep.elf $(BUILD)/crt0.o $(BUILD)/beep_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/save.elf: apps/crt0.s apps/save.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/save.elf: apps/crt0.s apps/save.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/save.c -o $(BUILD)/save_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/save.elf $(BUILD)/crt0.o $(BUILD)/save_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/files.elf: apps/crt0.s apps/files.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/files.elf: apps/crt0.s apps/files.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/files.c -o $(BUILD)/files_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/files.elf $(BUILD)/crt0.o $(BUILD)/files_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/ls.elf: apps/crt0.s apps/ls.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/ls.elf: apps/crt0.s apps/ls.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/ls.c -o $(BUILD)/ls_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ls.elf $(BUILD)/crt0.o $(BUILD)/ls_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/del.elf: apps/crt0.s apps/del.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/del.elf: apps/crt0.s apps/del.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/del.c -o $(BUILD)/del_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/del.elf $(BUILD)/crt0.o $(BUILD)/del_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/play.elf: apps/crt0.s apps/play.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/play.elf: apps/crt0.s apps/play.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/play.c -o $(BUILD)/play_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/play.elf $(BUILD)/crt0.o $(BUILD)/play_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/seek.elf: apps/crt0.s apps/seek.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/seek.elf: apps/crt0.s apps/seek.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/seek.c -o $(BUILD)/seek_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/seek.elf $(BUILD)/crt0.o $(BUILD)/seek_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/fd.elf: apps/crt0.s apps/fd.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/fd.elf: apps/crt0.s apps/fd.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/fd.c -o $(BUILD)/fd_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fd.elf $(BUILD)/crt0.o $(BUILD)/fd_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/shell.elf: apps/crt0.s apps/shell.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/shell.elf: apps/crt0.s apps/shell.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/shell.c -o $(BUILD)/shell_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/shell.elf $(BUILD)/crt0.o $(BUILD)/shell_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/arrows.elf: apps/crt0.s apps/arrows.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/arrows.elf: apps/crt0.s apps/arrows.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/arrows.c -o $(BUILD)/arrows_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/arrows.elf $(BUILD)/crt0.o $(BUILD)/arrows_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/snake.elf: apps/crt0.s apps/snake.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/snake.elf: apps/crt0.s apps/snake.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/snake.c -o $(BUILD)/snake_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/snake.elf $(BUILD)/crt0.o $(BUILD)/snake_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/pong.elf: apps/crt0.s apps/pong.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/pong.elf: apps/crt0.s apps/pong.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/installer.elf: apps/crt0.s apps/installer.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/installer.elf: apps/crt0.s apps/installer.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/installer.c -o $(BUILD)/installer_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/installer.elf $(BUILD)/crt0.o $(BUILD)/installer_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/edit.elf: apps/crt0.s apps/edit.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/edit.elf: apps/crt0.s apps/edit.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/edit.c -o $(BUILD)/edit_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/edit.elf $(BUILD)/crt0.o $(BUILD)/edit_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/fbdemo.elf: apps/crt0.s apps/fbdemo.c apps/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/fbdemo.elf: apps/crt0.s apps/fbdemo.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/fbdemo.c -o $(BUILD)/fbdemo_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/fbdemo.elf $(BUILD)/crt0.o $(BUILD)/fbdemo_app.o $(LIBSTINK_OBJS)
 
-$(BUILD)/stinkpkg.elf: apps/crt0.s apps/stinkpkg.c apps/stinkpkg.h apps/libstink.h apps/libstink_http.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+$(BUILD)/stinkpkg.elf: apps/crt0.s apps/stinkpkg.c apps/stinkpkg.h lib/libstink.h lib/libstink_http.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/stinkpkg.c -o $(BUILD)/stinkpkg_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/stinkpkg.elf $(BUILD)/crt0.o $(BUILD)/stinkpkg_app.o $(LIBSTINK_OBJS)
