@@ -44,7 +44,7 @@ DOOM_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
 DOOM_SRCS = dummy.c am_map.c doomdef.c doomstat.c dstrings.c d_event.c \
             d_items.c d_iwad.c d_loop.c d_main.c d_mode.c d_net.c \
             f_finale.c f_wipe.c g_game.c hu_lib.c hu_stuff.c info.c \
-            i_cdmus.c i_endoom.c i_input.c i_joystick.c i_scale.c i_sound.c \
+            i_cdmus.c i_endoom.c i_input.c i_joystick.c i_scale.c \
             i_system.c i_timer.c i_video.c \
             memio.c m_argv.c m_bbox.c m_cheat.c m_config.c m_controls.c \
             m_fixed.c m_menu.c m_misc.c m_random.c \
@@ -68,52 +68,54 @@ DOOM_OBJS = $(addprefix $(BUILD)/doom/, $(DOOM_SRCS:.c=.o))
 DOOM_CORE_OBJS = $(filter-out $(BUILD)/doom/doomgeneric_stink.o, $(DOOM_OBJS))
 
 # Image is padded so the bootloader's fixed LBA read never runs past EOF.
-# Must cover the boot sector + KSECTORS (see boot.s): (1 + 56) * 512 = 29184.
-IMG_MIN = 29184
+# Must cover the boot sector + KSECTORS (see boot.s): (1 + 127) * 512 = 65536.
+IMG_MIN = 65536
 # Bytes the bootloader loads (boot sector + KSECTORS). The linked kernel image
 # (boot + code + data, up to __bss_start) must fit here or it boots truncated.
-KERNEL_LOAD_MAX = 29184
+KERNEL_LOAD_MAX = 65536
 
 # Userland apps stored on raw disk slots, loaded by the kernel at runtime.
-APP1_LBA = 64
-APP2_LBA = 72
-APP3_LBA = 80
-APP4_LBA = 88
-APP5_LBA = 96
-APP6_LBA = 104
-APP7_LBA = 112
-APP8_LBA = 120
-APP9_LBA = 128
-APP10_LBA = 136
-APP11_LBA = 144
-APP12_LBA = 152
-APP13_LBA = 160
-APP14_LBA = 168
-APP15_LBA = 176           # SHELL  — 16-sector slot (176..191)
-APP16_LBA = 192           # ARROWS — 8-sector slot  (192..199)
-APP17_LBA = 200           # SNAKE  — 8-sector slot  (200..207)
-APP18_LBA = 208           # PONG    — 8-sector slot  (208..215)
-APP19_LBA = 216           # INSTALL  — 8-sector slot  (216..223)
+# Small-app region starts at LBA 128 (= first sector past the 64 KiB kernel
+# load area) so the kernel binary can grow up to ~63.5 KiB without overlapping
+# the app area.
+APP1_LBA = 128
+APP2_LBA = 136
+APP3_LBA = 144
+APP4_LBA = 152
+APP5_LBA = 160
+APP6_LBA = 168
+APP7_LBA = 176
+APP8_LBA = 184
+APP9_LBA = 192
+APP10_LBA = 200
+APP11_LBA = 208
+APP12_LBA = 216
+APP13_LBA = 224
+APP14_LBA = 232
+APP15_LBA = 240           # SHELL  — 16-sector slot (240..255)
+APP16_LBA = 256           # ARROWS — 8-sector slot  (256..263)
+APP17_LBA = 264           # SNAKE  — 16-sector slot (264..279)
+APP18_LBA = 280           # PONG   — 16-sector slot (280..295)
+APP19_LBA = 296           # INSTALL — 8-sector slot  (296..303)
 
-# The small-app region spans LBA 64..223. Metadata: the app TOC at LBA 224,
-# the StinkFS directory at 225, and a ~32 MiB StinkFS data region at 226..65225
-# (big enough for a Doom WAD plus save games). The Doom slot lives just past
-# that data region.
-TOC_LBA      = 224
-FS_DIR_LBA   = 225
-FS_DATA_LBA  = 226
-FS_DATA_END  = 200226       # must match FS_DATA_END in fs.c (~100 MiB)
+# The small-app region spans LBA 128..303. Metadata: the app TOC at LBA 304,
+# the StinkFS directory at 305, and a ~100 MiB StinkFS data region at 306+.
+# The Doom slots live just past that data region.
+TOC_LBA      = 304
+FS_DIR_LBA   = 305
+FS_DATA_LBA  = 306
+FS_DATA_END  = 200306       # must match FS_DATA_END in fs.c (~100 MiB)
 # Each Doom variant gets its own 1 MiB slot just past the StinkFS data region:
 #   freedoom1 (Doom 1 set)   -> DOOM1_LBA
 #   freedoom2 (Doom 2 set)   -> DOOM2_LBA
 #   freedm    (deathmatch)   -> FREEDM_LBA
 DOOM_SECTORS    = 2048
-DOOM1_LBA       = 200226
-DOOM2_LBA       = 202274        # DOOM1_LBA + DOOM_SECTORS
-FREEDM_LBA      = 204322        # DOOM2_LBA + DOOM_SECTORS
-STINKPKG_LBA    = 206370        # FREEDM_LBA + DOOM_SECTORS
+DOOM1_LBA       = 200306
+DOOM2_LBA       = 202354        # DOOM1_LBA + DOOM_SECTORS
+FREEDM_LBA      = 204402        # DOOM2_LBA + DOOM_SECTORS
+STINKPKG_LBA    = 206450        # FREEDM_LBA + DOOM_SECTORS
 STINKPKG_SECTORS = 256          # 128 KiB -- HTTP client + UI + pkg parser
-DISK_END        = 105792512     # (STINKPKG_LBA + STINKPKG_SECTORS) * 512 = 206626 * 512
+DISK_END        = 105830400     # (STINKPKG_LBA + STINKPKG_SECTORS) * 512 = 206706 * 512
 
 # WAD bundling. Defaults look under wads/ for the three Freedoom releases the
 # fetch-wads.sh script downloads; override on the command line to point at a
@@ -151,7 +153,7 @@ $(BUILD)/libstink_stdio.o: apps/libstink_stdio.c apps/libstink.h | $(BUILD)
 # POSIX glue needs the doom-shims headers on its include path so its <time.h>
 # and <sys/stat.h> includes find the layout it implements against.
 $(BUILD)/libstink_posix.o: apps/libstink_posix.c apps/libstink.h apps/doom-shims/time.h apps/doom-shims/sys/stat.h | $(BUILD)
-	$(CC) $(CFLAGS) -I apps/doom-shims -c apps/libstink_posix.c -o $(BUILD)/libstink_posix.o
+	$(CC) $(CFLAGS) -I apps -I apps/doom-shims -c apps/libstink_posix.c -o $(BUILD)/libstink_posix.o
 
 $(BUILD)/libstink_setjmp.o: apps/libstink_setjmp.s | $(BUILD)
 	$(AS) -O0 apps/libstink_setjmp.s -o $(BUILD)/libstink_setjmp.o
@@ -280,17 +282,19 @@ $(BUILD)/doom/stink_doom2.o: $(DOOM_DIR)/doomgeneric_stink.c | $(BUILD)/doom
 $(BUILD)/doom/stink_freedm.o: $(DOOM_DIR)/doomgeneric_stink.c | $(BUILD)/doom
 	$(CC) $(DOOM_CFLAGS) -DSTINKDOOM_IWAD='"FREEDM.WAD"' -c $< -o $@
 
+LIBGCC := $(shell i386-elf-gcc -print-libgcc-file-name)
+
 $(BUILD)/doom1.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom1.o $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom1.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom1.o $(LIBSTINK_OBJS)
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom1.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom1.o $(LIBSTINK_OBJS) $(LIBGCC)
 
 $(BUILD)/doom2.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom2.o $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom2.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom2.o $(LIBSTINK_OBJS)
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/doom2.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_doom2.o $(LIBSTINK_OBJS) $(LIBGCC)
 
 $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
-	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS)
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
 os: $(LINK_OBJS) linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	$(LD) -T linker.ld --oformat binary -o os.bin $(LINK_OBJS)
