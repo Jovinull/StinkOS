@@ -351,8 +351,18 @@ hex:
 dall:
 	objdump -m i386 -b binary --adjust-vma=0x7c00 -D os.bin
 
+# QEMU audio backend for the Sound Blaster 16 device:
+#   none  -- driver initialises, no sound reaches the host (default; quiet)
+#   sdl   -- cross-platform SDL audio (Linux/macOS/Windows; needs SDL2 libs)
+#   pa    -- PulseAudio (Linux)
+#   dsound -- DirectSound (Windows host)
+# Override per-run: make QEMU_AUDIO=sdl run
+QEMU_AUDIO ?= none
+
 run: all
-	qemu-system-i386 -drive format=raw,file=os.bin
+	qemu-system-i386 -drive format=raw,file=os.bin \
+	  -audiodev $(QEMU_AUDIO),id=snd0 \
+	  -device sb16,audiodev=snd0
 
 # Headless verification: boots the image in qemu, reads the serial debug log and
 # injects keystrokes via the monitor to assert protected mode, the timer IRQ and
