@@ -24,11 +24,90 @@
 #include "libstink_http.h"
 #include "stinkpkg.h"
 
-#define REPO_URL_BASE   "http://stinkos-repo.local"
-#define REPO_INDEX_PATH "/index.txt"
-#define REPO_PKG_PATH   "/pkg/"
+#define DEFAULT_REPO_URL "http://stinkos-repo.local"
+#define REPO_INDEX_PATH  "/index.txt"
+#define REPO_PKG_PATH    "/pkg/"
+#define REPO_URL_MAX     128
 
 #define MAX_PKG_BYTES   (4u * 1024u * 1024u)   /* 4 MiB cap per package */
+
+/* Configurable repository base URL.
+ *
+ * Resolution order (first hit wins):
+ *   1. The "repo_url=..." line of STINKPKG.CONF in StinkFS.
+ *   2. The compile-time DEFAULT_REPO_URL.
+ *
+ * The config file is plain text, key=value per line; unknown keys are
+ * ignored. Caching keeps the cost to one sys_fread for the lifetime of
+ * the process. */
+static char  repo_url_cache[REPO_URL_MAX];
+static int   repo_url_loaded;
+
+static const char *repo_base(void)
+{
+	if (repo_url_loaded)
+		return repo_url_cache;
+
+	char conf[512];
+	int  n = sys_fread("STINKPKG.CONF", conf, sizeof(conf) - 1);
+	if (n > 0) {
+		conf[n] = '\0';
+		const char *key = "repo_url=";
+		int klen = 9;
+		const char *p = conf;
+		while (*p) {
+			int match = 1;
+			for (int j = 0; j < klen; j++) {
+				if (p[j] != key[j]) {
+					match = 0;
+					break;
+				}
+			}
+			if (match) {
+				p += klen;
+				int k = 0;
+				while (*p && *p != '\n' && *p != '\r' &&
+				       k < REPO_URL_MAX - 1)
+					repo_url_cache[k++] = *p++;
+				repo_url_cache[k] = '\0';
+				if (k > 0) {
+					repo_url_loaded = 1;
+					return repo_url_cache;
+				}
+				break;
+			}
+			while (*p && *p != '\n') p++;
+			if (*p == '\n') p++;
+		}
+	}
+
+	const char *def = DEFAULT_REPO_URL;
+	int k = 0;
+	while (def[k] && k < REPO_URL_MAX - 1) {
+		repo_url_cache[k] = def[k];
+		k++;
+	}
+	repo_url_cache[k] = '\0';
+	repo_url_loaded = 1;
+	return repo_url_cache;
+}
+
+/* Concatenate the configured base + `suffix` into `out`. Truncates silently
+ * if the destination is too small; caller picks the cap. Returns out for
+ * call-chain convenience. */
+static char *build_url(char *out, unsigned int cap, const char *suffix)
+{
+	const char *base = repo_base();
+	unsigned int o = 0;
+	while (base[o] && o + 1 < cap) {
+		out[o] = base[o];
+		o++;
+	}
+	for (unsigned int i = 0; suffix[i] && o + 1 < cap; i++)
+		out[o++] = suffix[i];
+	out[o] = '\0';
+	return out;
+}
 
 /* Allocated lazily in main() via malloc so the ELF stays small (the buffer
  * would otherwise live in user BSS, which is bounded by the 1 MiB code
@@ -132,10 +211,14 @@ static void cmd_list(void)
 static void cmd_update(void)
 {
 	draw_header("updating index");
-	sys_drawtext(140, 150, "GET " REPO_URL_BASE REPO_INDEX_PATH, COLOR_DIM);
+	char idx_url[REPO_URL_MAX + 32];
+	build_url(idx_url, sizeof(idx_url), REPO_INDEX_PATH);
+
+	sys_drawtext(140, 150, "GET", COLOR_DIM);
+	sys_drawtext(180, 150, idx_url, COLOR_DIM);
 
 	int status = 0;
-	int n = http_get(REPO_URL_BASE REPO_INDEX_PATH, pkg_buf, MAX_PKG_BYTES, &status);
+	int n = http_get(idx_url, pkg_buf, MAX_PKG_BYTES, &status);
 	if (n <= 0 || status != 200) {
 		sys_drawtext(140, 190, "fetch failed.", COLOR_ERR);
 		wait_any_key(220, "press any key.", COLOR_DIM);
@@ -308,11 +391,11 @@ static void cmd_install(void)
 	if (read_line(280, 150, name, sizeof(name)) < 0)
 		return;
 
-	char url[160];
+	char url[REPO_URL_MAX + 64];
+	build_url(url, sizeof(url), REPO_PKG_PATH);
 	int u = 0;
-	const char *base = REPO_URL_BASE REPO_PKG_PATH;
-	while (base[u]) { url[u] = base[u]; u++; }
-	for (int i = 0; name[i] && u + 8 < (int)sizeof(url); i++)
+	while (url[u]) u++;
+	for (int i = 0; name[i] && u + 12 < (int)sizeof(url); i++)
 		url[u++] = name[i];
 	const char *suf = ".stinkpkg";
 	for (int i = 0; suf[i] && u + 1 < (int)sizeof(url); i++)
