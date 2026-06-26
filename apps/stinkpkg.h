@@ -27,8 +27,10 @@
  * Integrity:
  *   - SHA-256 of the entire file (computed by the package server) is
  *     published alongside the .stinkpkg in the repo index.
- *   - Optional ed25519 signature of that SHA, verified by stink-pkg before
- *     install. (Crypto code lands in a follow-up commit.)
+ *   - stink-pkg recomputes that SHA-256 over the downloaded bytes and refuses
+ *     to install on any mismatch or missing entry (fail closed). See
+ *     index_sha()/hex32() in stinkpkg.c and sha256() in libstink_sha256.c.
+ *   - An ed25519 signature over that SHA is a future hardening step.
  */
 #ifndef STINKPKG_H
 #define STINKPKG_H

@@ -670,6 +670,10 @@ int printf(const char *fmt, ...);
 int strcasecmp(const char *a, const char *b);
 int strncasecmp(const char *a, const char *b, unsigned int n);
 
+/* SHA-256 (apps/libstink_sha256.c). Hashes 'len' bytes at 'data' into the
+ * 32-byte 'out' digest. Used by stink-pkg to verify download integrity. */
+void sha256(const void *data, unsigned int len, unsigned char out[32]);
+
 /* ---- C-style stdio (apps/libstink_stdio.c) ---- */
 
 typedef struct __file FILE;
