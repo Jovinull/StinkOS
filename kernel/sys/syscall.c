@@ -285,6 +285,14 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 56: {                                 /* SYS_MMAP: ebx=size -> vaddr (0 if OOM) */
+		r->eax = paging_user_mmap(r->ebx);
+		break;
+	}
+	case 57: {                                 /* SYS_MUNMAP: ebx=addr ecx=size -> 0 / -1 */
+		r->eax = (unsigned int)paging_user_munmap(r->ebx, r->ecx);
+		break;
+	}
 	case 53: {                                 /* SYS_SIGNAL: ebx=sig ecx=handler_addr -> 0 ok / -1 */
 		unsigned int sig = r->ebx;
 		if (sig >= PROC_NSIG) {

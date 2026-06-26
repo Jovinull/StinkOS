@@ -187,6 +187,47 @@ unsigned int paging_user_brk(void)
 	return user_heap_next;
 }
 
+unsigned int paging_user_mmap(unsigned int size)
+{
+	if (size == 0)
+		return 0;
+	unsigned int pages = (size + PAGE_4KB - 1u) / PAGE_4KB;
+	if (user_heap_next + pages * PAGE_4KB > USER_HEAP_HI)
+		return 0;
+
+	unsigned int base = user_heap_next;
+	for (unsigned int i = 0; i < pages; i++) {
+		unsigned int frame = pmm_alloc();
+		if (!frame) {
+			/* Unwind every page we managed to allocate so the user
+			 * heap doesn't end up with half-mapped reservations. */
+			for (unsigned int j = 0; j < i; j++)
+				unmap_user_page(base + j * PAGE_4KB);
+			user_heap_next = base;
+			return 0;
+		}
+		map_user_page(user_heap_next, frame);
+		user_heap_next += PAGE_4KB;
+	}
+	return base;
+}
+
+int paging_user_munmap(unsigned int addr, unsigned int size)
+{
+	if (size == 0)
+		return 0;
+	if (addr < USER_HEAP_LO || addr >= USER_HEAP_HI)
+		return -1;
+	unsigned int pages = (size + PAGE_4KB - 1u) / PAGE_4KB;
+	for (unsigned int i = 0; i < pages; i++) {
+		unsigned int v = addr + i * PAGE_4KB;
+		if (v >= USER_HEAP_HI)
+			return -1;
+		unmap_user_page(v);
+	}
+	return 0;
+}
+
 /* Resize the heap so the program break sits at (or just above) 'new_brk',
  * mapping or unmapping pages as needed. Sub-page requests are rounded up so
  * the break always sits on a 4 KiB boundary. Returns the resulting break --

@@ -13,6 +13,19 @@ unsigned int paging_user_brk(void);        /* current program break (heap end) *
 unsigned int paging_user_set_brk(unsigned int new_brk);  /* resize, returns new break */
 void paging_reset_user_heap(void);         /* reset the heap for a new app */
 
+/* Reserve a contiguous block of `size` bytes (rounded up to 4 KiB pages) in
+ * the user heap region and back it with fresh physical frames. Returns the
+ * base virtual address, or 0 if the heap is full or out of memory. Unlike
+ * sbrk these allocations do not contribute to the program break -- they sit
+ * past it -- so malloc/free remain untouched. */
+unsigned int paging_user_mmap(unsigned int size);
+
+/* Release the pages previously returned by paging_user_mmap. The freed range
+ * stays reserved in the heap bump pointer (no compaction), so the address
+ * cannot be reused until the next paging_reset_user_heap. Returns 0 on
+ * success, -1 if the range falls outside the heap region. */
+int          paging_user_munmap(unsigned int addr, unsigned int size);
+
 /* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
 int paging_user_range_ok(unsigned int addr, unsigned int len);
 

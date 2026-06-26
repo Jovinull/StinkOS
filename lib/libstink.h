@@ -256,6 +256,16 @@ static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 
 static inline int sys_wait(void)                 { return __syscall(47, 0, 0, 0); }
 static inline int sys_waitpid(int pid)           { return __syscall(48, pid, 0, 0); }
 
+/* Reserve `size` bytes (rounded up to 4 KiB) of fresh user memory and return
+ * the base virtual address; 0 on failure. Independent of malloc/sbrk -- ideal
+ * for large allocations or shared-memory regions that should not interleave
+ * with the program break. sys_munmap releases the range; the address cannot
+ * be reused until the app exits (no compaction). */
+static inline void *sys_mmap(unsigned int size)
+                                                 { return (void *)__syscall(56, (int)size, 0, 0); }
+static inline int   sys_munmap(void *addr, unsigned int size)
+                                                 { return __syscall(57, (int)addr, (int)size, 0); }
+
 /* Cooperative signals. The kernel only buffers the pending bits and the
  * handler addresses; an app actually dispatches by polling sys_sigpoll(),
  * looking up its registered handler, and calling it. Polling is cheap (one
