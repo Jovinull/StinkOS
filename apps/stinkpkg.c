@@ -383,14 +383,38 @@ static void hex32(const unsigned char *d, char *out)
 	out[64] = '\0';
 }
 
-static void cmd_install(void)
-{
-	draw_header("install");
-	sys_drawtext(140, 150, "package name:", COLOR_DIM);
-	char name[32];
-	if (read_line(280, 150, name, sizeof(name)) < 0)
-		return;
+/* ---- install (with recursive dep resolution) ---- */
 
+#define INSTALL_MAX_DEPTH   4               /* guards against pkg cycles */
+
+/* Lookup in STINKDB: returns 1 if "<name> " appears at the start of any line. */
+static int pkg_installed(const char *name)
+{
+	char db[2048];
+	int dn = sys_fread("STINKDB", db, sizeof(db) - 1);
+	if (dn <= 0)
+		return 0;
+	db[dn] = '\0';
+	int ls = 0;
+	for (int i = 0; i <= dn; i++) {
+		if (db[i] != '\n' && db[i] != '\0')
+			continue;
+		db[i] = '\0';
+		const char *line = db + ls;
+		int k = 0;
+		while (name[k] && line[k] == name[k]) k++;
+		if (name[k] == '\0' && line[k] == ' ')
+			return 1;
+		ls = i + 1;
+	}
+	return 0;
+}
+
+/* Download <name>.stinkpkg into pkg_buf and verify its SHA-256 against the
+ * repo index. Returns the byte count on success, -1 on any failure with a
+ * one-line error already drawn at y. */
+static int fetch_and_verify(const char *name, int y)
+{
 	char url[REPO_URL_MAX + 64];
 	build_url(url, sizeof(url), REPO_PKG_PATH);
 	int u = 0;
@@ -402,45 +426,93 @@ static void cmd_install(void)
 		url[u++] = suf[i];
 	url[u] = '\0';
 
-	sys_drawtext(140, 180, "GET", COLOR_DIM);
-	sys_drawtext(180, 180, url, COLOR_DIM);
-
 	int status = 0;
 	int n = http_get(url, pkg_buf, MAX_PKG_BYTES, &status);
 	if (n <= 0 || status != 200) {
-		sys_drawtext(140, 220, "download failed.", COLOR_ERR);
-		wait_any_key(250, "press any key.", COLOR_DIM);
-		return;
+		sys_drawtext(140, y, "download failed.", COLOR_ERR);
+		return -1;
 	}
 
-	/* Integrity gate: the package is unknown bytes off the network until it
-	 * matches the SHA-256 the repo index publishes for this name. Fail closed
-	 * -- a missing index, missing entry or any mismatch blocks the install so
-	 * a tampered or corrupted ELF never reaches the disk or Ring 3. */
 	char want[65];
 	if (index_sha(name, want) != 0) {
-		sys_drawtext(140, 220, "no published hash; run 'u'. refusing.", COLOR_ERR);
-		wait_any_key(250, "press any key.", COLOR_DIM);
-		return;
+		sys_drawtext(140, y, "no published hash; refusing.", COLOR_ERR);
+		return -1;
 	}
 	unsigned char digest[32];
 	sha256(pkg_buf, (unsigned int)n, digest);
 	char got[65];
 	hex32(digest, got);
 	if (strcasecmp(got, want) != 0) {
-		sys_drawtext(140, 220, "sha256 mismatch! refusing install.", COLOR_ERR);
-		wait_any_key(250, "press any key.", COLOR_DIM);
-		return;
+		sys_drawtext(140, y, "sha256 mismatch! refusing.", COLOR_ERR);
+		return -1;
 	}
-	sys_drawtext(140, 220, "sha256 verified.", COLOR_OK);
+	return n;
+}
+
+/* Recursive install: walks the header's dependency list, installs anything
+ * missing from STINKDB depth-first, then unpacks the requested package.
+ * Re-fetches the requested package after the dep loop because the recursive
+ * dep installs share pkg_buf and clobber its contents. Depth cap blocks
+ * cyclic dependency graphs. */
+static int install_pkg(const char *name, int depth, int progress_y)
+{
+	if (depth >= INSTALL_MAX_DEPTH) {
+		sys_drawtext(140, progress_y, "dep depth limit reached.", COLOR_ERR);
+		return -1;
+	}
+	if (pkg_installed(name)) {
+		sys_drawtext(140, progress_y, "already installed.", COLOR_DIM);
+		sys_drawtext(280, progress_y, name, COLOR_DIM);
+		return 0;
+	}
+
+	int n = fetch_and_verify(name, progress_y);
+	if (n < 0)
+		return -1;
+
+	/* Snapshot dep names before any recursion clobbers pkg_buf. */
+	const struct stinkpkg_hdr *h = (const struct stinkpkg_hdr *)pkg_buf;
+	unsigned int dc = h->dep_count;
+	if (dc > 8) dc = 8;                         /* cap; ignores excess deps */
+	char deps[8][STINKPKG_NAME_LEN];
+	const struct stinkpkg_dep *src = (const struct stinkpkg_dep *)
+	                                 (pkg_buf + sizeof(*h));
+	for (unsigned int i = 0; i < dc; i++) {
+		for (int k = 0; k < STINKPKG_NAME_LEN; k++)
+			deps[i][k] = src[i].name[k];
+		deps[i][STINKPKG_NAME_LEN - 1] = '\0';
+	}
+
+	for (unsigned int i = 0; i < dc; i++) {
+		if (install_pkg(deps[i], depth + 1, progress_y + 20) != 0)
+			return -1;
+	}
+
+	/* Re-fetch after recursion so pkg_buf again holds THIS package. */
+	if (dc > 0) {
+		n = fetch_and_verify(name, progress_y);
+		if (n < 0)
+			return -1;
+	}
 
 	if (unpack_package(pkg_buf, (unsigned int)n) != 0) {
-		sys_drawtext(140, 240, "unpack failed (bad format).", COLOR_ERR);
-		wait_any_key(270, "press any key.", COLOR_DIM);
-		return;
+		sys_drawtext(140, progress_y, "unpack failed (bad format).", COLOR_ERR);
+		return -1;
 	}
-	sys_drawtext(140, 240, "installed.", COLOR_OK);
-	wait_any_key(270, "press any key.", COLOR_DIM);
+	return 0;
+}
+
+static void cmd_install(void)
+{
+	draw_header("install");
+	sys_drawtext(140, 150, "package name:", COLOR_DIM);
+	char name[32];
+	if (read_line(280, 150, name, sizeof(name)) < 0)
+		return;
+
+	if (install_pkg(name, 0, 180) == 0)
+		sys_drawtext(140, 280, "installed.", COLOR_OK);
+	wait_any_key(310, "press any key.", COLOR_DIM);
 }
 
 /* ---- remove ---- */
