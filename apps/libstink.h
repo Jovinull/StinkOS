@@ -6,6 +6,7 @@
 #define LIBSTINK_H
 
 #include <stdarg.h>
+#include <stddef.h>
 
 static inline int __syscall(int n, int a, int b, int c)
 {
