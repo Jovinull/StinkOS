@@ -13,6 +13,7 @@
 
 #include "doomkeys.h"
 #include "doomgeneric.h"
+#include "d_event.h"        /* event_t + D_PostEvent prototype */
 
 #include "libstink.h"
 
@@ -122,6 +123,36 @@ static void drain_keyboard(void)
 	}
 }
 
+/* PS/2 mouse button layout matches Doom's exactly (bit 0 = left = fire,
+ * bit 1 = right, bit 2 = middle), so the bitfield passes through unchanged.
+ * Tracked here so we still post a fresh event even when motion is zero but
+ * the button state changed (Doom polls per-tick and needs every transition). */
+static int last_mouse_buttons;
+
+/* Poll the kernel mouse driver for relative motion and button changes, then
+ * push them through Doom's regular event queue. d_event.c's D_PostEvent is
+ * the same entry point keyboard events go through, so the rest of the engine
+ * sees mouse input identically to the SDL backend would. */
+static void poll_mouse_events(void)
+{
+	int dx, dy, buttons;
+	if (sys_get_mouse(&dx, &dy, &buttons) != 0)
+		return;
+	if (dx == 0 && dy == 0 && buttons == last_mouse_buttons)
+		return;
+
+	event_t ev;
+	ev.type  = ev_mouse;
+	ev.data1 = buttons & 0x07;        /* mask reserved bits the kernel never sets */
+	ev.data2 = dx;                    /* X axis -> turning */
+	ev.data3 = -dy;                   /* Y axis: Doom expects + = forward (mouse up);
+	                                   * our delta is screen-convention (+y = down),
+	                                   * so negate to match. */
+	ev.data4 = 0;
+	last_mouse_buttons = buttons;
+	D_PostEvent(&ev);
+}
+
 void DG_Init(void)
 {
 	/* Paint the surrounding letterbox black once; the Doom rect is repainted
@@ -133,6 +164,7 @@ void DG_Init(void)
 void DG_DrawFrame(void)
 {
 	drain_keyboard();
+	poll_mouse_events();
 	sys_blit(DOOM_X_OFFSET, DOOM_Y_OFFSET,
 	         DOOMGENERIC_RESX, DOOMGENERIC_RESY,
 	         DG_ScreenBuffer);
