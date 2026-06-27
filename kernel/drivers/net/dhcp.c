@@ -10,6 +10,7 @@
 #include "e1000.h"
 #include "serial.h"
 #include "interrupts.h"     /* pit_ticks() for DISCOVER/REQUEST retransmit */
+#include "arp.h"            /* arp_send_request for gratuitous announce */
 
 #define DHCP_CLIENT_PORT  68
 #define DHCP_SERVER_PORT  67
@@ -224,6 +225,12 @@ static void on_packet(ipv4_t src_ip, unsigned short src_port,
 		net_set_local_ip(h->yiaddr);
 		state = DHCP_BOUND;
 		log_state("bound");
+		/* Gratuitous ARP: an ARP request for our own freshly-assigned
+		 * IP. Peers on the segment update their caches with our MAC
+		 * without waiting for the first packet from us, and a duplicate
+		 * IP elsewhere on the LAN shows up immediately as a conflict
+		 * reply instead of mysterious silent loss. */
+		arp_send_request(h->yiaddr);
 		return;
 	}
 	if (state == DHCP_REQUESTING && msg_type == DHCPNAK) {
