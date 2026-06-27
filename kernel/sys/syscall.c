@@ -208,6 +208,13 @@ static int exec_run_by_elf(const char *elf_name)
  * otherwise fall back to the graphical menu. Does not return. */
 void app_return(void)
 {
+	/* Hush any mixer channels owned by the exiting process before the
+	 * scheduler picks a new foreground app: otherwise a sound effect the
+	 * dead app queued would keep playing into the next one's audio. */
+	{
+		struct proc *cur = proc_current();
+		audio_mix_silence_pid(cur ? cur->pid : 0);
+	}
 	if (exec_active) {
 		exec_active = 0;
 		char shell_elf[16] = "SHELL.ELF\0\0\0\0\0\0\0";
@@ -601,6 +608,7 @@ void syscall_dispatch(struct regs *r)
 		}
 		target->state     = PROC_ZOMBIE;
 		target->exit_code = 137;           /* SIGKILL exit-code convention */
+		audio_mix_silence_pid(pid);        /* hush its mixer channels */
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
