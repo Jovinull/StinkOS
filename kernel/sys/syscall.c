@@ -320,6 +320,24 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 65:                                   /* SYS_SHUTDOWN: power off the machine */
+		/* QEMU's "shutdown" knob: writing 0x2000 to port 0x604 (the PIIX4
+		 * APM control register that QEMU re-purposes as a shutdown trigger)
+		 * powers the VM off. Bochs reads 0xB004 with the same magic. On
+		 * real hardware without ACPI the best we can do is wait for the
+		 * watchdog -- we fall through to a hlt loop in that case. */
+		outw(0x604,  0x2000);
+		outw(0xB004, 0x2000);
+		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
+		serial_write("shutdown: requested but no compatible path -- halting\n");
+		for (;;) __asm__ volatile ("cli; hlt");
+	case 66:                                   /* SYS_REBOOT: warm-reset via the 8042 keyboard controller */
+		/* The classic PC reset path: pulse the 8042 reset line low. */
+		serial_write("reboot: pulsing 8042 reset line\n");
+		while (inb(0x64) & 0x02)              /* wait until input buffer drains */
+			;
+		outb(0x64, 0xFE);                       /* command 0xFE = CPU reset */
+		for (;;) __asm__ volatile ("cli; hlt"); /* unreachable on a real CPU */
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
 		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;

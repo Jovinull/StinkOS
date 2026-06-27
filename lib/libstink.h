@@ -204,6 +204,13 @@ struct sys_rtc_time {
 static inline int sys_rtc_read(struct sys_rtc_time *out)
                                                  { return __syscall(64, (int)out, 0, 0); }
 
+/* Power off / reboot the machine. Both calls block until the operation
+ * completes (or wedge forever on hardware that lacks the conventional
+ * shutdown port -- the kernel falls back to a `hlt` loop in that case).
+ * Neither call returns on success. */
+static inline void sys_shutdown(void)            { __syscall(65, 0, 0, 0); for (;;) ; }
+static inline void sys_reboot(void)              { __syscall(66, 0, 0, 0); for (;;) ; }
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into
