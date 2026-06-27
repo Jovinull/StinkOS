@@ -226,6 +226,20 @@ static int tcb_alloc(void)
 	return -1;
 }
 
+/* Current free space in the rx ring (the bytes we can still buffer
+ * before we'd have to drop the oldest unread byte). Used to advertise
+ * an accurate window every time we emit a segment -- without this the
+ * window stayed at TCP_BUFFER_SIZE forever, telling the peer to keep
+ * sending data while our buffer was already full. */
+static unsigned int tcb_rx_wnd(const struct tcb *t)
+{
+	unsigned int used = (t->rx_tail + TCP_BUFFER_SIZE - t->rx_head) %
+	                    TCP_BUFFER_SIZE;
+	if (used + 1 >= TCP_BUFFER_SIZE)
+		return 0;
+	return TCP_BUFFER_SIZE - 1u - used;
+}
+
 /* Copy `data` (`n` bytes) into the rx ring, drop tail if it overflows; advance
  * rcv_nxt past the bytes actually buffered. Returns the count buffered. */
 static unsigned int tcb_rx_inline(struct tcb *t, const unsigned char *data,
@@ -439,7 +453,7 @@ static void tcp_emit(struct tcb *t, unsigned char flags,
 	h->ack      = htonl(t->rcv_nxt);
 	h->data_off = (5u << 4);                /* 5 dwords = 20 bytes, no options */
 	h->flags    = flags;
-	h->window   = htons((unsigned short)t->rcv_wnd);
+	h->window   = htons((unsigned short)tcb_rx_wnd(t));
 	h->checksum = 0;
 	h->urg      = 0;
 
@@ -671,7 +685,7 @@ static void tcp_emit_syn(struct tcb *t, unsigned char flags)
 	h->seq      = htonl(t->snd_nxt);
 	h->ack      = htonl(t->rcv_nxt);
 	h->flags    = flags;
-	h->window   = htons((unsigned short)t->rcv_wnd);
+	h->window   = htons((unsigned short)tcb_rx_wnd(t));
 	h->checksum = 0;
 	h->urg      = 0;
 
@@ -718,7 +732,7 @@ static void tcp_emit_sack_ack(struct tcb *t)
 	h->seq      = htonl(t->snd_nxt);
 	h->ack      = htonl(t->rcv_nxt);
 	h->flags    = TCP_ACK;
-	h->window   = htons((unsigned short)t->rcv_wnd);
+	h->window   = htons((unsigned short)tcb_rx_wnd(t));
 	h->checksum = 0;
 	h->urg      = 0;
 
