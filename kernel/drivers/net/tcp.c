@@ -71,6 +71,13 @@ struct tcb {
 	unsigned int    rto_ticks;
 	unsigned int    retries;
 
+	/* Congestion control (Reno-ish, no fast retransmit). cwnd caps
+	 * simultaneous bytes in flight; slow start doubles cwnd per round trip
+	 * until it crosses ssthresh, then we switch to additive increase. A
+	 * retransmission timeout halves ssthresh and resets cwnd to one MSS. */
+	unsigned int    cwnd;
+	unsigned int    ssthresh;
+
 	int             in_use;
 };
 
@@ -106,6 +113,8 @@ static int tcb_alloc(void)
 			t->last_seg_ticks = 0;
 			t->rto_ticks      = TCP_RTO_INITIAL;
 			t->retries        = 0;
+			t->cwnd           = 2u * TCP_MSS;     /* IW=2 segments */
+			t->ssthresh       = 64u * TCP_MSS;    /* high; first loss tightens it */
 			return i;
 		}
 	}
@@ -237,39 +246,47 @@ static void tcp_emit(struct tcb *t, unsigned char flags,
 	ipv4_send(t->remote_ip, IP_PROTO_TCP, buf, sizeof(*h) + data_len);
 }
 
-/* Push whatever is queued in the tx buffer onto the wire. Stop-and-wait:
- * only ships one MSS-sized segment at a time and waits for the ACK before
- * sending the next. This caps throughput but keeps the code tiny -- congestion
- * control + sliding window come in a follow-up commit. The bytes stay in
- * tx_buf until ACK'd so we can retransmit if needed. */
+/* Push whatever is queued in the tx buffer onto the wire. Sends up to
+ * (cwnd - in_flight) bytes, in MSS-sized segments, bounded by the peer's
+ * advertised window. Loops until either the tx ring is empty, cwnd is full,
+ * or the peer window is exhausted. Each emitted segment arms the RTO if
+ * none is armed yet, so a loss anywhere in the burst restarts the timer. */
 static void tcp_drain_tx(struct tcb *t)
 {
 	if (t->state != TCP_ESTABLISHED && t->state != TCP_CLOSE_WAIT)
 		return;
 
-	unsigned int in_flight = t->snd_nxt - t->snd_una;
-	if (in_flight > 0)
-		return;
+	for (;;) {
+		unsigned int in_flight = t->snd_nxt - t->snd_una;
+		unsigned int avail     = tx_pending(t);
+		if (avail == 0)
+			return;
 
-	unsigned int avail = tx_pending(t);
-	if (avail == 0)
-		return;
+		unsigned int window = (t->snd_wnd != 0) ? t->snd_wnd : avail;
+		unsigned int budget = (t->cwnd > in_flight) ? (t->cwnd - in_flight) : 0;
+		if (budget == 0)
+			return;
+		if (window <= in_flight)
+			return;
+		unsigned int peer_room = window - in_flight;
+		if (budget > peer_room)
+			budget = peer_room;
 
-	unsigned int chunk = avail;
-	if (chunk > TCP_MSS)
-		chunk = TCP_MSS;
-	if (t->snd_wnd != 0 && chunk > t->snd_wnd)
-		chunk = t->snd_wnd;
+		unsigned int chunk = avail;
+		if (chunk > TCP_MSS) chunk = TCP_MSS;
+		if (chunk > budget)  chunk = budget;
+		if (chunk == 0)
+			return;
 
-	/* Copy bytes out of the wrapping tx ring into a linear scratch buffer
-	 * for emit -- the segment builder wants contiguous data. */
-	unsigned char linear[TCP_MSS];
-	for (unsigned int i = 0; i < chunk; i++)
-		linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
+		unsigned char linear[TCP_MSS];
+		for (unsigned int i = 0; i < chunk; i++)
+			linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
 
-	tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
-	t->snd_nxt += chunk;
-	tcp_arm_rto(t);
+		tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
+		t->snd_nxt += chunk;
+		if (t->last_seg_ticks == 0)
+			tcp_arm_rto(t);
+	}
 }
 
 /* Bare RST to an unsolicited segment (RFC 793 reset generation). */
@@ -479,6 +496,23 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 				/* Trim acked bytes off the head of tx_buf. */
 				t->tx_head = (t->tx_head + acked) % TCP_BUFFER_SIZE;
 				t->snd_wnd = ntohs(h->window);
+
+				/* Slow start vs. congestion avoidance. cwnd<ssthresh:
+				 * grow by `acked` (effectively doubles per RTT once the
+				 * burst rolls). cwnd>=ssthresh: additive increase, grow
+				 * by ~MSS per RTT independent of segment size. Cap cwnd
+				 * at the tx ring -- there is no point holding a credit
+				 * larger than our outstanding-data ceiling. */
+				if (t->cwnd < t->ssthresh) {
+					t->cwnd += acked;
+				} else if (t->cwnd > 0) {
+					unsigned int add = (TCP_MSS * acked) / t->cwnd;
+					if (add == 0) add = 1;
+					t->cwnd += add;
+				}
+				if (t->cwnd > TCP_BUFFER_SIZE)
+					t->cwnd = TCP_BUFFER_SIZE;
+
 				/* Fresh ACK clears the retransmit timer. If still some
 				 * bytes in flight, tcp_drain_tx re-arms it; if fully
 				 * caught up, leave last_seg_ticks=0 to disable RTO. */
@@ -595,6 +629,14 @@ void tcp_tick(void)
 			t->in_use = 0;
 			continue;
 		}
+
+		/* Loss collapse before retransmitting: halve ssthresh, drop
+		 * cwnd to one segment so we re-probe the path with slow start. */
+		unsigned int half = (t->snd_nxt - t->snd_una) / 2u;
+		if (half < 2u * TCP_MSS)
+			half = 2u * TCP_MSS;
+		t->ssthresh = half;
+		t->cwnd     = TCP_MSS;
 
 		tcp_retransmit(t);
 		t->retries++;
