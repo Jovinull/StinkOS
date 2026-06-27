@@ -433,7 +433,28 @@ stinkos-install.iso: all tools/write-mbr.py
 	    --start $(INSTALL_PART_START) \
 	    --count $(INSTALL_PART_SECTORS)
 
+# Sample .stinkpkg archives. Bundles a handful of built userland ELFs through
+# tools/make-stinkpkg.py and drops them under repo/, ready to be served by
+# tools/repo-server.py. Use after `make` so the .elf inputs exist.
+SAMPLE_REPO = repo
+sample-packages: all tools/make-stinkpkg.py
+	@mkdir -p $(SAMPLE_REPO)
+	python3 tools/make-stinkpkg.py \
+	    --name edit  --version 0.1.0 --desc "Stink text editor" \
+	    --out $(SAMPLE_REPO)/edit.stinkpkg  $(BUILD)/edit.elf
+	python3 tools/make-stinkpkg.py \
+	    --name snake --version 1.0.0 --desc "Snake game" \
+	    --out $(SAMPLE_REPO)/snake.stinkpkg $(BUILD)/snake.elf
+	python3 tools/make-stinkpkg.py \
+	    --name pong  --version 1.0.0 --desc "Pong game" \
+	    --out $(SAMPLE_REPO)/pong.stinkpkg  $(BUILD)/pong.elf
+	python3 tools/make-stinkpkg.py \
+	    --name hello --version 1.0.0 --desc "Minimal hello-world" \
+	    --out $(SAMPLE_REPO)/hello.stinkpkg $(BUILD)/hi.elf
+	@echo "sample packages written under $(SAMPLE_REPO)/"
+	@echo "run: tools/repo-server.py --pkgdir $(SAMPLE_REPO)"
+
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
 
-.PHONY: all hex dall run run-install run-installed test-headless audit clean
+.PHONY: all hex dall run run-install run-installed test-headless audit sample-packages clean
