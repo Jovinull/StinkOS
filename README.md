@@ -186,6 +186,7 @@ Deep dives live under `docs/`:
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | How to author a `.stinkpkg` |
 | [`docs/MEMORY.md`](docs/MEMORY.md) | Memory accounting + leak-sweep methodology |
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md) | Build from scratch in 10 steps |
+| [`docs/TESTING.md`](docs/TESTING.md) | Host-mirror unit test contract + how to add one |
 
 ## Toolchain — why a cross-compiler?
 
