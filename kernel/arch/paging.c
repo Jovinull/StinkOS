@@ -205,6 +205,14 @@ unsigned int paging_user_mmap(unsigned int size)
 {
 	if (size == 0)
 		return 0;
+	/* Overflow guard: a hostile userland passing size ~= 0xFFFFFFFF
+	 * could otherwise wrap the (size + PAGE_4KB - 1) round-up to a
+	 * tiny page count, sneak past the heap-top check, and pull the
+	 * allocator into a million-page loop. Cap at the remaining heap
+	 * room (rounded down to page granularity). */
+	unsigned int room = USER_HEAP_HI - user_heap_next;
+	if (size > room)
+		return 0;
 	unsigned int pages = (size + PAGE_4KB - 1u) / PAGE_4KB;
 	if (user_heap_next + pages * PAGE_4KB > USER_HEAP_HI)
 		return 0;
