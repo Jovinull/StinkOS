@@ -82,6 +82,7 @@ struct mix_channel {
 	unsigned int         length;
 	int                  volume;        /* 0..256 */
 	int                  active;
+	int                  owner_pid;     /* PID that called audio_mix_play */
 };
 
 static struct mix_channel channels[MIX_CHANNELS];
@@ -245,13 +246,17 @@ int audio_mix_play(const unsigned char *samples, unsigned int length, int volume
 	if (volume < 0)   volume = 0;
 	if (volume > 256) volume = 256;
 
+	struct proc *cur = proc_current();
+	int pid = cur ? cur->pid : 0;
+
 	for (int i = 0; i < MIX_CHANNELS; i++) {
 		if (!channels[i].active) {
-			channels[i].src    = samples;
-			channels[i].pos    = 0;
-			channels[i].length = length;
-			channels[i].volume = volume;
-			channels[i].active = 1;
+			channels[i].src       = samples;
+			channels[i].pos       = 0;
+			channels[i].length    = length;
+			channels[i].volume    = volume;
+			channels[i].active    = 1;
+			channels[i].owner_pid = pid;
 			return i;
 		}
 	}
@@ -280,6 +285,17 @@ void audio_mix_silence_all(void)
 {
 	for (int i = 0; i < MIX_CHANNELS; i++)
 		channels[i].active = 0;
+}
+
+/* Silence only the channels owned by `pid`. Lets the scheduler (or future
+ * suspend logic) mute a single process's output without trashing audio
+ * belonging to other still-running apps. A `pid` of 0 matches the kernel
+ * boot context and any channel started outside a userland call. */
+void audio_mix_silence_pid(int pid)
+{
+	for (int i = 0; i < MIX_CHANNELS; i++)
+		if (channels[i].active && channels[i].owner_pid == pid)
+			channels[i].active = 0;
 }
 
 /* IRQ5 dispatcher: the SB16 raises this every half-buffer in auto-init mode,

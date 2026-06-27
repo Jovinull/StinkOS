@@ -58,6 +58,11 @@ void audio_mix_stop(int handle);
 void audio_mix_set_volume(int handle, int volume);
 void audio_mix_silence_all(void);
 
+/* Silence channels owned by `pid` only. Per-channel ownership is set at
+ * audio_mix_play time from proc_current(); this lets the scheduler stop a
+ * suspended or exiting process's audio without disturbing peers. */
+void audio_mix_silence_pid(int pid);
+
 /* Master volume: scales the final mixer output before it lands in the DMA
  * ring. Range 0..256 (256 = unity). One scalar applied to every channel,
  * so apps can fade or mute the whole soundscape without walking each
