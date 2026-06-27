@@ -415,8 +415,15 @@ void syscall_dispatch(struct regs *r)
 		unsigned int dst_h =  r->edx        & 0xFFFFu;
 		unsigned int src_w = (r->esi >> 16) & 0xFFFFu;
 		unsigned int src_h =  r->esi        & 0xFFFFu;
-		if (src_w == 0 || src_h == 0 ||
-		    !paging_user_range_ok(r->ebx, src_w * src_h * sizeof(unsigned int))) {
+		/* Integer-overflow guard: src_w * src_h * 4 must fit in a
+		 * 32-bit unsigned. Without it a userland pair like 65535x65535
+		 * wraps the multiplication, paging_user_range_ok sees a tiny
+		 * size and approves, and fb_blit_scaled then reads gigabytes
+		 * of attacker-controlled memory. Same pattern guarded in case
+		 * 26 (SYS_BLIT) -- this just brings parity. */
+		unsigned int bytes = src_w * src_h * sizeof(unsigned int);
+		if (src_w == 0 || src_h == 0 || bytes / 4u / src_w != src_h ||
+		    !paging_user_range_ok(r->ebx, bytes)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
