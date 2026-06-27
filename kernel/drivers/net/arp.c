@@ -24,11 +24,16 @@ struct arp_packet {
 } __attribute__((packed));
 
 #define ARP_CACHE_SIZE 16
+/* Entries older than this drop out of the cache and the next lookup
+ * re-issues an ARP request. 60s matches what BSD/Linux pick by default
+ * (modern arp_min_age / gc_stale_time). PIT runs at 100 Hz. */
+#define ARP_ENTRY_TTL  6000u
 
 struct arp_entry {
-	ipv4_t ip;
-	mac_t  mac;
-	int    valid;
+	ipv4_t       ip;
+	mac_t        mac;
+	int          valid;
+	unsigned int touched_tick;
 };
 
 static struct arp_entry cache[ARP_CACHE_SIZE];
@@ -38,11 +43,13 @@ static const unsigned char broadcast_mac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x
 
 static void cache_insert(ipv4_t ip, const mac_t mac)
 {
+	unsigned int now = pit_ticks();
 	/* Update in place if we already track this IP. */
 	for (int i = 0; i < ARP_CACHE_SIZE; i++) {
 		if (cache[i].valid && cache[i].ip == ip) {
 			for (int k = 0; k < 6; k++)
 				cache[i].mac[k] = mac[k];
+			cache[i].touched_tick = now;
 			return;
 		}
 	}
@@ -59,16 +66,27 @@ static void cache_insert(ipv4_t ip, const mac_t mac)
 	for (int k = 0; k < 6; k++)
 		cache[slot].mac[k] = mac[k];
 	cache[slot].valid = 1;
+	cache[slot].touched_tick = now;
 }
 
 int arp_lookup(ipv4_t ip, mac_t out)
 {
+	unsigned int now = pit_ticks();
 	for (int i = 0; i < ARP_CACHE_SIZE; i++) {
-		if (cache[i].valid && cache[i].ip == ip) {
-			for (int k = 0; k < 6; k++)
-				out[k] = cache[i].mac[k];
-			return 1;
+		if (!cache[i].valid)
+			continue;
+		if (cache[i].ip != ip)
+			continue;
+		/* Expire silently if too stale -- forces the caller to ARP
+		 * again, which will pick up MAC changes from peer migrations,
+		 * router failovers, or laptops jumping NICs. */
+		if ((now - cache[i].touched_tick) > ARP_ENTRY_TTL) {
+			cache[i].valid = 0;
+			return 0;
 		}
+		for (int k = 0; k < 6; k++)
+			out[k] = cache[i].mac[k];
+		return 1;
 	}
 	return 0;
 }
