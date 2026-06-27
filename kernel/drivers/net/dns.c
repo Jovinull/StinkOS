@@ -10,6 +10,7 @@
 #include "dns.h"
 #include "udp.h"
 #include "dhcp.h"
+#include "interrupts.h"           /* pit_ticks for cache TTL */
 
 #define DNS_PORT          53
 #define LOCAL_PORT        32768
@@ -32,6 +33,77 @@ static unsigned short    current_id;
 static int               port_bound;
 static int               answer_ready;
 static ipv4_t            answer_ip;
+
+/* Response cache. 8 entries, fixed 60-second TTL regardless of the per-
+ * record TTL the server actually sent -- a hobby OS rarely cares about
+ * sub-minute freshness, and dropping the TTL parser keeps this small. */
+#define DNS_CACHE_SIZE   8
+#define DNS_CACHE_TTL    6000u           /* 60 s at 100 Hz PIT */
+#define DNS_CACHE_NAME   64
+
+struct dns_cache_entry {
+	int          in_use;
+	char         name[DNS_CACHE_NAME];
+	ipv4_t       ip;
+	unsigned int filled_at;
+};
+
+static struct dns_cache_entry dns_cache[DNS_CACHE_SIZE];
+static int dns_cache_round;                     /* round-robin replace cursor */
+
+static int names_eq(const char *a, const char *b)
+{
+	int i = 0;
+	while (a[i] && b[i] && a[i] == b[i]) i++;
+	return a[i] == '\0' && b[i] == '\0';
+}
+
+static struct dns_cache_entry *dns_cache_find(const char *name)
+{
+	unsigned int now = pit_ticks();
+	for (int i = 0; i < DNS_CACHE_SIZE; i++) {
+		struct dns_cache_entry *e = &dns_cache[i];
+		if (!e->in_use)
+			continue;
+		if ((unsigned int)(now - e->filled_at) > DNS_CACHE_TTL) {
+			e->in_use = 0;
+			continue;
+		}
+		if (names_eq(e->name, name))
+			return e;
+	}
+	return 0;
+}
+
+static void dns_cache_put(const char *name, ipv4_t ip)
+{
+	if (!name || !name[0] || ip == 0)
+		return;
+	/* Reuse existing slot for the same name, else round-robin replace. */
+	for (int i = 0; i < DNS_CACHE_SIZE; i++) {
+		if (dns_cache[i].in_use && names_eq(dns_cache[i].name, name)) {
+			dns_cache[i].ip        = ip;
+			dns_cache[i].filled_at = pit_ticks();
+			return;
+		}
+	}
+	struct dns_cache_entry *e = &dns_cache[dns_cache_round];
+	dns_cache_round = (dns_cache_round + 1) % DNS_CACHE_SIZE;
+	int k = 0;
+	while (k < DNS_CACHE_NAME - 1 && name[k]) {
+		e->name[k] = name[k];
+		k++;
+	}
+	e->name[k]  = '\0';
+	e->ip        = ip;
+	e->filled_at = pit_ticks();
+	e->in_use    = 1;
+}
+
+/* Last queried name, captured so the reply path can write into the cache
+ * (the wire reply itself doesn't carry the bare name back -- it would
+ * need to be reconstructed from the question section). */
+static char last_query_name[DNS_CACHE_NAME];
 
 /* Encode "example.com" -> "\x07example\x03com\x00" into out. Returns the
  * number of bytes written, or -1 if buffer would overflow. */
@@ -122,6 +194,7 @@ static void on_packet(ipv4_t src_ip, unsigned short src_port,
 			unsigned char *ob = (unsigned char *)&answer_ip;
 			ob[0] = p[0]; ob[1] = p[1]; ob[2] = p[2]; ob[3] = p[3];
 			answer_ready = 1;
+			dns_cache_put(last_query_name, answer_ip);
 			return;
 		}
 		p += rdlen;
@@ -130,6 +203,18 @@ static void on_packet(ipv4_t src_ip, unsigned short src_port,
 
 int dns_resolve(const char *name)
 {
+	if (!name)
+		return -1;
+
+	/* Cache hit: skip the wire entirely. answer_ready flips immediately
+	 * so the caller's `dns_ready()` poll succeeds on the first tick. */
+	struct dns_cache_entry *hit = dns_cache_find(name);
+	if (hit) {
+		answer_ip    = hit->ip;
+		answer_ready = 1;
+		return 0;
+	}
+
 	if (!dhcp_bound() || dhcp_get_dns() == 0)
 		return -1;
 
@@ -138,6 +223,14 @@ int dns_resolve(const char *name)
 			return -1;
 		port_bound = 1;
 	}
+
+	/* Save name so on_packet can fill the cache when the reply arrives. */
+	int k = 0;
+	while (k < DNS_CACHE_NAME - 1 && name[k]) {
+		last_query_name[k] = name[k];
+		k++;
+	}
+	last_query_name[k] = '\0';
 
 	answer_ready = 0;
 	answer_ip    = 0;
