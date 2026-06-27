@@ -160,6 +160,11 @@ static inline void sys_audio_stop(int handle)    { __syscall(29, handle, 0, 0); 
 static inline void sys_audio_set_volume(int handle, int volume)
                                                  { __syscall(30, handle, volume, 0); }
 
+/* Master volume (0..256, unity = 256) applied to every mixer channel before
+ * the DMA write. Returns the previous master so callers can save/restore
+ * (e.g. fade out / fade back to a UI volume slider's value). */
+static inline int sys_audio_master(int volume)   { return __syscall(60, volume, 0, 0); }
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into

@@ -58,4 +58,11 @@ void audio_mix_stop(int handle);
 void audio_mix_set_volume(int handle, int volume);
 void audio_mix_silence_all(void);
 
+/* Master volume: scales the final mixer output before it lands in the DMA
+ * ring. Range 0..256 (256 = unity). One scalar applied to every channel,
+ * so apps can fade or mute the whole soundscape without walking each
+ * per-channel volume. */
+void audio_set_master(int volume);
+int  audio_get_master(void);
+
 #endif

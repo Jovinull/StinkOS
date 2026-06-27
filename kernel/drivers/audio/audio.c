@@ -86,6 +86,11 @@ struct mix_channel {
 
 static struct mix_channel channels[MIX_CHANNELS];
 
+/* Global master volume (0..256, unity = 256). Applied after the per-channel
+ * sum but before saturation, so muting at the master level survives any
+ * stale per-channel state and snaps every active sound to silence at once. */
+static int master_volume = 256;
+
 /* The reset sequence wants a hold of >= 3 microseconds with the reset line
  * high. Without a known clock, count IO reads on port 0x80 (the legacy
  * "diagnostic port" that's traditionally used as a tiny portable delay). */
@@ -208,10 +213,26 @@ static void mixer_fill_window(unsigned int offset, unsigned int n)
 			sum += (s * ch->volume) >> 8;
 			ch->pos++;
 		}
+		/* Apply master volume scaling before saturation so a 0 master
+		 * always renders silence (0x80 mid-rail) regardless of channel
+		 * activity. */
+		sum = (sum * master_volume) >> 8;
 		if (sum >  127) sum =  127;
 		if (sum < -128) sum = -128;
 		out[i] = (unsigned char)(sum + 128);
 	}
+}
+
+void audio_set_master(int volume)
+{
+	if (volume < 0)   volume = 0;
+	if (volume > 256) volume = 256;
+	master_volume = volume;
+}
+
+int audio_get_master(void)
+{
+	return master_volume;
 }
 
 /* Claim the first free mixer channel for a one-shot sound effect. Volume is

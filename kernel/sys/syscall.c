@@ -295,6 +295,10 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 60:                                   /* SYS_AUDIO_MASTER: ebx=volume(0..256) -> previous master */
+		r->eax = (unsigned int)audio_get_master();
+		audio_set_master((int)r->ebx);
+		break;
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
 		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;
