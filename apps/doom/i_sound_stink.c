@@ -200,7 +200,14 @@ music_module_t DG_music_module = {
 	Stink_MusicPoll,
 };
 
-/* ---- legacy music interface stubs (called by s_sound.c directly) ---- */
+/* ---- legacy music interface: intentionally silent forever ----
+ *
+ * Doom's music is DMX-format MUS lumps rendered through an OPL2/OPL3
+ * Adlib emulator. StinkOS will NOT ship an OPL3 emulator (the dev
+ * cost vastly outweighs the value for a hobby OS; SFX via SB16 PCM
+ * already covers the soundtrack the playable demo needs). These
+ * stubs are the "formal stub forever" path: the engine still asks
+ * for music every level, we silently ignore it. SFX remains live. */
 int snd_musicdevice = 0;
 
 void    I_InitMusic(void)              { }
