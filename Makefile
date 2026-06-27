@@ -515,7 +515,10 @@ $(TEST_BIN)/test_arp_storm: $(TEST_DIR)/test_arp_storm.c | $(TEST_BIN)
 $(TEST_BIN)/test_stinkfs_dir: $(TEST_DIR)/test_stinkfs_dir.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_stinkfs_dir.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir
+$(TEST_BIN)/test_tcp_dupack: $(TEST_DIR)/test_tcp_dupack.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_tcp_dupack.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
@@ -531,6 +534,7 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 	$(TEST_BIN)/test_eth_frame
 	$(TEST_BIN)/test_arp_storm
 	$(TEST_BIN)/test_stinkfs_dir
+	$(TEST_BIN)/test_tcp_dupack
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso

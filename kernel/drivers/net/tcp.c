@@ -115,6 +115,15 @@ struct tcb {
 		unsigned char buf[TCP_MSS];
 	} ooo[2];
 
+	/* Fast retransmit (RFC 5681 §3.2): count consecutive duplicate ACKs.
+	 * A "dup ACK" is an ACK that does not advance snd_una, carries no
+	 * payload, and does not shrink/grow the peer window. After 3 dups in
+	 * a row, retransmit the oldest unacked segment immediately instead of
+	 * waiting for the RTO to expire, and tighten ssthresh + cwnd to half
+	 * the in-flight ceiling so we don't re-flood the path that just
+	 * dropped data. Cleared on any forward ACK. */
+	unsigned char   dup_acks;
+
 	int             in_use;
 };
 
@@ -156,6 +165,7 @@ static int tcb_alloc(void)
 			t->peer_mss       = TCP_MSS;
 			t->last_activity_ticks  = 0;
 			t->last_keepalive_ticks = 0;
+			t->dup_acks             = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -768,6 +778,26 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		if (h->flags & TCP_ACK) {
 			unsigned int acked = seg_ack - t->snd_una;
 			unsigned int inflight = t->snd_nxt - t->snd_una;
+			unsigned int data_off_dbg = (h->data_off >> 4) * 4u;
+			unsigned int payload_dbg = (data_off_dbg <= len)
+			    ? (len - data_off_dbg) : 0;
+			/* Dup-ACK detector: ACK that does NOT advance snd_una,
+			 * carries no payload, and still has unacked data in
+			 * flight. Three such ACKs in a row trigger fast
+			 * retransmit; anything else resets the counter. */
+			if (acked == 0 && payload_dbg == 0 && inflight > 0) {
+				if (t->dup_acks < 255)
+					t->dup_acks++;
+				if (t->dup_acks == 3) {
+					t->ssthresh = inflight / 2;
+					if (t->ssthresh < 2u * TCP_MSS)
+						t->ssthresh = 2u * TCP_MSS;
+					t->cwnd = t->ssthresh;
+					tcp_retransmit(t);
+				}
+			} else if (acked > 0) {
+				t->dup_acks = 0;
+			}
 			if (acked > 0 && acked <= inflight) {
 				t->snd_una = seg_ack;
 				/* Trim acked bytes off the head of tx_buf. */
