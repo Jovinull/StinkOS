@@ -48,6 +48,8 @@ void kmain(void)
 	bootdiag_add("timer: pit", BOOT_OK);
 	proc_init();                               /* reserves PID 1 for the kernel boot path */
 	bootdiag_add("proc: pid 1", BOOT_OK);
+	timer_init();                              /* one-shot timer table */
+	bootdiag_add("timer: subsystem", BOOT_OK);
 	keyboard_init();
 	bootdiag_add("input: kbd", BOOT_OK);
 	if (vm.valid)

@@ -170,7 +170,8 @@ void irq_handler(struct regs *r)
 		ticks++;
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
-		preempt = 1;                       /* let the scheduler reshuffle */
+		timer_tick();                       /* fire any expired one-shots */
+		preempt = 1;                        /* let the scheduler reshuffle */
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
 	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
