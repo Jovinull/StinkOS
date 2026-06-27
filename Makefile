@@ -454,7 +454,30 @@ sample-packages: all tools/make-stinkpkg.py
 	@echo "sample packages written under $(SAMPLE_REPO)/"
 	@echo "run: tools/repo-server.py --pkgdir $(SAMPLE_REPO)"
 
+# Host-side unit tests. Compile + run pure-C subsystems (SHA-256, BSD inet
+# helpers, ...) against the host gcc so we get a fast signal that does not
+# need QEMU or the cross-toolchain. Lives under tests/.
+HOST_CC  ?= gcc
+HOST_CFLAGS = -O2 -Wall -Wno-unused-function \
+              -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
+TEST_DIR  = tests
+TEST_BIN  = $(BUILD)/tests
+
+$(TEST_BIN):
+	mkdir -p $(TEST_BIN)
+
+$(TEST_BIN)/test_sha256: $(TEST_DIR)/test_sha256.c lib/libstink_sha256.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_sha256.c lib/libstink_sha256.c
+
+$(TEST_BIN)/test_inet_addr: $(TEST_DIR)/test_inet_addr.c lib/libstink_socket.c lib/libstink_socket.h | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -I lib -o $@ $(TEST_DIR)/test_inet_addr.c lib/libstink_socket.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr
+	@echo "=== unit tests ==="
+	$(TEST_BIN)/test_sha256
+	$(TEST_BIN)/test_inet_addr
+
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
 
-.PHONY: all hex dall run run-install run-installed test-headless audit sample-packages clean
+.PHONY: all hex dall run run-install run-installed test-headless audit sample-packages unittest clean
