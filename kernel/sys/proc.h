@@ -105,4 +105,10 @@ struct proc   *proc_find_zombie_child(int pid);
  * "nothing to wait for" from "waiting on a live child". */
 int            proc_has_living_child(void);
 
+/* Fill `out` with a human-readable snapshot of every non-UNUSED PCB:
+ *   "PID  STATE     PRIO  PARENT  NAME\n" per row, with a one-line header.
+ * Returns the number of bytes written (excluding NUL), truncated to `cap`.
+ * Backs SYS_PROC_INFO and the shell's `ps` command. */
+unsigned int   proc_snapshot(char *out, unsigned int cap);
+
 #endif

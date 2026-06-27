@@ -237,3 +237,64 @@ int proc_has_living_child(void)
 	}
 	return 0;
 }
+
+static const char *state_label(enum proc_state s)
+{
+	switch (s) {
+	case PROC_UNUSED:   return "FREE";
+	case PROC_EMBRYO:   return "EMBR";
+	case PROC_READY:    return "READ";
+	case PROC_RUNNING:  return "RUN ";
+	case PROC_SLEEPING: return "SLEP";
+	case PROC_ZOMBIE:   return "ZOMB";
+	}
+	return "????";
+}
+
+static unsigned int append_str(char *out, unsigned int off, unsigned int cap,
+                               const char *s)
+{
+	while (*s && off + 1 < cap)
+		out[off++] = *s++;
+	return off;
+}
+
+static unsigned int append_dec(char *out, unsigned int off, unsigned int cap,
+                               unsigned int v, int width)
+{
+	char tmp[12];
+	int n = 0;
+	if (v == 0) tmp[n++] = '0';
+	while (v > 0 && n < 11) { tmp[n++] = '0' + (v % 10); v /= 10; }
+	while (n < width && off + 1 < cap) out[off++] = ' ';
+	for (int i = n - 1; i >= 0 && off + 1 < cap; i--) out[off++] = tmp[i];
+	return off;
+}
+
+unsigned int proc_snapshot(char *out, unsigned int cap)
+{
+	if (!out || cap == 0)
+		return 0;
+	unsigned int off = 0;
+	off = append_str(out, off, cap, "PID  STATE PRIO PARENT NAME\n");
+	for (int i = 0; i < PROC_MAX; i++) {
+		struct proc *p = &table[i];
+		if (p->state == PROC_UNUSED)
+			continue;
+		off = append_dec(out, off, cap, (unsigned int)p->pid, 3);
+		if (off + 1 < cap) out[off++] = ' ';
+		off = append_str(out, off, cap, " ");
+		off = append_str(out, off, cap, state_label(p->state));
+		if (off + 1 < cap) out[off++] = ' ';
+		off = append_dec(out, off, cap, (unsigned int)p->priority, 3);
+		if (off + 1 < cap) out[off++] = ' ';
+		off = append_dec(out, off, cap, (unsigned int)p->parent_pid, 5);
+		if (off + 1 < cap) out[off++] = ' ';
+		for (int k = 0; k < PROC_NAME_LEN && p->name[k] && off + 1 < cap; k++)
+			out[off++] = p->name[k];
+		if (off + 1 < cap) out[off++] = '\n';
+	}
+	if (off < cap)
+		out[off] = '\0';
+	return off;
+}

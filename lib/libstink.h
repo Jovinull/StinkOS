@@ -225,6 +225,12 @@ static inline int sys_resume(int pid)            { return __syscall(70, pid, 0, 
 static inline int sys_setprio(int pid, int prio) { return __syscall(71, pid, prio, 0); }
 static inline int sys_getprio(int pid)           { return __syscall(72, pid, 0, 0); }
 
+/* Snapshot every non-UNUSED PCB into `buf` as plain ASCII ("PID STATE
+ * PRIO PARENT NAME" rows). Returns the byte count written (capped to
+ * `cap`), or -1 on bad pointer. Backs the shell `ps` command. */
+static inline int sys_proc_info(char *buf, unsigned int cap)
+                                                 { return __syscall(73, (int)buf, (int)cap, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).
