@@ -646,6 +646,19 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
+		/* Refuse to ping broadcast / multicast / loopback. Pinging the
+		 * broadcast address invites the same Smurf amplifier we already
+		 * defend against on the receive side; pinging 127/8 has no
+		 * meaning without a loopback driver. */
+		{
+			ipv4_t dst = r->ebx;
+			if (dst == 0xFFFFFFFFu ||
+			    (dst & 0x000000FFu) == 0x0000007Fu ||
+			    (dst & 0x000000F0u) == 0x000000E0u) {
+				r->eax = (unsigned int)-1;
+				break;
+			}
+		}
 		static unsigned short ping_seq;
 		unsigned short id  = 0x5453;       /* 'TS' */
 		unsigned short seq = ++ping_seq;
