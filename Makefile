@@ -1,5 +1,22 @@
 BUILD = build
 
+# Default target if `make` is run with no args.
+.DEFAULT_GOAL := help
+
+help:
+	@echo "StinkOS build targets:"
+	@echo "  make all           -- build the kernel + every userland .elf"
+	@echo "  make run           -- boot the freshly-built image in QEMU"
+	@echo "  make run-install   -- boot the installer, copies to target.bin"
+	@echo "  make run-installed -- boot target.bin (the post-install disk)"
+	@echo "  make run-iso       -- boot stinkos-install.iso (USB-stick layout)"
+	@echo "  make test-headless -- boot, run, capture serial, diff a baseline"
+	@echo "  make unittest      -- run every host-side regression test"
+	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
+	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
+	@echo "  make clean         -- delete build/ os.bin stinkos-install.iso"
+	@echo "  make audit         -- run shell-side lint scripts on the source tree"
+
 CC = i386-elf-gcc
 AS = i386-elf-as
 LD = i386-elf-ld
