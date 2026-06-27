@@ -39,4 +39,16 @@ void dma_channel1_program(unsigned int phys_addr,
                           unsigned int count_bytes,
                           unsigned int mode);
 
+/* Program channel 5 (slave controller, 16-bit) for an SB16 16-bit audio
+ * transfer. The slave's address + count registers count in WORDS, not
+ * bytes, and the address+page split is at a 17-bit boundary (the page
+ * register holds bits 23..17). The buffer therefore must be aligned to
+ * 64 KiB worst case AND must not cross a 128 KiB boundary mid-transfer.
+ * count_bytes still expresses the BYTE count for the caller's
+ * convenience; the helper translates internally. Used by the SB16
+ * 16-bit playback path when it lands; harmless to call early. */
+void dma_channel5_program(unsigned int phys_addr,
+                          unsigned int count_bytes,
+                          unsigned int mode);
+
 #endif
