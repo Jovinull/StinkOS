@@ -78,6 +78,17 @@ struct tcb {
 	unsigned int    cwnd;
 	unsigned int    ssthresh;
 
+	/* Out-of-order receive queue. A single dropped packet on a steady
+	 * stream typically causes the next two packets to arrive ahead of the
+	 * retransmit; cache them here so they don't need to be retransmitted
+	 * themselves, then drain into rx_buf once rcv_nxt catches up. */
+	struct {
+		int           used;
+		unsigned int  seq;
+		unsigned int  len;
+		unsigned char buf[TCP_MSS];
+	} ooo[2];
+
 	int             in_use;
 };
 
@@ -115,10 +126,71 @@ static int tcb_alloc(void)
 			t->retries        = 0;
 			t->cwnd           = 2u * TCP_MSS;     /* IW=2 segments */
 			t->ssthresh       = 64u * TCP_MSS;    /* high; first loss tightens it */
+			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
 	}
 	return -1;
+}
+
+/* Copy `data` (`n` bytes) into the rx ring, drop tail if it overflows; advance
+ * rcv_nxt past the bytes actually buffered. Returns the count buffered. */
+static unsigned int tcb_rx_inline(struct tcb *t, const unsigned char *data,
+                                  unsigned int n)
+{
+	unsigned int put = 0;
+	while (put < n) {
+		unsigned int next = (t->rx_tail + 1) % TCP_BUFFER_SIZE;
+		if (next == t->rx_head)
+			break;
+		t->rx_buf[t->rx_tail] = data[put++];
+		t->rx_tail = next;
+	}
+	t->rcv_nxt += put;
+	return put;
+}
+
+/* Park an out-of-order segment in a free slot. Drops it if both slots are
+ * busy or the segment is larger than one MSS; both are tolerable losses --
+ * the sender will retransmit and we will get it again in order. */
+static void tcb_ooo_park(struct tcb *t, unsigned int seq,
+                         const unsigned char *data, unsigned int n)
+{
+	if (n == 0 || n > TCP_MSS)
+		return;
+	for (int k = 0; k < 2; k++) {
+		if (t->ooo[k].used && t->ooo[k].seq == seq)
+			return;                                  /* already queued */
+	}
+	for (int k = 0; k < 2; k++) {
+		if (t->ooo[k].used)
+			continue;
+		t->ooo[k].seq = seq;
+		t->ooo[k].len = n;
+		for (unsigned int i = 0; i < n; i++)
+			t->ooo[k].buf[i] = data[i];
+		t->ooo[k].used = 1;
+		return;
+	}
+}
+
+/* Drain any OOO slot whose seq has caught up with rcv_nxt; loop because
+ * one absorbed segment can chain into another. */
+static void tcb_ooo_drain(struct tcb *t)
+{
+	int progress = 1;
+	while (progress) {
+		progress = 0;
+		for (int k = 0; k < 2; k++) {
+			if (!t->ooo[k].used)
+				continue;
+			if (t->ooo[k].seq != t->rcv_nxt)
+				continue;
+			tcb_rx_inline(t, t->ooo[k].buf, t->ooo[k].len);
+			t->ooo[k].used = 0;
+			progress = 1;
+		}
+	}
 }
 
 /* Mark `t` as having just sent a retransmittable segment so the RTO timer
@@ -524,24 +596,27 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			}
 		}
 
-		/* Take any in-order payload into rx_buf and ACK back. */
+		/* Take any payload. In-order segments land in rx_buf directly
+		 * and pull any queued OOO segments behind them; future-seq
+		 * segments park in the OOO queue until the gap is filled. */
 		unsigned int data_off = (h->data_off >> 4) * 4u;
 		if (data_off >= len)
 			data_off = sizeof(struct tcp_hdr);
 		unsigned int data_len = len - data_off;
-		if (data_len > 0 && seg_seq == t->rcv_nxt) {
+		if (data_len > 0) {
 			const unsigned char *data =
 			    (const unsigned char *)payload + data_off;
-			unsigned int put = 0;
-			while (put < data_len) {
-				unsigned int next = (t->rx_tail + 1) % TCP_BUFFER_SIZE;
-				if (next == t->rx_head)
-					break;       /* rx buffer full */
-				t->rx_buf[t->rx_tail] = data[put++];
-				t->rx_tail = next;
+			if (seg_seq == t->rcv_nxt) {
+				tcb_rx_inline(t, data, data_len);
+				tcb_ooo_drain(t);
+				tcp_emit(t, TCP_ACK, (void *)0, 0);
+			} else if ((int)(seg_seq - t->rcv_nxt) > 0) {
+				/* Future seq: queue and ACK the still-expected
+				 * rcv_nxt so the sender knows what to retransmit. */
+				tcb_ooo_park(t, seg_seq, data, data_len);
+				tcp_emit(t, TCP_ACK, (void *)0, 0);
 			}
-			t->rcv_nxt += put;
-			tcp_emit(t, TCP_ACK, (void *)0, 0);
+			/* past-seq: silently drop (already have it). */
 		}
 
 		if ((h->flags & TCP_FIN) && t->state == TCP_ESTABLISHED) {
