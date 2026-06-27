@@ -537,6 +537,8 @@ static void tcp_emit_syn(struct tcb *t, unsigned char flags)
 	buf[off++] = 4;                                  /* length */
 	buf[off++] = (TCP_MSS >> 8) & 0xFF;
 	buf[off++] =  TCP_MSS       & 0xFF;
+	buf[off++] = 4;                                  /* kind = SACK-permitted */
+	buf[off++] = 2;                                  /* length */
 	while (off & 3u)
 		buf[off++] = 1;                          /* NOP padding */
 
