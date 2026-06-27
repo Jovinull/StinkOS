@@ -446,6 +446,9 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)rc;
 		break;
 	}
+	case 82:                                   /* SYS_AUDIO_QUERY -> current mode or -1 */
+		r->eax = (unsigned int)audio_current_mode();
+		break;
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */

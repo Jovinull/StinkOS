@@ -284,6 +284,9 @@ static inline int sys_rtc_alarm_fired(void)      { return __syscall(79, 0, 0, 0)
 #define SYS_AUDIO_MODE_MONO_S16    1
 #define SYS_AUDIO_MODE_STEREO_S16  2
 static inline int sys_audio_mode(int mode)       { return __syscall(80, mode, 0, 0); }
+/* Returns the current SYS_AUDIO_MODE value, or -1 if no playback has
+ * been armed yet. */
+static inline int sys_audio_query(void)          { return __syscall(82, 0, 0, 0); }
 
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional

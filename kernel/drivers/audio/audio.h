@@ -51,6 +51,10 @@ int  audio_start_output_16bit(void);
  * each one is 4 bytes (vs 2 for mono s16, or 1 for u8). */
 int  audio_start_output_stereo(void);
 
+/* Returns the currently-armed playback mode: 0 = mono u8, 1 = mono s16,
+ * 2 = stereo s16. Returns -1 if no playback is running yet. */
+int  audio_current_mode(void);
+
 /* Pause the DSP + cut the speaker. The DMA channel remains armed so a
  * subsequent audio_start_output picks back up cleanly. */
 void audio_stop_output(void);

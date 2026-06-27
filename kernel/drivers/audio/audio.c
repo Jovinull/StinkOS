@@ -432,6 +432,13 @@ void audio_handle_irq(void)
 
 unsigned int audio_irq_count_get(void) { return irq_count; }
 
+int audio_current_mode(void)
+{
+	if (!output_running)
+		return -1;
+	return output_is_16bit;     /* holds the AUDIO_MODE_* enum value */
+}
+
 /* SB16 sample-rate command: two-byte HIGH-then-LOW big-endian rate. */
 static void dsp_set_output_rate(unsigned int hz)
 {
