@@ -254,6 +254,12 @@ int paging_user_munmap(unsigned int addr, unsigned int size)
 		return 0;
 	if (addr < USER_HEAP_LO || addr >= USER_HEAP_HI)
 		return -1;
+	/* Same overflow guard as paging_user_mmap: clamp size to the
+	 * remaining heap so the (size + PAGE_4KB - 1) round-up never
+	 * wraps a hostile request to a tiny page count. */
+	unsigned int room = USER_HEAP_HI - addr;
+	if (size > room)
+		return -1;
 	unsigned int pages = (size + PAGE_4KB - 1u) / PAGE_4KB;
 	for (unsigned int i = 0; i < pages; i++) {
 		unsigned int v = addr + i * PAGE_4KB;
