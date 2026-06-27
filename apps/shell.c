@@ -485,15 +485,12 @@ void main(void)
 			}
 		} else if (strcmp(line, "vol") == 0) {
 			/* "vol" -> show current master.
-			 * "vol N" (0..256) -> set, returns prev. */
+			 * "vol N" (0..256) -> set, returns prev.
+			 * The kernel treats any value > 256 as read-only, so we
+			 * pass 9999 for the query path -- no clobber of state. */
 			if (rest[0] == '\0') {
-				int prev = sys_audio_master(-1);  /* read-back: passes
-				                                   * -1 which the
-				                                   * kernel clamps to 0
-				                                   * before applying;
-				                                   * we just want prev. */
-				tprintf("vol: previous master was %d / 256", prev);
-				sys_audio_master(prev);           /* restore */
+				int cur = sys_audio_master(9999);
+				tprintf("vol: master = %d / 256", cur);
 			} else {
 				int n = 0;
 				const char *p = rest;

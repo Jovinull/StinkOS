@@ -327,9 +327,10 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
-	case 60:                                   /* SYS_AUDIO_MASTER: ebx=volume(0..256) -> previous master */
+	case 60:                                   /* SYS_AUDIO_MASTER: ebx=volume(0..256) -> previous master; ebx > 256 = read-only query */
 		r->eax = (unsigned int)audio_get_master();
-		audio_set_master((int)r->ebx);
+		if ((int)r->ebx >= 0 && r->ebx <= 256u)
+			audio_set_master((int)r->ebx);
 		break;
 	case 61: {                                 /* SYS_SOCK_LISTEN: ebx=local_port -> handle or -1 */
 		unsigned short lport = (unsigned short)r->ebx;
