@@ -78,6 +78,13 @@ struct tcb {
 	unsigned int    cwnd;
 	unsigned int    ssthresh;
 
+	/* Peer's advertised window-scale shift (RFC 7323). Set when a SYN /
+	 * SYN-ACK carries TCP option kind=3; zero means no scaling. We apply
+	 * it on every snd_wnd update so the kernel sees the real byte count
+	 * the peer is willing to buffer. Our own receive window stays small
+	 * enough to fit in the raw 16-bit field, so we never emit kind=3. */
+	unsigned char   peer_wscale;
+
 	/* Out-of-order receive queue. A single dropped packet on a steady
 	 * stream typically causes the next two packets to arrive ahead of the
 	 * retransmit; cache them here so they don't need to be retransmitted
@@ -126,6 +133,7 @@ static int tcb_alloc(void)
 			t->retries        = 0;
 			t->cwnd           = 2u * TCP_MSS;     /* IW=2 segments */
 			t->ssthresh       = 64u * TCP_MSS;    /* high; first loss tightens it */
+			t->peer_wscale    = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -483,6 +491,36 @@ enum tcp_state tcp_get_state(tcp_handle_t h)
 	return conns[h].state;
 }
 
+/* Scan TCP options between the fixed 20-byte header and `data_off` for the
+ * window-scale (kind=3, len=3) option. Returns the shift count (0..14) the
+ * peer advertised, or 0 if no scale option is present or the option set is
+ * malformed. RFC 7323 caps the shift at 14; anything above is clamped. */
+static unsigned char tcp_parse_wscale(const unsigned char *opts,
+                                      unsigned int opts_len)
+{
+	for (unsigned int i = 0; i < opts_len; ) {
+		unsigned char kind = opts[i];
+		if (kind == 0)            /* EOL */ break;
+		if (kind == 1) { i++; continue; }   /* NOP padding */
+		if (i + 1 >= opts_len) break;
+		unsigned char optlen = opts[i + 1];
+		if (optlen < 2 || i + optlen > opts_len) break;
+		if (kind == 3 && optlen == 3) {
+			unsigned char shift = opts[i + 2];
+			if (shift > 14) shift = 14;
+			return shift;
+		}
+		i += optlen;
+	}
+	return 0;
+}
+
+/* Scale the peer's raw 16-bit window value by their advertised shift. */
+static unsigned int tcp_apply_wscale(const struct tcb *t, const struct tcp_hdr *h)
+{
+	return ((unsigned int)ntohs(h->window)) << t->peer_wscale;
+}
+
 void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 {
 	if (len < sizeof(struct tcp_hdr))
@@ -522,7 +560,19 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			t->snd_una     = initial_seq;
 			t->snd_nxt     = initial_seq;
 			t->rcv_nxt     = seg_seq + 1;
-			t->snd_wnd     = ntohs(h->window);
+			/* Pick up the peer's window-scale before applying the
+			 * window so snd_wnd starts at the correct byte count. */
+			{
+				unsigned int data_off = (h->data_off >> 4) * 4u;
+				if (data_off > sizeof(struct tcp_hdr) &&
+				    data_off <= len) {
+					t->peer_wscale = tcp_parse_wscale(
+					    (const unsigned char *)payload +
+					        sizeof(struct tcp_hdr),
+					    data_off - sizeof(struct tcp_hdr));
+				}
+			}
+			t->snd_wnd     = tcp_apply_wscale(t, h);
 			initial_seq   += 64000u;
 			t->state       = TCP_SYN_RECEIVED;
 			tcp_emit(t, TCP_SYN | TCP_ACK, (void *)0, 0);
@@ -536,7 +586,7 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	case TCP_SYN_RECEIVED:
 		if ((h->flags & TCP_ACK) && seg_ack == t->snd_nxt) {
 			t->snd_una        = seg_ack;
-			t->snd_wnd        = ntohs(h->window);
+			t->snd_wnd        = tcp_apply_wscale(t, h);
 			t->state          = TCP_ESTABLISHED;
 			t->last_seg_ticks = 0;      /* our SYN-ACK has been acked */
 			t->retries        = 0;
@@ -548,7 +598,18 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		    seg_ack == t->snd_nxt) {
 			t->rcv_nxt = seg_seq + 1;
 			t->snd_una = seg_ack;
-			t->snd_wnd = ntohs(h->window);
+			/* SYN-ACK is the only chance to learn the peer scale. */
+			{
+				unsigned int data_off = (h->data_off >> 4) * 4u;
+				if (data_off > sizeof(struct tcp_hdr) &&
+				    data_off <= len) {
+					t->peer_wscale = tcp_parse_wscale(
+					    (const unsigned char *)payload +
+					        sizeof(struct tcp_hdr),
+					    data_off - sizeof(struct tcp_hdr));
+				}
+			}
+			t->snd_wnd = tcp_apply_wscale(t, h);
 			t->state   = TCP_ESTABLISHED;
 			t->last_seg_ticks = 0;      /* our SYN has been acked */
 			t->retries        = 0;
@@ -567,7 +628,7 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 				t->snd_una = seg_ack;
 				/* Trim acked bytes off the head of tx_buf. */
 				t->tx_head = (t->tx_head + acked) % TCP_BUFFER_SIZE;
-				t->snd_wnd = ntohs(h->window);
+				t->snd_wnd = tcp_apply_wscale(t, h);
 
 				/* Slow start vs. congestion avoidance. cwnd<ssthresh:
 				 * grow by `acked` (effectively doubles per RTT once the
