@@ -491,6 +491,59 @@ enum tcp_state tcp_get_state(tcp_handle_t h)
 	return conns[h].state;
 }
 
+/* Emit an ACK segment that optionally carries SACK blocks describing the
+ * out-of-order ranges we already hold. Up to 2 blocks per emission (matches
+ * the OOO queue cap). Padded to a 4-byte boundary so data_off stays valid.
+ * Plain ACKs without OOO data fall back to the no-options fast path -- this
+ * keeps the wire footprint identical for the common case. */
+static void tcp_emit_sack_ack(struct tcb *t)
+{
+	unsigned int blocks = 0;
+	unsigned int starts[2], ends[2];
+	for (int k = 0; k < 2; k++) {
+		if (!t->ooo[k].used) continue;
+		if (blocks >= 2) break;
+		starts[blocks] = t->ooo[k].seq;
+		ends[blocks]   = t->ooo[k].seq + t->ooo[k].len;
+		blocks++;
+	}
+	if (blocks == 0) {
+		tcp_emit(t, TCP_ACK, (void *)0, 0);
+		return;
+	}
+
+	unsigned char  buf[1500];
+	struct tcp_hdr *h = (struct tcp_hdr *)buf;
+	h->src_port = htons(t->local_port);
+	h->dst_port = htons(t->remote_port);
+	h->seq      = htonl(t->snd_nxt);
+	h->ack      = htonl(t->rcv_nxt);
+	h->flags    = TCP_ACK;
+	h->window   = htons((unsigned short)t->rcv_wnd);
+	h->checksum = 0;
+	h->urg      = 0;
+
+	unsigned int off = sizeof(*h);
+	buf[off++] = 1;                                /* NOP */
+	buf[off++] = 1;                                /* NOP -- align SACK to 4B */
+	buf[off++] = 5;                                /* kind = SACK */
+	buf[off++] = (unsigned char)(2u + 8u * blocks);
+	for (unsigned int b = 0; b < blocks; b++) {
+		unsigned int s = htonl(starts[b]);
+		unsigned int e = htonl(ends[b]);
+		const unsigned char *sp = (const unsigned char *)&s;
+		const unsigned char *ep = (const unsigned char *)&e;
+		for (int j = 0; j < 4; j++) buf[off++] = sp[j];
+		for (int j = 0; j < 4; j++) buf[off++] = ep[j];
+	}
+	while (off & 3u)
+		buf[off++] = 0;
+
+	h->data_off = (unsigned char)((off >> 2) << 4);
+	h->checksum = tcp_checksum(t->local_ip, t->remote_ip, buf, off);
+	ipv4_send(t->remote_ip, IP_PROTO_TCP, buf, off);
+}
+
 /* Scan TCP options between the fixed 20-byte header and `data_off` for the
  * window-scale (kind=3, len=3) option. Returns the shift count (0..14) the
  * peer advertised, or 0 if no scale option is present or the option set is
@@ -670,12 +723,16 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			if (seg_seq == t->rcv_nxt) {
 				tcb_rx_inline(t, data, data_len);
 				tcb_ooo_drain(t);
-				tcp_emit(t, TCP_ACK, (void *)0, 0);
+				/* Some OOO slot may still hold data ahead of the
+				 * new rcv_nxt; advertise it via SACK so the peer
+				 * can skip retransmitting bytes we already have. */
+				tcp_emit_sack_ack(t);
 			} else if ((int)(seg_seq - t->rcv_nxt) > 0) {
-				/* Future seq: queue and ACK the still-expected
-				 * rcv_nxt so the sender knows what to retransmit. */
+				/* Future seq: queue, then dup-ACK the still-
+				 * expected rcv_nxt with SACK blocks describing
+				 * every OOO range we hold. */
 				tcb_ooo_park(t, seg_seq, data, data_len);
-				tcp_emit(t, TCP_ACK, (void *)0, 0);
+				tcp_emit_sack_ack(t);
 			}
 			/* past-seq: silently drop (already have it). */
 		}
