@@ -331,6 +331,14 @@ void syscall_dispatch(struct regs *r)
 		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
 		serial_write("shutdown: requested but no compatible path -- halting\n");
 		for (;;) __asm__ volatile ("cli; hlt");
+	case 68: {                                 /* SYS_KLOG_READ: ebx=buf ecx=cap -> bytes copied */
+		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = klog_read((char *)r->ebx, r->ecx);
+		break;
+	}
 	case 67: {                                 /* SYS_BLIT_SCALED: ebx=src ecx=dst_xy(packed) edx=dst_wh(packed) esi=src_wh(packed) -> 0 */
 		unsigned int dst_w = (r->edx >> 16) & 0xFFFFu;
 		unsigned int dst_h =  r->edx        & 0xFFFFu;

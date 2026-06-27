@@ -1,6 +1,7 @@
 /* COM1 serial console (38400 8N1) used as the kernel debug log. */
 #include "serial.h"
 #include "io.h"
+#include "klog.h"
 
 #define COM1 0x3F8
 
@@ -17,6 +18,7 @@ void serial_init(void)
 
 void serial_putc(char c)
 {
+	klog_push(c);                            /* mirror into the dmesg ring */
 	while ((inb(COM1 + 5) & 0x20) == 0)
 		;
 	outb(COM1, (unsigned char)c);

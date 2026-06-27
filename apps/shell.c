@@ -379,7 +379,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  history  exit", TERM_FG);
+			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -412,6 +412,26 @@ void main(void)
 				        t.rx_pending, t.tx_pending);
 			}
 			if (!active) term_print("no active TCBs", TERM_FG);
+		} else if (strcmp(line, "dmesg") == 0) {
+			static char klog_buf[4096];
+			int n = sys_klog_read(klog_buf, sizeof(klog_buf));
+			if (n <= 0) {
+				term_print("(klog empty)", TERM_FG);
+			} else {
+				int ls = 0;
+				for (int i = 0; i < n; i++) {
+					if (klog_buf[i] == '\n' || i == n - 1) {
+						int end = (i == n - 1 && klog_buf[i] != '\n') ? i + 1 : i;
+						char line2[TERM_COLS + 1];
+						int copy = end - ls;
+						if (copy > TERM_COLS) copy = TERM_COLS;
+						for (int j = 0; j < copy; j++) line2[j] = klog_buf[ls + j];
+						line2[copy] = '\0';
+						if (copy > 0) term_print(line2, TERM_FG);
+						ls = i + 1;
+					}
+				}
+			}
 		} else if (strcmp(line, "mem") == 0) {
 			struct sys_meminfo m;
 			if (sys_meminfo(&m) != 0) {

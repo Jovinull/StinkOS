@@ -22,6 +22,7 @@
 #include "proc.h"
 #include "pipe.h"
 #include "timer.h"
+#include "klog.h"
 #include "bootdiag.h"
 #include "elf.h"
 
