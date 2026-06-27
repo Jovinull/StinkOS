@@ -2,8 +2,8 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [master]
+  push:                       # every branch, so feature branches get build feedback
+                              # before they hit a PR. Master is included implicitly.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +23,8 @@ jobs:
           sudo apt-get install -y \
             build-essential bison flex texinfo wget \
             libgmp3-dev libmpc-dev libmpfr-dev libisl-dev \
-            qemu-system-x86 python3
+            qemu-system-x86 python3 \
+            cppcheck
 
       - name: Restore i386-elf cross-toolchain cache
         id: cache-cross
@@ -50,3 +51,7 @@ jobs:
 
       - name: Run headless boot test
         run: make test-headless
+
+      - name: Static-analysis sweep
+        run: make audit
+        continue-on-error: true   # surface findings without failing the build yet
