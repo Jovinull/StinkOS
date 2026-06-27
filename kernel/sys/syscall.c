@@ -331,9 +331,15 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)audio_get_master();
 		audio_set_master((int)r->ebx);
 		break;
-	case 61:                                   /* SYS_SOCK_LISTEN: ebx=local_port -> handle or -1 */
-		r->eax = (unsigned int)tcp_listen((unsigned short)r->ebx);
+	case 61: {                                 /* SYS_SOCK_LISTEN: ebx=local_port -> handle or -1 */
+		unsigned short lport = (unsigned short)r->ebx;
+		if (lport == 0) {                  /* port 0 has no addressable use */
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)tcp_listen(lport);
 		break;
+	}
 	case 63: {                                 /* SYS_MBR_READ: ebx=drive ecx=*struct mbr_partition[4] -> 0 / -1 */
 		if (!paging_user_range_ok(r->ecx, 4 * sizeof(struct mbr_partition))) {
 			r->eax = (unsigned int)-1;
