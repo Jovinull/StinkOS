@@ -472,10 +472,14 @@ $(TEST_BIN)/test_sha256: $(TEST_DIR)/test_sha256.c lib/libstink_sha256.c | $(TES
 $(TEST_BIN)/test_inet_addr: $(TEST_DIR)/test_inet_addr.c lib/libstink_socket.c lib/libstink_socket.h | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -I lib -o $@ $(TEST_DIR)/test_inet_addr.c lib/libstink_socket.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr
+$(TEST_BIN)/test_mixer: $(TEST_DIR)/test_mixer.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_mixer.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
+	$(TEST_BIN)/test_mixer
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
