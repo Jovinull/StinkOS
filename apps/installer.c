@@ -268,6 +268,33 @@ void main(void)
 	sys_log("installer: rewriting target boot sector");
 	sys_disk_copy(SOURCE_DRIVE, TARGET_DRIVE, 1, 0);
 
+	/* Write a real MBR partition table so other OSes / partition tools
+	 * see the StinkOS install as a single primary partition (type 0x7F
+	 * = "Linux native ext-flavour"; close enough that gparted will at
+	 * least display the slice rather than reporting "unallocated"). The
+	 * bootstrap in bytes 0..445 of LBA 0 is preserved by sys_mbr_write.
+	 * Spans LBA 1 through the just-installed area; LBA 0 itself is the
+	 * MBR, conventionally not inside the partition. */
+	{
+		struct sys_mbr_partition parts[4];
+		for (int k = 0; k < 4; k++) {
+			parts[k].bootable     = 0;
+			parts[k].type         = 0;
+			parts[k].first_lba    = 0;
+			parts[k].sector_count = 0;
+		}
+		parts[0].bootable     = 0x80;          /* active */
+		parts[0].type         = 0x7F;
+		parts[0].first_lba    = 1;
+		parts[0].sector_count = install_sectors > 0
+		                       ? install_sectors - 1u
+		                       : 0u;
+		if (sys_mbr_write(TARGET_DRIVE, parts) == 0)
+			sys_log("installer: wrote MBR partition table");
+		else
+			sys_log("installer: MBR partition write failed");
+	}
+
 	draw_chrome("step 3/3: complete");
 	draw_status(180, "result:", "INSTALL SUCCEEDED", COLOR_OK);
 	sys_drawtext(140, 220,

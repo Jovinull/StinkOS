@@ -349,6 +349,15 @@ void syscall_dispatch(struct regs *r)
 		                                (struct mbr_partition *)r->ecx);
 		break;
 	}
+	case 81: {                                 /* SYS_MBR_WRITE: ebx=drive ecx=*const struct mbr_partition[4] -> 0 / -1 */
+		if (!paging_user_range_ok(r->ecx, 4 * sizeof(struct mbr_partition))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)mbr_write((int)r->ebx,
+		                                 (const struct mbr_partition *)r->ecx);
+		break;
+	}
 	case 64: {                                 /* SYS_RTC_READ: ebx=*struct rtc_time -> 0 / -1 */
 		if (!paging_user_range_ok(r->ebx, sizeof(struct rtc_time))) {
 			r->eax = (unsigned int)-1;

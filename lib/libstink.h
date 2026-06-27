@@ -184,6 +184,16 @@ struct sys_mbr_partition {
 
 /* Read the MBR partition table of `drive` into out[4]. Returns 0 on success
  * (signature 0x55AA present), -1 on disk error or missing signature. */
+/* Write a 4-slot partition table to sector 0 of `drive`. Boot code in
+ * bytes 0..445 of the existing sector is preserved (so an installer can
+ * combine its own bootstrap with the partition layout). The 0x55AA
+ * signature is set unconditionally. Returns 0 on success, -1 on bad
+ * pointer / disk error. */
+static inline int sys_mbr_write(int drive, const struct sys_mbr_partition *in4)
+{
+	return __syscall(81, drive, (unsigned int)in4, 0);
+}
+
 static inline int sys_mbr_read(int drive, struct sys_mbr_partition *out4)
                                                  { return __syscall(63, drive, (int)out4, 0); }
 
