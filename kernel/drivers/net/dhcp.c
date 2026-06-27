@@ -76,6 +76,12 @@ static ipv4_t          dns_ip;
 static unsigned int    dhcp_last_send;
 static unsigned char   dhcp_retries;
 
+/* PIT tick when dhcp_start kicked off the very first DISCOVER. Every
+ * subsequent send_dhcp (REQUEST, retries) reports `secs` as the elapsed
+ * seconds since then -- RFC 2131 field BOOTP/DHCP servers can use for
+ * back-off or load-balancing decisions. Capped at 0xFFFF (16 bits). */
+static unsigned int    dhcp_first_send;
+
 static void log_state(const char *name)
 {
 	serial_write("dhcp: ");
@@ -110,7 +116,13 @@ static void send_dhcp(unsigned char msg_type)
 	h->hlen  = 6;
 	h->hops  = 0;
 	h->xid   = our_xid;           /* opaque, sender-defined */
-	h->secs  = 0;
+	{
+		unsigned int dt = (dhcp_first_send == 0)
+		    ? 0u
+		    : (pit_ticks() - dhcp_first_send) / 100u;
+		if (dt > 0xFFFFu) dt = 0xFFFFu;
+		h->secs = htons((unsigned short)dt);
+	}
 	h->flags = htons(0x8000);     /* broadcast reply */
 	h->ciaddr = 0;
 	h->yiaddr = 0;
@@ -249,6 +261,9 @@ void dhcp_start(void)
 	}
 	state = DHCP_DISCOVERING;
 	log_state("sending DISCOVER");
+	dhcp_first_send = pit_ticks();         /* seconds=0 reference */
+	if (dhcp_first_send == 0)
+		dhcp_first_send = 1;            /* keep zero as "unset" sentinel */
 	send_dhcp(DHCPDISCOVER);
 	dhcp_last_send = pit_ticks();
 	dhcp_retries   = 0;
