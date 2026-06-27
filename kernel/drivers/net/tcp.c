@@ -364,6 +364,39 @@ static int tcb_find(ipv4_t remote_ip, unsigned short remote_port,
 /* Compute the TCP checksum (one's-complement over pseudo-header + segment).
  * 'segment' must hold the TCP header + any data, with the checksum field
  * already zeroed by the caller. */
+/* Verify the TCP checksum of an incoming segment: sum the pseudo-header
+ * plus the segment bytes (including the existing checksum field), and
+ * accept iff the folded sum is 0xFFFF. A failing segment is silently
+ * dropped by the caller -- TCP retransmission will resend; passing
+ * corrupt bytes to the state machine could break the connection or
+ * worse, let an attacker inject data with a flipped bit. */
+static int tcp_checksum_ok(ipv4_t src, ipv4_t dst,
+                           const void *segment, unsigned int seg_len)
+{
+	unsigned int sum = 0;
+	const unsigned char *bytes;
+	struct pseudo_hdr ph;
+	ph.src_ip     = src;
+	ph.dst_ip     = dst;
+	ph.zero       = 0;
+	ph.protocol   = IP_PROTO_TCP;
+	ph.tcp_length = htons((unsigned short)seg_len);
+
+	bytes = (const unsigned char *)&ph;
+	for (unsigned int i = 0; i + 1 < sizeof(ph); i += 2)
+		sum += ((unsigned int)bytes[i] << 8) | bytes[i + 1];
+
+	bytes = (const unsigned char *)segment;
+	for (unsigned int i = 0; i + 1 < seg_len; i += 2)
+		sum += ((unsigned int)bytes[i] << 8) | bytes[i + 1];
+	if (seg_len & 1)
+		sum += (unsigned int)bytes[seg_len - 1] << 8;
+
+	while (sum >> 16)
+		sum = (sum & 0xFFFFu) + (sum >> 16);
+	return (sum & 0xFFFFu) == 0xFFFFu;
+}
+
 static unsigned short tcp_checksum(ipv4_t src, ipv4_t dst,
                                    const void *segment, unsigned int seg_len)
 {
@@ -802,6 +835,16 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 {
 	if (len < sizeof(struct tcp_hdr))
 		return;
+	/* Verify the segment checksum before doing anything else. A flipped
+	 * bit in the wire can otherwise let an attacker shift a seq/ack a
+	 * byte or two and inject data into a connection -- TCP has no other
+	 * end-to-end integrity check below TLS. RFC 793 §3.1 makes this
+	 * REQUIRED; we used to accept everything because the e1000 normally
+	 * delivers clean frames, but a hostile sender forging a bad checksum
+	 * deserves an immediate drop. */
+	if (!tcp_checksum_ok(src_ip, net_get_local_ip(), payload, len))
+		return;
+
 	const struct tcp_hdr *h = (const struct tcp_hdr *)payload;
 
 	unsigned short src_port = ntohs(h->src_port);
