@@ -425,6 +425,18 @@ void syscall_dispatch(struct regs *r)
 	case 79:                                   /* SYS_RTC_ALARM_FIRED -> 1 if fired (and clears) else 0 */
 		r->eax = (unsigned int)rtc_alarm_fired();
 		break;
+	case 80: {                                 /* SYS_AUDIO_MODE: ebx=mode (0=u8, 1=s16 mono, 2=s16 stereo) -> 0/-1 */
+		audio_stop_output();
+		int rc;
+		switch (r->ebx) {
+		case 0: rc = audio_start_output();        break;
+		case 1: rc = audio_start_output_16bit();  break;
+		case 2: rc = audio_start_output_stereo(); break;
+		default: rc = -1; break;
+		}
+		r->eax = (unsigned int)rc;
+		break;
+	}
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */

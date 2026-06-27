@@ -264,6 +264,17 @@ static inline int sys_rtc_set_alarm(int h, int m, int s)
 static inline int sys_rtc_clear_alarm(void)      { return __syscall(78, 0, 0, 0); }
 static inline int sys_rtc_alarm_fired(void)      { return __syscall(79, 0, 0, 0); }
 
+/* Switch the SB16 output mode. Stops any in-progress playback first,
+ * then re-arms in the requested format. 0 = mono u8 (default), 1 = mono
+ * signed 16-bit, 2 = stereo signed 16-bit. Existing mixer channels keep
+ * playing in the new format (u8 sources are widened to s16 dynamic
+ * range automatically). Returns 0 on success, -1 if the SB16 is
+ * missing or the mode value is unknown. */
+#define SYS_AUDIO_MODE_MONO_U8     0
+#define SYS_AUDIO_MODE_MONO_S16    1
+#define SYS_AUDIO_MODE_STEREO_S16  2
+static inline int sys_audio_mode(int mode)       { return __syscall(80, mode, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).
