@@ -137,6 +137,7 @@ static void show_menu(void)
 	sys_drawtext(140, 170, "u  update repo index",             COLOR_TEXT);
 	sys_drawtext(140, 190, "s  search repo for a name",        COLOR_TEXT);
 	sys_drawtext(140, 210, "i  install a package by name",     COLOR_TEXT);
+	sys_drawtext(140, 215, "I  install without resolving deps", COLOR_DIM);
 	sys_drawtext(140, 230, "g  upgrade installed packages",    COLOR_TEXT);
 	sys_drawtext(140, 250, "r  remove an installed package",   COLOR_TEXT);
 	sys_drawtext(140, 270, "y  inspect a .stinkpkg in StinkFS",COLOR_TEXT);
@@ -584,7 +585,11 @@ static void lockfile_append(const char *name, const char *version,
  * cyclic dependency graphs. `force` skips the already-installed check so
  * the upgrade path can re-pull a package even if it already appears in
  * STINKDB. */
-static int install_pkg(const char *name, int depth, int progress_y, int force)
+/* `skip_deps` short-circuits the recursive dependency loop -- used by the
+ * 'I' menu key for force-installing a single package without pulling its
+ * dep graph. Useful for testing and for hand-resolving conflicts. */
+static int install_pkg(const char *name, int depth, int progress_y, int force,
+                       int skip_deps)
 {
 	if (depth >= INSTALL_MAX_DEPTH) {
 		sys_drawtext(140, progress_y, "dep depth limit reached.", COLOR_ERR);
@@ -636,13 +641,15 @@ static int install_pkg(const char *name, int depth, int progress_y, int force)
 		deps[i][STINKPKG_NAME_LEN - 1] = '\0';
 	}
 
-	for (unsigned int i = 0; i < dc; i++) {
-		if (install_pkg(deps[i], depth + 1, progress_y + 20, 0) != 0)
-			return -1;
+	if (!skip_deps) {
+		for (unsigned int i = 0; i < dc; i++) {
+			if (install_pkg(deps[i], depth + 1, progress_y + 20, 0, 0) != 0)
+				return -1;
+		}
 	}
 
 	/* Re-fetch after recursion so pkg_buf again holds THIS package. */
-	if (dc > 0) {
+	if (!skip_deps && dc > 0) {
 		n = fetch_and_verify(name, progress_y);
 		if (n < 0)
 			return -1;
@@ -683,8 +690,20 @@ static void cmd_install(void)
 	if (read_line(280, 150, name, sizeof(name)) < 0)
 		return;
 
-	if (install_pkg(name, 0, 180, 0) == 0)
+	if (install_pkg(name, 0, 180, 0, 0) == 0)
 		sys_drawtext(140, 280, "installed.", COLOR_OK);
+	wait_any_key(310, "press any key.", COLOR_DIM);
+}
+
+static void cmd_install_no_deps(void)
+{
+	draw_header("install (no deps)");
+	sys_drawtext(140, 150, "package name:", COLOR_DIM);
+	char name[32];
+	if (read_line(280, 150, name, sizeof(name)) < 0)
+		return;
+	if (install_pkg(name, 0, 180, 0, 1) == 0)
+		sys_drawtext(140, 280, "installed without deps.", COLOR_OK);
 	wait_any_key(310, "press any key.", COLOR_DIM);
 }
 
@@ -796,7 +815,7 @@ static void cmd_upgrade(void)
 					sys_drawtext(360, y, "->", COLOR_DIM);
 					sys_drawtext(400, y, idx_ver, COLOR_OK);
 					stinkdb_remove(name);
-					if (install_pkg(name, 0, y + 20, 1) == 0)
+					if (install_pkg(name, 0, y + 20, 1, 0) == 0)
 						upgraded++;
 					y += 60;
 					if (y > 600) break;
@@ -1003,9 +1022,10 @@ void main(void)
 		case 'l': cmd_list();    break;
 		case 'u': cmd_update();  break;
 		case 's': cmd_search();  break;
-		case 'i': cmd_install(); break;
-		case 'g': cmd_upgrade(); break;
-		case 'y': cmd_query();   break;
+		case 'i': cmd_install();        break;
+		case 'I': cmd_install_no_deps(); break;
+		case 'g': cmd_upgrade();        break;
+		case 'y': cmd_query();          break;
 		case 'r': cmd_remove();  break;
 		case 27:
 		case 'q':
