@@ -36,6 +36,7 @@ struct proc {
 	unsigned int      pending_signals;  /* bitmap, bit N = signal N pending */
 	unsigned int      sig_handlers[PROC_NSIG];   /* userland handler addrs */
 	struct vfs_fd     fd_table[VFS_FD_MAX];       /* per-process open files */
+	int               priority;          /* 0 = highest .. 31 = lowest; default 16 */
 	char              name[PROC_NAME_LEN];
 };
 

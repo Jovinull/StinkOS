@@ -218,6 +218,13 @@ static inline int sys_klog_read(void *buf, unsigned int cap)
 static inline int sys_suspend(int pid)           { return __syscall(69, pid, 0, 0); }
 static inline int sys_resume(int pid)            { return __syscall(70, pid, 0, 0); }
 
+/* Scheduler priority. Range 0..31 where 0 is the highest priority.
+ * Default for every new proc is 16. The scheduler always picks the
+ * lowest-priority-value PROC_READY slot; equal-priority procs round-robin
+ * fairly. sys_setprio returns 0/-1, sys_getprio returns prio or -1. */
+static inline int sys_setprio(int pid, int prio) { return __syscall(71, pid, prio, 0); }
+static inline int sys_getprio(int pid)           { return __syscall(72, pid, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).

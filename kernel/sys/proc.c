@@ -22,6 +22,7 @@ static void zero_proc(struct proc *p)
 	p->esp             = 0;
 	p->cr3             = 0;
 	p->pending_signals = 0;
+	p->priority        = 16;             /* default mid-priority */
 	for (int i = 0; i < PROC_NSIG; i++)
 		p->sig_handlers[i] = 0;
 	vfs_fd_table_clear(p->fd_table);
@@ -153,16 +154,25 @@ struct proc *proc_kthread_create(const char *name, void (*entry)(void))
 	return p;
 }
 
-/* Find the next PROC_READY slot in round-robin order starting from `from + 1`.
- * Returns NULL if nothing else is runnable. */
+/* Pick the next PROC_READY slot, preferring lower priority values (highest
+ * priority wins). Within a priority level, round-robin from `from + 1` so
+ * equal-prio peers share the CPU fairly. Returns NULL if nothing else is
+ * runnable. */
 static struct proc *next_ready(int from)
 {
+	int best_prio = 32;                       /* worse than any valid priority */
+	int best_idx  = -1;
+
 	for (int i = 1; i <= PROC_MAX; i++) {
 		int idx = (from + i) % PROC_MAX;
-		if (table[idx].state == PROC_READY)
-			return &table[idx];
+		if (table[idx].state != PROC_READY)
+			continue;
+		if (table[idx].priority < best_prio) {
+			best_prio = table[idx].priority;
+			best_idx  = idx;
+		}
 	}
-	return 0;
+	return (best_idx >= 0) ? &table[best_idx] : 0;
 }
 
 void proc_yield(void)

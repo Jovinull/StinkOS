@@ -331,6 +331,27 @@ void syscall_dispatch(struct regs *r)
 		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
 		serial_write("shutdown: requested but no compatible path -- halting\n");
 		for (;;) __asm__ volatile ("cli; hlt");
+	case 71: {                                 /* SYS_SETPRIO: ebx=pid ecx=prio(0..31) -> 0 / -1 */
+		int pid  = (int)r->ebx;
+		int prio = (int)r->ecx;
+		if (prio < 0 || prio > 31) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *target = proc_get(pid);
+		if (!target) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		target->priority = prio;
+		r->eax = 0;
+		break;
+	}
+	case 72: {                                 /* SYS_GETPRIO: ebx=pid -> prio or -1 */
+		struct proc *target = proc_get((int)r->ebx);
+		r->eax = (unsigned int)(target ? target->priority : -1);
+		break;
+	}
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */
