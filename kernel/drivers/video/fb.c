@@ -56,6 +56,14 @@ void fb_fill(unsigned int rgb)
 void fb_rect(unsigned int x0, unsigned int y0,
              unsigned int w, unsigned int h, unsigned int rgb)
 {
+	/* Clip BEFORE entering the per-pixel loops. fb_putpixel rejects
+	 * out-of-bounds writes on its own, but a userland call with
+	 * w = h = 0xFFFFFFFF would otherwise spin the kernel through ~10^19
+	 * rejected pixel calls instead of returning immediately. */
+	if (x0 >= width || y0 >= height)
+		return;
+	if (w > width  - x0) w = width  - x0;
+	if (h > height - y0) h = height - y0;
 	for (unsigned int y = 0; y < h; y++)
 		for (unsigned int x = 0; x < w; x++)
 			fb_putpixel(x0 + x, y0 + y, rgb);
