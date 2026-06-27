@@ -236,6 +236,10 @@ static inline int sys_proc_info(char *buf, unsigned int cap)
 static inline int sys_arp_info(char *buf, unsigned int cap)
                                                  { return __syscall(74, (int)buf, (int)cap, 0); }
 
+/* Drop every entry of the ARP cache. Next outbound packet re-resolves
+ * from scratch. Useful when peers change MAC underneath us. */
+static inline int sys_arp_flush(void)            { return __syscall(75, 0, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).

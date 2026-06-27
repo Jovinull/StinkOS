@@ -157,6 +157,13 @@ static unsigned int append_hex2(char *out, unsigned int off, unsigned int cap,
 	return off;
 }
 
+void arp_flush(void)
+{
+	for (int i = 0; i < ARP_CACHE_SIZE; i++)
+		cache[i].valid = 0;
+	cache_next = 0;
+}
+
 unsigned int arp_snapshot(char *out, unsigned int cap)
 {
 	if (!out || cap == 0) return 0;

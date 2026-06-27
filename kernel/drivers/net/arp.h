@@ -26,4 +26,9 @@ void arp_handle(const void *payload, unsigned int len);
  * and the shell `arp` command. */
 unsigned int arp_snapshot(char *out, unsigned int cap);
 
+/* Drop every cache entry. Useful for debugging stale-binding scenarios
+ * (peer changed MAC, network split). Next outbound packet to any host
+ * re-issues an ARP request from scratch. */
+void arp_flush(void);
+
 #endif

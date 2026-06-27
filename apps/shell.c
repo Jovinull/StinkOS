@@ -460,6 +460,9 @@ void main(void)
 				if (sys_resume(pid) == 0) tprintf("resumed pid %d", pid);
 				else                       tprintf("resume pid %d failed", pid);
 			}
+		} else if (strcmp(line, "arp") == 0 && rest[0] == '-' && rest[1] == 'd') {
+			sys_arp_flush();
+			term_print("arp cache flushed", TERM_HEAD);
 		} else if (strcmp(line, "arp") == 0) {
 			static char arp_buf[1024];
 			int n = sys_arp_info(arp_buf, sizeof(arp_buf));

@@ -368,6 +368,10 @@ void syscall_dispatch(struct regs *r)
 		r->eax = arp_snapshot((char *)r->ebx, r->ecx);
 		break;
 	}
+	case 75:                                   /* SYS_ARP_FLUSH: drop every cache entry */
+		arp_flush();
+		r->eax = 0;
+		break;
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */
