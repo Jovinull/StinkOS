@@ -43,6 +43,11 @@
 #define STINKPKG_DESC_LEN   128
 #define STINKPKG_FILE_LEN   32
 
+/* Header flag bits. Bit 0 = payload compressed via zlib/deflate. The
+ * make-stinkpkg.py builder sets it with --compress; userland currently
+ * refuses flagged packages until the inflate decoder lands. */
+#define STINKPKG_FLAG_COMPRESSED  0x0001u
+
 struct stinkpkg_hdr {
 	unsigned int   magic;
 	unsigned short format_ver;

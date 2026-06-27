@@ -342,6 +342,13 @@ static int unpack_package(const unsigned char *data, unsigned int len)
 		return -1;
 	if (h->payload_off + h->payload_size > len)
 		return -1;
+	if (h->flags & STINKPKG_FLAG_COMPRESSED) {
+		/* Compressed payloads require an inflate decoder that has not
+		 * landed yet -- refuse with a clear marker so the caller knows
+		 * to either rebuild the package without --compress or wait for
+		 * the decoder commit. */
+		return -1;
+	}
 
 	const unsigned char *cur = data + sizeof(*h) +
 	                           h->dep_count * sizeof(struct stinkpkg_dep);

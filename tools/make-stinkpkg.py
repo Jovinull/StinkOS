@@ -27,9 +27,12 @@ import argparse
 import os
 import struct
 import sys
+import zlib
 
 MAGIC          = 0x474B5053
 FORMAT_VERSION = 1
+
+FLAG_COMPRESSED = 0x0001
 
 NAME_LEN = 32
 VER_LEN  = 16
@@ -59,6 +62,10 @@ def main():
     ap.add_argument("--dep",     action="append", default=[],
                     help="dependency package name (repeatable)")
     ap.add_argument("--out",     help="output filename (default: NAME.stinkpkg)")
+    ap.add_argument("--compress", action="store_true",
+                    help="zlib-compress the concatenated payload (sets the "
+                         "FLAG_COMPRESSED header bit; the userland decoder "
+                         "is required before such packages can install)")
     ap.add_argument("inputs", nargs="+", metavar="FILE",
                     help="files to bundle into the payload")
     args = ap.parse_args()
@@ -82,6 +89,12 @@ def main():
         payload += data
         cursor  += len(data)
 
+    flags = 0
+    if args.compress:
+        compressed = zlib.compress(bytes(payload), level=9)
+        payload    = bytearray(compressed)
+        flags     |= FLAG_COMPRESSED
+
     payload_off  = HEADER_SIZE + len(deps) * DEP_SIZE + len(files) * FILE_SIZE
     payload_size = len(payload)
 
@@ -89,7 +102,7 @@ def main():
         HEADER_FMT,
         MAGIC,
         FORMAT_VERSION,
-        0,                        # flags
+        flags,                    # flags (bit 0 = compressed)
         name_field,
         ver_field,
         desc_field,
