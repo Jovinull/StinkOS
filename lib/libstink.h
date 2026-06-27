@@ -165,6 +165,13 @@ static inline void sys_audio_set_volume(int handle, int volume)
  * (e.g. fade out / fade back to a UI volume slider's value). */
 static inline int sys_audio_master(int volume)   { return __syscall(60, volume, 0, 0); }
 
+/* Open a passive TCP socket on the local `port` and return the kernel TCB
+ * handle (0..7) or -1 on failure. The handle stays in LISTEN until a SYN
+ * arrives; userland polls sys_sock_state for the transition to
+ * SYS_TCP_ESTABLISHED. One accepted connection per listen() call. */
+static inline int sys_sock_listen(unsigned short port)
+                                                 { return __syscall(61, (int)port, 0, 0); }
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into
@@ -181,11 +188,17 @@ static inline int sys_audio_master(int volume)   { return __syscall(60, volume, 
  *   }
  *   sys_sock_close(h);
  */
-#define SYS_TCP_CLOSED       0
-#define SYS_TCP_SYN_SENT     2
-#define SYS_TCP_ESTABLISHED  4
-#define SYS_TCP_CLOSE_WAIT   7
-#define SYS_TCP_TIME_WAIT    10
+#define SYS_TCP_CLOSED        0
+#define SYS_TCP_LISTEN        1
+#define SYS_TCP_SYN_SENT      2
+#define SYS_TCP_SYN_RECEIVED  3
+#define SYS_TCP_ESTABLISHED   4
+#define SYS_TCP_FIN_WAIT_1    5
+#define SYS_TCP_FIN_WAIT_2    6
+#define SYS_TCP_CLOSE_WAIT    7
+#define SYS_TCP_CLOSING       8
+#define SYS_TCP_LAST_ACK      9
+#define SYS_TCP_TIME_WAIT     10
 
 static inline int sys_sock_connect(unsigned int ip, unsigned short port)
                                                  { return __syscall(31, (int)ip, (int)port, 0); }

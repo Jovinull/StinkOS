@@ -51,6 +51,25 @@ int   socket(int domain, int type, int protocol);
  * unsupported family. The kernel handle is filled in transparently. */
 int   connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
+/* Bind `sockfd` to a local IPv4 port (the address field is currently
+ * ignored -- the kernel only binds by port and accepts on every interface).
+ * Returns 0 on success, -1 on bad descriptor / unsupported family. The
+ * actual passive open happens in listen(); bind() only records the port. */
+int   bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+/* Move `sockfd` into the LISTEN state on the previously-bound port. The
+ * `backlog` argument is accepted for API compatibility but ignored -- the
+ * kernel currently accepts at most one connection per LISTEN slot. Returns
+ * 0 on success, -1 if bind() was never called or the kernel pool is full. */
+int   listen(int sockfd, int backlog);
+
+/* Block until a peer SYN lands and the kernel transitions the listener out
+ * of LISTEN. Returns a fresh socket descriptor that aliases the same kernel
+ * handle as `sockfd` -- close it independently when done. `addr`/`addrlen`
+ * receive the remote endpoint when non-NULL; pass NULL to discard. Returns
+ * -1 if the listener was never set up or the kernel TCB pool is exhausted. */
+int   accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+
 /* Same semantics as POSIX -- count returned is bytes actually written /
  * read; -1 on error. flags is accepted but ignored. */
 int   send(int sockfd, const void *buf, unsigned int len, int flags);

@@ -5,8 +5,10 @@
 #define SOCKET_MAX  8
 
 struct sock_slot {
-	int  in_use;
-	int  kernel_handle;   /* -1 until connect() succeeds */
+	int            in_use;
+	int            kernel_handle;   /* -1 until connect/listen sets it */
+	unsigned short bound_port;       /* set by bind(), used by listen() */
+	int            is_listener;      /* 1 once listen() succeeds */
 };
 
 static struct sock_slot table[SOCKET_MAX];
@@ -29,6 +31,80 @@ int socket(int domain, int type, int protocol)
 		if (!table[i].in_use) {
 			table[i].in_use        = 1;
 			table[i].kernel_handle = -1;
+			table[i].bound_port    = 0;
+			table[i].is_listener   = 0;
+			return i;
+		}
+	}
+	return -1;
+}
+
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+{
+	struct sock_slot *s = slot(sockfd);
+	if (!s)
+		return -1;
+	if (!addr || addrlen < sizeof(struct sockaddr_in))
+		return -1;
+	const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
+	if (sin->sin_family != AF_INET)
+		return -1;
+	/* sin_port is network byte order per BSD; the kernel expects host. */
+	s->bound_port = (unsigned short)
+		(((sin->sin_port & 0x00FF) << 8) | ((sin->sin_port & 0xFF00) >> 8));
+	return 0;
+}
+
+int listen(int sockfd, int backlog)
+{
+	(void)backlog;                                   /* kernel ignores it today */
+	struct sock_slot *s = slot(sockfd);
+	if (!s || s->bound_port == 0)
+		return -1;
+	int kh = sys_sock_listen(s->bound_port);
+	if (kh < 0)
+		return -1;
+	s->kernel_handle = kh;
+	s->is_listener   = 1;
+	return 0;
+}
+
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+{
+	struct sock_slot *s = slot(sockfd);
+	if (!s || !s->is_listener || s->kernel_handle < 0)
+		return -1;
+
+	/* Block until the kernel TCB leaves LISTEN. The transition lands when
+	 * a peer SYN is processed -- sys_net_poll between checks gives the RX
+	 * path a chance to fire while we sleep. */
+	for (;;) {
+		int st = sys_sock_state(s->kernel_handle);
+		if (st != SYS_TCP_LISTEN && st != SYS_TCP_SYN_RECEIVED)
+			break;
+		sys_net_poll();
+		sys_sleep_ms(10);
+	}
+
+	/* Allocate a fresh slot that aliases the same kernel TCB. The original
+	 * listener slot is left in a "consumed" state -- close it to free the
+	 * kernel handle, or accept again only after another listen(). */
+	for (int i = 0; i < SOCKET_MAX; i++) {
+		if (!table[i].in_use) {
+			table[i].in_use        = 1;
+			table[i].kernel_handle = s->kernel_handle;
+			table[i].bound_port    = s->bound_port;
+			table[i].is_listener   = 0;
+			s->is_listener         = 0;
+			s->kernel_handle       = -1;
+			if (addr && addrlen && *addrlen >= sizeof(struct sockaddr_in)) {
+				struct sockaddr_in *out = (struct sockaddr_in *)addr;
+				out->sin_family    = AF_INET;
+				out->sin_port      = 0;            /* remote port not exposed */
+				out->sin_addr.s_addr = 0;          /* remote ip   not exposed */
+				for (int k = 0; k < 8; k++) out->sin_zero[k] = 0;
+				*addrlen = sizeof(struct sockaddr_in);
+			}
 			return i;
 		}
 	}
