@@ -180,11 +180,76 @@ static int history_load(char *buf)
 	return (int)n;
 }
 
+/* ---- system config (STINK.CONF) ---- */
+
+#define HOSTNAME_MAX  32
+#define CONFIG_FILE   "STINK.CONF"
+
+static char hostname[HOSTNAME_MAX] = "stinkos";
+
+/* Parse one "key=value" line out of STINK.CONF: writes the value at the named
+ * key into `out_buf` (cap-bounded, NUL-terminated). Silently leaves `out_buf`
+ * untouched if the key is absent or the file is missing. Unknown keys are
+ * ignored so STINK.CONF stays forward-compatible. */
+static void config_get(const char *key, char *out_buf, unsigned int cap)
+{
+	char raw[512];
+	int  n = sys_fread(CONFIG_FILE, raw, sizeof(raw) - 1);
+	if (n <= 0)
+		return;
+	raw[n] = '\0';
+
+	unsigned int klen = 0;
+	while (key[klen]) klen++;
+
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (raw[i] != '\n' && raw[i] != '\0')
+			continue;
+		raw[i] = '\0';
+		const char *line = raw + ls;
+		int match = 1;
+		for (unsigned int j = 0; j < klen; j++) {
+			if (line[j] != key[j]) { match = 0; break; }
+		}
+		if (match && line[klen] == '=') {
+			const char *p = line + klen + 1;
+			unsigned int w = 0;
+			while (*p && w + 1 < cap)
+				out_buf[w++] = *p++;
+			out_buf[w] = '\0';
+			return;
+		}
+		ls = i + 1;
+	}
+}
+
+/* Rewrite STINK.CONF with a single key=value line. Other keys are dropped
+ * (no need to preserve them while hostname is the only documented field). */
+static void config_set_hostname(const char *new_name)
+{
+	char line[HOSTNAME_MAX + 16];
+	int p = 0;
+	const char *prefix = "hostname=";
+	for (int i = 0; prefix[i]; i++) line[p++] = prefix[i];
+	for (int i = 0; new_name[i] && p < (int)sizeof(line) - 1; i++)
+		line[p++] = new_name[i];
+	line[p++] = '\n';
+	sys_fwrite(CONFIG_FILE, line, (unsigned int)p);
+
+	int j = 0;
+	for (; new_name[j] && j < HOSTNAME_MAX - 1; j++)
+		hostname[j] = new_name[j];
+	hostname[j] = '\0';
+}
+
 /* ---- input line rendering ---- */
 static void render_input(const char *buf, int len, int with_cursor)
 {
 	char display[TERM_COLS + 1];
 	int p = 0;
+	for (int i = 0; hostname[i] && p < TERM_COLS - 4; i++)
+		display[p++] = hostname[i];
 	display[p++] = '>';
 	display[p++] = ' ';
 	for (int i = 0; i < len && p < TERM_COLS - 1; i++)
@@ -297,6 +362,7 @@ static void print_fileinfo(const char *name, int size)
 void main(void)
 {
 	term_clear();
+	config_get("hostname", hostname, sizeof(hostname));
 	history_load_persistent();
 	term_print("STINKOS SHELL  (type 'help', 'exit' to quit)", TERM_HEAD);
 	term_row++;   /* blank line after header */
@@ -313,7 +379,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("run <appname>  netinfo  ping <ip>  history  exit", TERM_FG);
+			term_print("hostname [name]  run <appname>  netinfo  ping <ip>  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -321,6 +387,13 @@ void main(void)
 			term_print(rest, TERM_FG);
 		} else if (strcmp(line, "uptime") == 0) {
 			tprintf("%u ticks since boot", sys_ticks());
+		} else if (strcmp(line, "hostname") == 0) {
+			if (rest[0] == '\0') {
+				term_print(hostname, TERM_FG);
+			} else {
+				config_set_hostname(rest);
+				tprintf("hostname set to %s (persisted)", hostname);
+			}
 		} else if (strcmp(line, "exit") == 0) {
 			term_print("bye", TERM_HEAD);
 			sys_exit();
