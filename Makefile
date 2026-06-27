@@ -416,7 +416,21 @@ audit:
 	  fi
 	@echo "=== audit done ==="
 
+# Distribution image: a copy of os.bin with a proper single-partition MBR
+# table patched into sector 0. The on-disk bytes are otherwise identical, so
+# `dd` to a USB stick or `qemu -drive file=stinkos-install.iso` boots the
+# same system as `make run`. Despite the .iso suffix this is a raw disk
+# image, not ISO9660 -- the naming follows the convention every hobby OS
+# distribution uses ("download the .iso, dd it to a stick").
+INSTALL_PART_START   = 1
+INSTALL_PART_SECTORS = $(shell echo $$(( $(FS_DATA_END) - 1 )))
+stinkos-install.iso: all tools/write-mbr.py
+	cp os.bin stinkos-install.iso
+	python3 tools/write-mbr.py stinkos-install.iso \
+	    --start $(INSTALL_PART_START) \
+	    --count $(INSTALL_PART_SECTORS)
+
 clean:
-	rm -rf $(BUILD) os.bin
+	rm -rf $(BUILD) os.bin stinkos-install.iso
 
 .PHONY: all hex dall run run-install run-installed test-headless audit clean
