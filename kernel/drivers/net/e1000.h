@@ -38,4 +38,10 @@ unsigned int e1000_poll_receive(void *buf, unsigned int max_len);
  * a full TX ring; returns the byte count on success or -1 on bad arguments. */
 int e1000_send_frame(const void *buf, unsigned int len);
 
+/* IRQ entry: drain every RX descriptor the chip currently flags done and
+ * dispatch each frame via eth_handle_frame. Called from trap.c on every
+ * hardware IRQ -- the ICR read is cheap and self-clearing so it's safe to
+ * fire when no e1000 interrupt is actually pending. */
+void e1000_handle_irq(void);
+
 #endif

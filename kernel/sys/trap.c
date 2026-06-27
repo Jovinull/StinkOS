@@ -180,6 +180,12 @@ void irq_handler(struct regs *r)
 		mouse_handle(inb(0x60));
 	}
 
+	/* PCI INTx lines are shared and the BIOS-assigned vector varies, so
+	 * call the e1000 IRQ entry on every hardware IRQ. The handler reads
+	 * ICR (clears on read) and no-ops when no descriptor is done. */
+	if (r->int_no >= 32 && r->int_no <= 47)
+		e1000_handle_irq();
+
 	if (r->int_no >= 40)                        /* from the slave PIC */
 		outb(0xA0, 0x20);
 	outb(0x20, 0x20);                           /* end of interrupt */

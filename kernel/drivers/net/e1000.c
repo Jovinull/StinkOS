@@ -7,6 +7,7 @@
 #include "e1000.h"
 #include "pci.h"
 #include "serial.h"
+#include "ethernet.h"     /* eth_handle_frame for the IRQ-driven RX path */
 
 /* Register offsets from MMIO base (BAR0). The Intel SDM lists hundreds; we
  * only need a handful at this layer. */
@@ -175,10 +176,37 @@ int e1000_init(void)
 	read_mac_from_rar();
 	setup_rx();
 	setup_tx();
+
+	/* Clear any stale ICR bits, then arm RX-related interrupts (RXT0 ring
+	 * timer fired, RXDMT0 ring at minimum threshold). The PIC is unmasked
+	 * at boot so the legacy IRQ line wired to PCI fires; trap.c's
+	 * irq_handler calls e1000_handle_irq() on every IRQ so we don't need
+	 * to chase the BIOS-assigned line number for now. */
+	(void)e1000_read(E1000_ICR);
+	e1000_write(E1000_IMS, 0x90u);              /* RXT0 (0x80) | RXDMT0 (0x10) */
+
 	e1000_initialised = 1;
 	log_mac();
-	serial_write("e1000: RX + TX rings armed\n");
+	serial_write("e1000: RX + TX rings armed, IRQ-driven RX enabled\n");
 	return 1;
+}
+
+/* IRQ entry: drains every RX descriptor the chip has marked done and pushes
+ * each frame straight into the ethernet dispatcher. Safe to call from any
+ * IRQ context, including ones unrelated to this NIC: the ICR read is cheap
+ * and self-clearing, and the loop is a no-op when no DD bit is set. */
+void e1000_handle_irq(void)
+{
+	if (!e1000_initialised)
+		return;
+	(void)e1000_read(E1000_ICR);                /* clear pending bits */
+	while (rx_ring[rx_cursor].status & E1000_RXD_STAT_DD) {
+		unsigned int len = rx_ring[rx_cursor].length;
+		eth_handle_frame(rx_buffers[rx_cursor], len);
+		rx_ring[rx_cursor].status = 0;
+		e1000_write(E1000_RDT, rx_cursor);
+		rx_cursor = (rx_cursor + 1) % RX_RING_COUNT;
+	}
 }
 
 int e1000_present(void) { return e1000_initialised; }
