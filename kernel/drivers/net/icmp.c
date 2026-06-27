@@ -53,6 +53,16 @@ void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	if (len < sizeof(struct icmp_hdr))
 		return;
 
+	/* RFC 792: the ICMP checksum covers the whole message starting at
+	 * the ICMP header, NOT a pseudo-header. A valid packet folds the
+	 * sum to 0xFFFF, so ipv4_checksum returns 0. Anything else means
+	 * the packet was bit-flipped (or forged with a stale checksum) and
+	 * we drop it -- otherwise an echo-reply with mangled id/sequence
+	 * could spoof a ping response and let userland think a dead host
+	 * was alive. */
+	if (ipv4_checksum(payload, len) != 0)
+		return;
+
 	const struct icmp_hdr *h = (const struct icmp_hdr *)payload;
 
 	if (h->type == ICMP_TYPE_ECHO_REPLY) {     /* reply to our own ping */
