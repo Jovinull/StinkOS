@@ -849,6 +849,16 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 {
 	if (len < sizeof(struct tcp_hdr))
 		return;
+	/* RFC 1122 §4.2.3.10: TCP segments from broadcast / multicast / the
+	 * unspecified address can never represent a legitimate peer. They
+	 * usually come from a misconfigured sender or an attacker hoping we
+	 * will RST every neighbour on the segment when we can't find a
+	 * matching TCB. Silent drop is correct -- no state to update, no
+	 * reply to send. */
+	if (src_ip == 0 || src_ip == 0xFFFFFFFFu)
+		return;
+	if ((src_ip & 0x000000F0u) == 0x000000E0u)
+		return;
 	/* Verify the segment checksum before doing anything else. A flipped
 	 * bit in the wire can otherwise let an attacker shift a seq/ack a
 	 * byte or two and inject data into a connection -- TCP has no other
