@@ -137,3 +137,50 @@ void arp_handle(const void *payload, unsigned int len)
 		arp_send_reply(p);
 	}
 }
+
+static unsigned int append_dec(char *out, unsigned int off, unsigned int cap,
+                               unsigned int v)
+{
+	char t[12]; int n = 0;
+	if (v == 0) t[n++] = '0';
+	while (v > 0 && n < 11) { t[n++] = '0' + (v % 10); v /= 10; }
+	for (int i = n - 1; i >= 0 && off + 1 < cap; i--) out[off++] = t[i];
+	return off;
+}
+
+static unsigned int append_hex2(char *out, unsigned int off, unsigned int cap,
+                                unsigned char b)
+{
+	static const char hx[] = "0123456789ABCDEF";
+	if (off + 1 < cap) out[off++] = hx[(b >> 4) & 0xF];
+	if (off + 1 < cap) out[off++] = hx[b & 0xF];
+	return off;
+}
+
+unsigned int arp_snapshot(char *out, unsigned int cap)
+{
+	if (!out || cap == 0) return 0;
+	unsigned int off = 0;
+	const char *hdr = "IP              MAC\n";
+	while (*hdr && off + 1 < cap) out[off++] = *hdr++;
+
+	for (int i = 0; i < ARP_CACHE_SIZE; i++) {
+		if (!cache[i].valid) continue;
+		ipv4_t ip = cache[i].ip;
+		off = append_dec(out, off, cap, (unsigned int)( ip        & 0xFF));
+		if (off + 1 < cap) out[off++] = '.';
+		off = append_dec(out, off, cap, (unsigned int)((ip >>  8) & 0xFF));
+		if (off + 1 < cap) out[off++] = '.';
+		off = append_dec(out, off, cap, (unsigned int)((ip >> 16) & 0xFF));
+		if (off + 1 < cap) out[off++] = '.';
+		off = append_dec(out, off, cap, (unsigned int)((ip >> 24) & 0xFF));
+		while (off + 1 < cap && off % 16 != 0) out[off++] = ' ';
+		for (int k = 0; k < 6; k++) {
+			off = append_hex2(out, off, cap, cache[i].mac[k]);
+			if (k < 5 && off + 1 < cap) out[off++] = ':';
+		}
+		if (off + 1 < cap) out[off++] = '\n';
+	}
+	if (off < cap) out[off] = '\0';
+	return off;
+}

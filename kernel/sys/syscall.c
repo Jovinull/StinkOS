@@ -360,6 +360,14 @@ void syscall_dispatch(struct regs *r)
 		r->eax = proc_snapshot((char *)r->ebx, r->ecx);
 		break;
 	}
+	case 74: {                                 /* SYS_ARP_INFO: ebx=buf ecx=cap -> bytes */
+		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = arp_snapshot((char *)r->ebx, r->ecx);
+		break;
+	}
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */

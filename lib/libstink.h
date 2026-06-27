@@ -231,6 +231,11 @@ static inline int sys_getprio(int pid)           { return __syscall(72, pid, 0, 
 static inline int sys_proc_info(char *buf, unsigned int cap)
                                                  { return __syscall(73, (int)buf, (int)cap, 0); }
 
+/* Snapshot the ARP cache into `buf` as "IP MAC\n" rows with a header.
+ * Returns the byte count written. Backs the shell `arp` command. */
+static inline int sys_arp_info(char *buf, unsigned int cap)
+                                                 { return __syscall(74, (int)buf, (int)cap, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).

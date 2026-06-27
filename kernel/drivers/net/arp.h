@@ -21,4 +21,9 @@ void arp_send_request(ipv4_t target_ip);
  * request for our local IP, sends back a reply. */
 void arp_handle(const void *payload, unsigned int len);
 
+/* Format the cache as ASCII into `out` ("IP MAC\n" rows, header on top).
+ * Returns the byte count written (capped to `cap`). Backs SYS_ARP_INFO
+ * and the shell `arp` command. */
+unsigned int arp_snapshot(char *out, unsigned int cap);
+
 #endif

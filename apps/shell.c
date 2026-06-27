@@ -381,7 +381,7 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
-			term_print("clock  shutdown  reboot", TERM_FG);
+			term_print("clock  shutdown  reboot  arp", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -459,6 +459,26 @@ void main(void)
 					pid = pid * 10 + (rest[j] - '0');
 				if (sys_resume(pid) == 0) tprintf("resumed pid %d", pid);
 				else                       tprintf("resume pid %d failed", pid);
+			}
+		} else if (strcmp(line, "arp") == 0) {
+			static char arp_buf[1024];
+			int n = sys_arp_info(arp_buf, sizeof(arp_buf));
+			if (n <= 0) {
+				term_print("(no arp entries)", TERM_FG);
+			} else {
+				int ls = 0;
+				for (int i = 0; i < n; i++) {
+					if (arp_buf[i] == '\n' || i == n - 1) {
+						int end = (i == n - 1 && arp_buf[i] != '\n') ? i + 1 : i;
+						char l2[TERM_COLS + 1];
+						int copy = end - ls;
+						if (copy > TERM_COLS) copy = TERM_COLS;
+						for (int j = 0; j < copy; j++) l2[j] = arp_buf[ls + j];
+						l2[copy] = '\0';
+						if (copy > 0) term_print(l2, TERM_FG);
+						ls = i + 1;
+					}
+				}
 			}
 		} else if (strcmp(line, "ps") == 0) {
 			static char ps_buf[1024];
