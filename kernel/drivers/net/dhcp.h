@@ -31,6 +31,11 @@ ipv4_t dhcp_get_subnet_mask(void);
 ipv4_t dhcp_get_router(void);
 ipv4_t dhcp_get_dns(void);
 
+/* Secondary DNS server from the OPT_DNS list, if the server offered
+ * two. Returns 0 if only one was advertised (or no lease). Used as a
+ * fallback when a query against the primary server times out. */
+ipv4_t dhcp_get_dns2(void);
+
 /* Pumped from net_poll_once: re-broadcasts DHCPDISCOVER / DHCPREQUEST if
  * the corresponding reply never arrived (lost packet on noisy LANs or
  * race against DHCP server warmup). Gives up after a few retries and

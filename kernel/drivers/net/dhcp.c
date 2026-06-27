@@ -65,6 +65,7 @@ static ipv4_t          server_id;
 static ipv4_t          subnet_mask;
 static ipv4_t          router_ip;
 static ipv4_t          dns_ip;
+static ipv4_t          dns_ip2;     /* secondary if OPT_DNS carries >= 8 bytes */
 
 /* Retransmit state for whichever DHCP message we're currently waiting
  * on a reply to (DISCOVER in DISCOVERING, REQUEST in REQUESTING). After
@@ -195,7 +196,12 @@ static void parse_options(const unsigned char *opts, unsigned int len,
 			if (olen >= 4) router_ip = read_ipv4(&opts[i]);
 			break;
 		case OPT_DNS:
-			if (olen >= 4) dns_ip = read_ipv4(&opts[i]);
+			/* RFC 2132 §3.8: option 6 carries a list of DNS server
+			 * IPs in priority order, 4 bytes each. We keep the first
+			 * two -- enough for a primary/secondary pair, which is
+			 * what every consumer-grade router hands out. */
+			if (olen >= 4) dns_ip  = read_ipv4(&opts[i]);
+			if (olen >= 8) dns_ip2 = read_ipv4(&opts[i + 4]);
 			break;
 		case OPT_SERVER_ID:
 			if (olen == 4) server_id = read_ipv4(&opts[i]);
@@ -297,3 +303,4 @@ int    dhcp_bound(void)        { return state == DHCP_BOUND; }
 ipv4_t dhcp_get_subnet_mask(void) { return subnet_mask; }
 ipv4_t dhcp_get_router(void)      { return router_ip; }
 ipv4_t dhcp_get_dns(void)         { return dns_ip; }
+ipv4_t dhcp_get_dns2(void)        { return dns_ip2; }

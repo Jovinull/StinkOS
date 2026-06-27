@@ -272,7 +272,9 @@ int dns_resolve(const char *name)
 
 /* Re-encode + re-send the same query packet (same id, same qname). The
  * cached `last_query_name` lets us rebuild the wire format without
- * holding a static byte buffer. */
+ * holding a static byte buffer. After the primary DNS has consumed
+ * half the retry budget without an answer, swap to the secondary (if
+ * DHCP gave us one) so a primary-server outage still resolves. */
 static void dns_retransmit(void)
 {
 	if (!dhcp_bound() || dhcp_get_dns() == 0)
@@ -292,7 +294,10 @@ static void dns_retransmit(void)
 	unsigned int off = sizeof(*h) + (unsigned int)qn;
 	pkt[off++] = 0; pkt[off++] = QTYPE_A;
 	pkt[off++] = 0; pkt[off++] = QCLASS_IN;
-	udp_send(dhcp_get_dns(), DNS_PORT, LOCAL_PORT, pkt, off);
+	ipv4_t target = dhcp_get_dns();
+	if (send_retries >= (DNS_MAX_RETRIES / 2u) && dhcp_get_dns2() != 0)
+		target = dhcp_get_dns2();
+	udp_send(target, DNS_PORT, LOCAL_PORT, pkt, off);
 }
 
 void dns_tick(void)
