@@ -260,6 +260,14 @@ void main(void)
 	/* Strip the marker from the source so the install media stays idempotent. */
 	sys_fdelete("FIRSTBOOT.RUN");
 
+	/* Re-write the target's boot sector explicitly. The main clone loop
+	 * already copied LBA 0, but a later MBR-aware install step (partition
+	 * table edits, recovery shimming) could overwrite parts of it; this
+	 * final 1-sector pass guarantees the target boots with the same boot
+	 * code as the source. Idempotent and cheap (one IDE sector). */
+	sys_log("installer: rewriting target boot sector");
+	sys_disk_copy(SOURCE_DRIVE, TARGET_DRIVE, 1, 0);
+
 	draw_chrome("step 3/3: complete");
 	draw_status(180, "result:", "INSTALL SUCCEEDED", COLOR_OK);
 	sys_drawtext(140, 220,
