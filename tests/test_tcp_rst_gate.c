@@ -32,15 +32,24 @@ struct tcb {
 	int          state;
 	int          in_use;
 	unsigned int rcv_nxt;
+	unsigned int snd_nxt;
 };
 
+#define TCP_ACK 0x10
+
 /* Mirror of the RST gate -- returns 1 if the TCB transitioned to CLOSED. */
-static int rst_handle(struct tcb *t, unsigned int seg_seq)
+static int rst_handle(struct tcb *t, unsigned int seg_seq,
+                      unsigned int seg_ack, unsigned char flags)
 {
-	int strict = (t->state != SYN_SENT &&
-	              t->state != SYN_RECEIVED &&
-	              t->state != LISTEN);
-	if (!strict || seg_seq == t->rcv_nxt) {
+	int accept = 0;
+	if (t->state == LISTEN) {
+		accept = 1;
+	} else if (t->state == SYN_SENT) {
+		accept = (flags & TCP_ACK) && seg_ack == t->snd_nxt;
+	} else {
+		accept = (seg_seq == t->rcv_nxt);
+	}
+	if (accept) {
 		t->state  = CLOSED;
 		t->in_use = 0;
 		return 1;
@@ -61,45 +70,55 @@ int main(void)
 	struct tcb t;
 
 	/* ESTABLISHED with rcv_nxt=1000: RST at seq=1000 wins. */
-	t.state = ESTABLISHED; t.in_use = 1; t.rcv_nxt = 1000;
-	failures += expect_int("EST + matching seq: accepted",  rst_handle(&t, 1000), 1);
-	failures += expect_int("EST + matching seq: state=CLOSED", t.state,           CLOSED);
+	t.state = ESTABLISHED; t.in_use = 1; t.rcv_nxt = 1000; t.snd_nxt = 0;
+	failures += expect_int("EST + matching seq: accepted",  rst_handle(&t, 1000, 0, 0), 1);
+	failures += expect_int("EST + matching seq: state=CLOSED", t.state,                 CLOSED);
 
 	/* ESTABLISHED with rcv_nxt=1000: RST at seq=999 (off by one) dropped. */
 	t.state = ESTABLISHED; t.in_use = 1; t.rcv_nxt = 1000;
-	failures += expect_int("EST + off-by-one seq: dropped", rst_handle(&t, 999), 0);
-	failures += expect_int("EST + off-by-one seq: state kept", t.state,            ESTABLISHED);
+	failures += expect_int("EST + off-by-one seq: dropped", rst_handle(&t, 999, 0, 0),  0);
+	failures += expect_int("EST + off-by-one seq: state kept", t.state,                  ESTABLISHED);
 
 	/* ESTABLISHED + far-off attacker seq: dropped. */
 	t.state = ESTABLISHED; t.in_use = 1; t.rcv_nxt = 1000;
-	failures += expect_int("EST + spoofed seq: dropped",    rst_handle(&t, 0xDEADBEEFu), 0);
-	failures += expect_int("EST + spoofed seq: still in_use", t.in_use,                  1);
+	failures += expect_int("EST + spoofed seq: dropped",    rst_handle(&t, 0xDEADBEEFu, 0, 0), 0);
+	failures += expect_int("EST + spoofed seq: still in_use", t.in_use,                        1);
 
 	/* FIN_WAIT_2 same rule. */
 	t.state = FIN_WAIT_2; t.in_use = 1; t.rcv_nxt = 500;
-	failures += expect_int("FIN_WAIT_2 + matching: accepted", rst_handle(&t, 500), 1);
+	failures += expect_int("FIN_WAIT_2 + matching: accepted", rst_handle(&t, 500, 0, 0), 1);
 
 	t.state = LAST_ACK; t.in_use = 1; t.rcv_nxt = 500;
-	failures += expect_int("LAST_ACK + wrong seq: dropped",   rst_handle(&t, 0),   0);
-	failures += expect_int("LAST_ACK + wrong seq: state kept", t.state,            LAST_ACK);
+	failures += expect_int("LAST_ACK + wrong seq: dropped",   rst_handle(&t, 0, 0, 0),   0);
+	failures += expect_int("LAST_ACK + wrong seq: state kept", t.state,                  LAST_ACK);
 
-	/* SYN_SENT: rcv_nxt not yet meaningful, RST always accepted. */
-	t.state = SYN_SENT; t.in_use = 1; t.rcv_nxt = 0;
-	failures += expect_int("SYN_SENT + any seq: accepted",   rst_handle(&t, 0xCAFEBABEu), 1);
+	/* SYN_SENT: RFC 5961 §4 requires ack == snd_nxt with ACK flag.
+	 * Bare RST without ACK is dropped (attacker can't blind-RST). */
+	t.state = SYN_SENT; t.in_use = 1; t.snd_nxt = 0x1000;
+	failures += expect_int("SYN_SENT + bare RST: dropped",     rst_handle(&t, 0, 0, 0), 0);
+	failures += expect_int("SYN_SENT + RST+ACK matching: accepted",
+	                       rst_handle(&t, 0, 0x1000, TCP_ACK), 1);
 
-	/* SYN_RECEIVED: same. */
-	t.state = SYN_RECEIVED; t.in_use = 1; t.rcv_nxt = 0;
-	failures += expect_int("SYN_RECV + any seq: accepted",   rst_handle(&t, 12345),       1);
+	/* SYN_SENT + RST+ACK but wrong ack: dropped. */
+	t.state = SYN_SENT; t.in_use = 1; t.snd_nxt = 0x1000;
+	failures += expect_int("SYN_SENT + RST+ACK wrong ack: dropped",
+	                       rst_handle(&t, 0, 0x9999, TCP_ACK), 0);
 
-	/* LISTEN: same (pre-handshake). */
+	/* SYN_RECEIVED: post-handshake-ish, uses rcv_nxt rule. */
+	t.state = SYN_RECEIVED; t.in_use = 1; t.rcv_nxt = 50;
+	failures += expect_int("SYN_RECV + wrong seq: dropped",    rst_handle(&t, 0, 0, 0),  0);
+	t.state = SYN_RECEIVED; t.in_use = 1; t.rcv_nxt = 50;
+	failures += expect_int("SYN_RECV + matching seq: accepted", rst_handle(&t, 50, 0, 0), 1);
+
+	/* LISTEN: still accept always (no per-connection state). */
 	t.state = LISTEN; t.in_use = 1; t.rcv_nxt = 0;
-	failures += expect_int("LISTEN + any seq: accepted",     rst_handle(&t, 1),           1);
+	failures += expect_int("LISTEN + any seq: accepted",     rst_handle(&t, 1, 0, 0),   1);
 
 	/* TIME_WAIT also subject to strict gate. */
 	t.state = TIME_WAIT; t.in_use = 1; t.rcv_nxt = 8000;
-	failures += expect_int("TIME_WAIT + matching: accepted", rst_handle(&t, 8000), 1);
+	failures += expect_int("TIME_WAIT + matching: accepted", rst_handle(&t, 8000, 0, 0), 1);
 	t.state = TIME_WAIT; t.in_use = 1; t.rcv_nxt = 8000;
-	failures += expect_int("TIME_WAIT + wrong: dropped",     rst_handle(&t, 7999), 0);
+	failures += expect_int("TIME_WAIT + wrong: dropped",     rst_handle(&t, 7999, 0, 0), 0);
 
 	printf("\n%d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;

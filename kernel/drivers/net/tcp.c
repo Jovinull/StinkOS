@@ -862,17 +862,21 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	unsigned int seg_ack = ntohl(h->ack);
 
 	if (h->flags & TCP_RST) {
-		/* RFC 5961 §3: accept the RST only if its sequence number is
-		 * what we expected next. Once a connection is established the
-		 * attacker would have to guess rcv_nxt to spoof a RST, which
-		 * limits blind-RST attacks. Pre-handshake states (SYN_SENT /
-		 * SYN_RECEIVED) have no rcv_nxt yet, so we leave them on the
-		 * older "accept any RST" behaviour -- the rcv_nxt window will
-		 * be 0 until the SYN handshake completes. */
-		int strict_seq = (t->state != TCP_SYN_SENT &&
-		                  t->state != TCP_SYN_RECEIVED &&
-		                  t->state != TCP_LISTEN);
-		if (!strict_seq || seg_seq == t->rcv_nxt) {
+		/* RFC 5961 RST acceptance: in post-handshake states require
+		 * seg_seq == rcv_nxt (§3). In SYN_SENT require the RST to ack
+		 * the SYN we just sent (§4: seg_ack == snd_nxt AND ACK flag set)
+		 * -- without this any attacker who can hit the 5-tuple can blind
+		 * RST our outbound connect. SYN_RECEIVED inherits §3 once it
+		 * has rcv_nxt, and LISTEN is exempt (no per-connection state). */
+		int accept = 0;
+		if (t->state == TCP_LISTEN) {
+			accept = 1;
+		} else if (t->state == TCP_SYN_SENT) {
+			accept = (h->flags & TCP_ACK) && seg_ack == t->snd_nxt;
+		} else {
+			accept = (seg_seq == t->rcv_nxt);
+		}
+		if (accept) {
 			t->state  = TCP_CLOSED;
 			t->in_use = 0;
 		}
