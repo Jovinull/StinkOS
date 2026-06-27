@@ -75,6 +75,10 @@ int tcp_recv(tcp_handle_t h, void *buf, unsigned int max);
  * freed. */
 void tcp_close(tcp_handle_t h);
 
+/* Reap every TCB owned by `pid`. Used by process teardown to recover
+ * connection slots that the dying app never closed itself. */
+void tcp_close_pid(int pid);
+
 /* Current state of the connection (for debugging / waits). */
 enum tcp_state tcp_get_state(tcp_handle_t h);
 

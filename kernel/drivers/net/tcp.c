@@ -22,6 +22,7 @@
 #include "ipv4.h"
 #include "ethernet.h"
 #include "interrupts.h"   /* pit_ticks() for the RTO timer */
+#include "proc.h"         /* proc_current() to stamp TCB owner_pid */
 
 #define TCP_MAX_CONNS    8
 #define TCP_BUFFER_SIZE  4096
@@ -136,6 +137,12 @@ struct tcb {
 	 * forever after a graceful close. */
 	unsigned int    time_wait_ticks;
 
+	/* Owning process. Stamped at tcp_connect / tcp_listen so process
+	 * teardown (SYS_EXIT, SYS_KILL) can reap any TCBs the dying app
+	 * forgot to close, instead of leaving them pinned forever. 0 means
+	 * "no owner" (e.g. kernel-internal connection, never user-allocated). */
+	int             owner_pid;
+
 	/* Zero-window persist (RFC 1122 §4.2.2.17). When the peer advertises
 	 * snd_wnd == 0 and we still have tx-pending bytes, persist_armed is
 	 * set; tcp_tick then sends a 1-byte probe every persist_interval
@@ -211,6 +218,7 @@ static int tcb_alloc(void)
 			t->persist_last_tick    = 0;
 			t->persist_interval     = TCP_PERSIST_INITIAL;
 			t->time_wait_ticks      = 0;
+			t->owner_pid            = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -502,6 +510,10 @@ tcp_handle_t tcp_connect(ipv4_t dst_ip, unsigned short dst_port)
 	initial_seq   += 64000u;       /* coarse ISN bump, avoids reuse */
 
 	t->state = TCP_SYN_SENT;
+	{
+		struct proc *cur = proc_current();
+		t->owner_pid = cur ? cur->pid : 0;
+	}
 	tcp_emit_syn(t, TCP_SYN);
 	t->snd_nxt += 1;                /* SYN consumes one sequence slot */
 	tcp_arm_rto(t);
@@ -519,6 +531,10 @@ tcp_handle_t tcp_listen(unsigned short local_port)
 	t->local_port  = local_port;
 	t->remote_port = 0;
 	t->state       = TCP_LISTEN;
+	{
+		struct proc *cur = proc_current();
+		t->owner_pid = cur ? cur->pid : 0;
+	}
 	return idx;
 }
 
@@ -589,6 +605,23 @@ enum tcp_state tcp_get_state(tcp_handle_t h)
 	if (h < 0 || h >= TCP_MAX_CONNS || !conns[h].in_use)
 		return TCP_CLOSED;
 	return conns[h].state;
+}
+
+/* Reap every TCB the named process opened but never closed. Called from
+ * the SYS_EXIT / SYS_KILL paths so a dying app cannot pin the 8-slot
+ * connection table forever. Each TCB still drives tcp_close, which lets
+ * ESTABLISHED connections do an orderly FIN handshake (and lets
+ * tcp_tick eventually free them via the 2*MSL gate). Anything in
+ * SYN_SENT / LISTEN / CLOSED drops straight to freed. */
+void tcp_close_pid(int pid)
+{
+	if (pid <= 0)
+		return;
+	for (int i = 0; i < TCP_MAX_CONNS; i++) {
+		if (!conns[i].in_use)        continue;
+		if (conns[i].owner_pid != pid) continue;
+		tcp_close((tcp_handle_t)i);
+	}
 }
 
 /* Emit a SYN (or SYN-ACK) carrying our MSS option so the peer caps its

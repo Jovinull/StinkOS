@@ -210,10 +210,14 @@ void app_return(void)
 {
 	/* Hush any mixer channels owned by the exiting process before the
 	 * scheduler picks a new foreground app: otherwise a sound effect the
-	 * dead app queued would keep playing into the next one's audio. */
+	 * dead app queued would keep playing into the next one's audio.
+	 * Same idea for any TCP socket the app forgot to close: drive an
+	 * orderly FIN so the 8-slot connection table doesn't leak. */
 	{
 		struct proc *cur = proc_current();
-		audio_mix_silence_pid(cur ? cur->pid : 0);
+		int pid = cur ? cur->pid : 0;
+		audio_mix_silence_pid(pid);
+		tcp_close_pid(pid);
 	}
 	if (exec_active) {
 		exec_active = 0;
@@ -609,6 +613,7 @@ void syscall_dispatch(struct regs *r)
 		target->state     = PROC_ZOMBIE;
 		target->exit_code = 137;           /* SIGKILL exit-code convention */
 		audio_mix_silence_pid(pid);        /* hush its mixer channels */
+		tcp_close_pid(pid);                /* reap any sockets it left open */
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
