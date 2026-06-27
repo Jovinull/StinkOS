@@ -31,6 +31,28 @@ untracked) for the full pending list.
   connect / send / recv / closesocket`)
 - `SYS_NETSTAT` syscall + `netstat` shell command
 - `SYS_MEMINFO` + `mem` shell command + throttled PMM OOM serial log
+- `SYS_MBR_READ` syscall + installer-side target partition display
+- `SYS_RTC_READ` syscall exposing CMOS wall clock to userland
+- `SYS_SHUTDOWN` / `SYS_REBOOT` (QEMU shutdown port + 8042 reset fallback)
+- `SYS_BLIT_SCALED` kernel-side nearest-neighbour scaler
+- `SYS_KLOG_READ` syscall + 8 KiB kernel log ring + `dmesg` shell command
+- `SYS_SUSPEND` / `SYS_RESUME` (also silences mixer channels of the
+  suspended PID)
+- `SYS_SETPRIO` / `SYS_GETPRIO` (scheduler priorities 0..31, default 16,
+  lowest value wins with round-robin tie-break)
+- `SYS_PROC_INFO` + `ps` shell command
+- ICMP destination-unreachable reply for UDP packets on unbound ports
+- DNS response cache (8 entries, 60 s TTL)
+- TCP keepalive probes after configurable idle window
+- Doom fullscreen mode (1024x640 letterbox via `SYS_BLIT_SCALED`) gated
+  by `stinkdoom_fullscreen=1` in `STINK.CONF`
+- Installer rewrites target boot sector explicitly after the clone
+- `stink-pkg replay` re-installs entries from a `STINKPKG.LCK` snapshot
+- `stink-pkg` no-deps install via uppercase `I` menu key
+- Mixer resamples per channel via Q16.16 step from src_rate to output
+  rate (`audio_mix_play_rate`)
+- Host unit tests grown to sha256 + inet_addr + mixer + ipv4_checksum +
+  tcp_options + sched (6 binaries through `make unittest`)
 - `stink-pkg`: recursive dep resolver, `upgrade`, `query`, conflict
   detection, version pinning (`STINKPKG.PIN`), `STINKPKG.LCK`
   lockfile, configurable repo URL via `STINKPKG.CONF`
