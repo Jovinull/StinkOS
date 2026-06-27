@@ -838,11 +838,28 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)tcp_get_state((int)r->ebx);
 		break;
 	case 36: {                                 /* SYS_DNS_REQUEST: ebx=name (string) */
+		/* dns_resolve walks the name with no length bound, so we have
+		 * to copy it into a kernel buffer first -- otherwise a missing
+		 * NUL in the user buffer would let the resolver read past the
+		 * mapped region into kernel memory and either crash or leak
+		 * bytes via the DNS query payload. The on-wire qname format
+		 * caps single labels at 63 bytes; 64 leaves room for one
+		 * terminator and matches DNS_CACHE_NAME. */
+		char kname[64];
 		if (!paging_user_range_ok(r->ebx, 1)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		r->eax = (unsigned int)dns_resolve((const char *)r->ebx);
+		const char *un = (const char *)r->ebx;
+		unsigned int n = 0;
+		while (n < sizeof(kname) - 1 &&
+		       paging_user_range_ok((unsigned int)(un + n), 1) &&
+		       un[n] != '\0') {
+			kname[n] = un[n];
+			n++;
+		}
+		kname[n] = '\0';
+		r->eax = (unsigned int)dns_resolve(kname);
 		break;
 	}
 	case 37: {                                 /* SYS_DNS_POLL: ebx=*ipv4 -> 1 if ready */
