@@ -379,7 +379,44 @@ run-installed: target.bin
 test-headless: all
 	@python3 tools/test-headless.py
 
+# Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
+# clang-tidy and scan-build are installed -- skips missing tools quietly so
+# the target stays useful in any environment, including CI. Vendored sources
+# under apps/doom/ are excluded (they're third-party and famously not
+# strict-alias clean; warnings there would drown out real findings).
+AUDIT_SRCS = kernel boot lib $(filter-out apps/doom apps/doom-shims, $(wildcard apps))
+audit:
+	@echo "=== StinkOS static-analysis sweep ==="
+	@if command -v cppcheck >/dev/null 2>&1; then \
+	    echo "--- cppcheck ---"; \
+	    cppcheck --quiet --enable=warning,style,performance,portability \
+	             --inline-suppr --suppress=unusedFunction \
+	             -I kernel -I kernel/arch -I kernel/drivers/video \
+	             -I kernel/drivers/input -I kernel/drivers/storage \
+	             -I kernel/drivers/audio -I kernel/drivers/net \
+	             -I kernel/drivers/misc -I kernel/fs -I kernel/sys \
+	             -I kernel/ui -I lib -I apps \
+	             $(AUDIT_SRCS); \
+	  else \
+	    echo "--- cppcheck: not installed, skipping ---"; \
+	  fi
+	@if command -v clang-tidy >/dev/null 2>&1; then \
+	    echo "--- clang-tidy ---"; \
+	    find kernel lib -name '*.c' -print0 | \
+	        xargs -0 -n 8 clang-tidy --quiet \
+	            -checks='bugprone-*,clang-analyzer-*,-clang-analyzer-security.insecureAPI.*' \
+	            -- -m32 -ffreestanding -nostdinc \
+	               -Ikernel -Ikernel/arch -Ikernel/sys \
+	               -Ikernel/drivers/video -Ikernel/drivers/input \
+	               -Ikernel/drivers/storage -Ikernel/drivers/audio \
+	               -Ikernel/drivers/net -Ikernel/drivers/misc \
+	               -Ikernel/fs -Ikernel/ui -Ilib 2>/dev/null || true; \
+	  else \
+	    echo "--- clang-tidy: not installed, skipping ---"; \
+	  fi
+	@echo "=== audit done ==="
+
 clean:
 	rm -rf $(BUILD) os.bin
 
-.PHONY: all hex dall run run-install run-installed test-headless clean
+.PHONY: all hex dall run run-install run-installed test-headless audit clean
