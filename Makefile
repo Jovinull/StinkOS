@@ -478,12 +478,16 @@ $(TEST_BIN)/test_mixer: $(TEST_DIR)/test_mixer.c | $(TEST_BIN)
 $(TEST_BIN)/test_ipv4_checksum: $(TEST_DIR)/test_ipv4_checksum.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_ipv4_checksum.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum
+$(TEST_BIN)/test_tcp_options: $(TEST_DIR)/test_tcp_options.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_tcp_options.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
 	$(TEST_BIN)/test_mixer
 	$(TEST_BIN)/test_ipv4_checksum
+	$(TEST_BIN)/test_tcp_options
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
