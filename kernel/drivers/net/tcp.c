@@ -901,6 +901,20 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	t->last_activity_ticks  = pit_ticks();
 	t->last_keepalive_ticks = 0;
 
+	/* RFC 5961 §4: a SYN arriving on an already-synchronized connection
+	 * is either a stray retransmit (peer crashed and re-opened the same
+	 * port pair) or an attacker probing. Reply with a "challenge ACK"
+	 * carrying our current snd_nxt/rcv_nxt so the legitimate peer's
+	 * stack sees that the original connection is still up; drop the SYN
+	 * itself so the state machine isn't perturbed. LISTEN / SYN_SENT /
+	 * SYN_RECEIVED are pre-handshake and handled by the normal switch
+	 * below -- this rule is only for synchronized states. */
+	if ((h->flags & TCP_SYN) && t->state != TCP_LISTEN &&
+	    t->state != TCP_SYN_SENT && t->state != TCP_SYN_RECEIVED) {
+		tcp_emit(t, TCP_ACK, (void *)0, 0);
+		return;
+	}
+
 	switch (t->state) {
 	case TCP_LISTEN:
 		/* Only a bare SYN advances a LISTEN socket; everything else gets
