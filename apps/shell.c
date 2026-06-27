@@ -381,7 +381,7 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
-			term_print("clock  shutdown  reboot  arp", TERM_FG);
+			term_print("clock  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -459,6 +459,26 @@ void main(void)
 					pid = pid * 10 + (rest[j] - '0');
 				if (sys_resume(pid) == 0) tprintf("resumed pid %d", pid);
 				else                       tprintf("resume pid %d failed", pid);
+			}
+		} else if (strcmp(line, "dns") == 0) {
+			if (rest[0] == '\0') {
+				term_print("usage: dns <hostname>", TERM_ERR);
+			} else if (sys_dns_request(rest) != 0) {
+				term_print("dns request failed (no link?)", TERM_ERR);
+			} else {
+				unsigned int ip = 0;
+				for (int t = 0; t < 200; t++) {
+					if (sys_dns_poll(&ip)) break;
+					sys_net_poll();
+					sys_sleep_ms(50);
+				}
+				if (ip == 0) {
+					term_print("dns timeout", TERM_ERR);
+				} else {
+					tprintf("%s -> %u.%u.%u.%u", rest,
+					        ip & 0xFF, (ip >> 8) & 0xFF,
+					        (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
+				}
 			}
 		} else if (strcmp(line, "arp") == 0 && rest[0] == '-' && rest[1] == 'd') {
 			sys_arp_flush();
