@@ -78,8 +78,9 @@ static int output_running;
 
 struct mix_channel {
 	const unsigned char *src;
-	unsigned int         pos;
-	unsigned int         length;
+	unsigned int         pos;           /* Q16.16 fixed-point index */
+	unsigned int         length;        /* in source samples (integer) */
+	unsigned int         step;          /* Q16.16 step per output sample */
 	int                  volume;        /* 0..256 */
 	int                  active;
 	int                  owner_pid;     /* PID that called audio_mix_play */
@@ -190,10 +191,11 @@ unsigned int audio_dsp_version(void)
 }
 
 /* Fills [offset, offset+n) of audio_buffer with mixed samples from every
- * active mix channel. Walks linearly; for each output sample, sums each
- * channel's source byte (recentred to signed -128..127, scaled by volume/256)
- * and saturates back to unsigned 8-bit. Channels that hit the end of their
- * source deactivate themselves -- no resource leaks. */
+ * active mix channel. Per-channel pos/step are Q16.16 fixed-point indices
+ * into the source so each channel plays at its own native rate -- the
+ * step is (src_rate << 16) / output_rate, computed once at play time.
+ * Nearest-sample reads keep the mixer cheap; a real cubic interpolator
+ * would clean up the artefacts when ratios are far from unity. */
 static void mixer_fill_window(unsigned int offset, unsigned int n)
 {
 	unsigned char *out = (unsigned char *)audio_buffer + offset;
@@ -204,19 +206,15 @@ static void mixer_fill_window(unsigned int offset, unsigned int n)
 			struct mix_channel *ch = &channels[c];
 			if (!ch->active)
 				continue;
-			if (ch->pos >= ch->length) {
+			unsigned int idx = ch->pos >> 16;
+			if (idx >= ch->length) {
 				ch->active = 0;
 				continue;
 			}
-			/* Recenter unsigned 0..255 to signed -128..127, scale by
-			 * 0..256 volume, drop the 8 fractional bits. */
-			int s = (int)ch->src[ch->pos] - 128;
+			int s = (int)ch->src[idx] - 128;
 			sum += (s * ch->volume) >> 8;
-			ch->pos++;
+			ch->pos += ch->step;
 		}
-		/* Apply master volume scaling before saturation so a 0 master
-		 * always renders silence (0x80 mid-rail) regardless of channel
-		 * activity. */
 		sum = (sum * master_volume) >> 8;
 		if (sum >  127) sum =  127;
 		if (sum < -128) sum = -128;
@@ -254,6 +252,7 @@ int audio_mix_play(const unsigned char *samples, unsigned int length, int volume
 			channels[i].src       = samples;
 			channels[i].pos       = 0;
 			channels[i].length    = length;
+			channels[i].step      = 1u << 16;   /* unity (output_rate) */
 			channels[i].volume    = volume;
 			channels[i].active    = 1;
 			channels[i].owner_pid = pid;
@@ -261,6 +260,23 @@ int audio_mix_play(const unsigned char *samples, unsigned int length, int volume
 		}
 	}
 	return -1;
+}
+
+int audio_mix_play_rate(const unsigned char *samples, unsigned int length,
+                        int volume, unsigned int src_rate)
+{
+	int h = audio_mix_play(samples, length, volume);
+	if (h < 0)
+		return -1;
+	/* Q16.16 step = src_rate / output_rate. Clamp to a safe range so a
+	 * pathological caller cannot overflow the index in a few samples. */
+	if (src_rate == 0)
+		src_rate = AUDIO_RATE_HZ;
+	unsigned int step = ((unsigned long long)src_rate << 16) / AUDIO_RATE_HZ;
+	if (step == 0) step = 1;
+	if (step > (16u << 16)) step = (16u << 16);   /* 16x speed ceiling */
+	channels[h].step = step;
+	return h;
 }
 
 void audio_mix_stop(int handle)

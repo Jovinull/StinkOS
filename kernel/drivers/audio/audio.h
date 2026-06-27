@@ -54,6 +54,13 @@ unsigned int   audio_sample_rate(void);
  * called. audio_mix_silence_all clears every channel without touching the
  * DSP and is what menu_exit uses before unmapping the app's address space. */
 int  audio_mix_play(const unsigned char *samples, unsigned int length, int volume);
+
+/* Play `samples` at `src_rate` (Hz). Computes a Q16.16 step into the source
+ * so the kernel mixer resamples on the fly via nearest neighbour. Pass 0
+ * for src_rate to mean "same as output", which is what audio_mix_play
+ * implicitly assumes. Returns the channel handle or -1 if no slot is free. */
+int  audio_mix_play_rate(const unsigned char *samples, unsigned int length,
+                         int volume, unsigned int src_rate);
 void audio_mix_stop(int handle);
 void audio_mix_set_volume(int handle, int volume);
 void audio_mix_silence_all(void);
