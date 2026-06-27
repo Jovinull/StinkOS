@@ -969,6 +969,13 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			t->state          = TCP_ESTABLISHED;
 			t->last_seg_ticks = 0;      /* our SYN-ACK has been acked */
 			t->retries        = 0;
+		} else if ((h->flags & TCP_ACK) && seg_ack != t->snd_nxt) {
+			/* RFC 793 §3.9: an ACK in SYN_RECEIVED whose ack number
+			 * doesn't match snd_nxt is bogus -- the peer never sent
+			 * a SYN-ACK that would advance our snd_nxt to that value.
+			 * Reset so a misbehaving peer doesn't keep sending stale
+			 * acks while we wait forever for the right one. */
+			tcp_emit_rst(src_ip, h);
 		}
 		break;
 
