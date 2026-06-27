@@ -828,9 +828,24 @@ void syscall_dispatch(struct regs *r)
 		audio_mix_set_volume((int)r->ebx, (int)r->ecx);
 		r->eax = 0;
 		break;
-	case 31:                                   /* SYS_SOCK_CONNECT: ebx=ipv4 ecx=port -> handle */
-		r->eax = (unsigned int)tcp_connect((ipv4_t)r->ebx, (unsigned short)r->ecx);
+	case 31: {                                 /* SYS_SOCK_CONNECT: ebx=ipv4 ecx=port -> handle */
+		/* Reject destinations that don't represent a valid TCP peer:
+		 * 0.0.0.0 (unspecified), 255.255.255.255 (broadcast), 127/8
+		 * (we have no loopback driver), and 224.0.0.0/4 (multicast).
+		 * Letting these through would either get the TCB stuck in
+		 * SYN_SENT forever or splash SYNs onto the LAN broadcast group. */
+		ipv4_t dst = (ipv4_t)r->ebx;
+		unsigned short dport = (unsigned short)r->ecx;
+		if (dst == 0 || dst == 0xFFFFFFFFu ||
+		    (dst & 0x000000FFu) == 0x0000007Fu ||
+		    (dst & 0x000000F0u) == 0x000000E0u ||
+		    dport == 0) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)tcp_connect(dst, dport);
 		break;
+	}
 	case 32: {                                 /* SYS_SOCK_SEND: ebx=h ecx=buf edx=len */
 		if (!paging_user_range_ok(r->ecx, r->edx)) {
 			r->eax = (unsigned int)-1;
