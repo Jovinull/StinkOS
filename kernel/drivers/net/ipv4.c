@@ -216,6 +216,21 @@ void ip_handle(const void *payload, unsigned int len)
 	if (h->dst_ip != local && h->dst_ip != 0xFFFFFFFFu && local != 0)
 		return;
 
+	/* RFC 1812 §5.3.7 / "Martian" address filter: drop packets whose
+	 * source claims to be our own address (anti-spoof so an attacker
+	 * cannot loop something back into our state machines), the limited
+	 * broadcast, the loopback range (127/8), or class-D multicast as a
+	 * source. We have no use for any of those at the host layer and
+	 * accepting them lets a hostile peer pretend to be us. */
+	if (local != 0 && h->src_ip == local)
+		return;
+	if (h->src_ip == 0xFFFFFFFFu)
+		return;
+	if ((h->src_ip & 0x000000FFu) == 0x0000007Fu)
+		return;
+	if ((h->src_ip & 0x000000F0u) == 0x000000E0u)
+		return;
+
 	/* Verify the header checksum. */
 	if (ipv4_checksum(h, ihl) != 0)
 		return;
