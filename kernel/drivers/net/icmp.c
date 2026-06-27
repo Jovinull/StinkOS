@@ -83,3 +83,31 @@ void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 
 	ipv4_send(src_ip, IP_PROTO_ICMP, scratch, len);
 }
+
+/* RFC 792 "Destination Unreachable": 8-byte header (type, code, checksum,
+ * unused 32-bit) + the original IP header + first 8 bytes of its payload.
+ * Most TCP/UDP stacks use those bytes to route the rejection back to the
+ * right socket. */
+int icmp_send_unreachable(ipv4_t dst, unsigned char code,
+                          const void *orig_ip_packet, unsigned int orig_len)
+{
+	unsigned int echo = orig_len;
+	if (echo > 28u) echo = 28u;            /* 20-byte IP hdr + 8 payload bytes */
+	unsigned int total = 8u + echo;
+	if (total > sizeof(scratch))
+		return -1;
+
+	scratch[0] = ICMP_TYPE_DEST_UNREACH;
+	scratch[1] = code;
+	scratch[2] = 0; scratch[3] = 0;        /* checksum slot */
+	scratch[4] = 0; scratch[5] = 0;        /* unused */
+	scratch[6] = 0; scratch[7] = 0;
+	const unsigned char *o = (const unsigned char *)orig_ip_packet;
+	for (unsigned int i = 0; i < echo; i++)
+		scratch[8 + i] = o[i];
+
+	unsigned short ck = ipv4_checksum(scratch, total);
+	scratch[2] = (unsigned char)(ck & 0xFF);
+	scratch[3] = (unsigned char)((ck >> 8) & 0xFF);
+	return ipv4_send(dst, IP_PROTO_ICMP, scratch, total);
+}

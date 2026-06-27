@@ -5,6 +5,7 @@
 #include "udp.h"
 #include "ipv4.h"
 #include "ethernet.h"
+#include "icmp.h"           /* send port-unreachable for unbound dst ports */
 
 #define UDP_MAX_HANDLERS 8
 
@@ -83,4 +84,34 @@ void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			return;
 		}
 	}
+
+	/* No handler matched. Synthesise the minimum IP header + first 8 UDP
+	 * bytes that RFC 792 wants embedded in the ICMP body, then bounce a
+	 * port-unreachable so the peer learns to stop sending. */
+	unsigned char embed[28];
+	embed[0] = 0x45;                      /* IPv4, IHL=5 */
+	embed[1] = 0;                         /* TOS */
+	unsigned short tl = (unsigned short)(20u + (total < 8u ? total : 8u));
+	embed[2] = (unsigned char)((tl >> 8) & 0xFF);
+	embed[3] = (unsigned char)(tl & 0xFF);
+	embed[4] = 0; embed[5] = 0;           /* id */
+	embed[6] = 0; embed[7] = 0;           /* flags + fragoff */
+	embed[8] = IPV4_DEFAULT_TTL;
+	embed[9] = IP_PROTO_UDP;
+	embed[10] = 0; embed[11] = 0;         /* checksum -- peers do not verify */
+	ipv4_t local = net_get_local_ip();
+	embed[12] = (unsigned char)(src_ip      & 0xFF);
+	embed[13] = (unsigned char)((src_ip >>  8) & 0xFF);
+	embed[14] = (unsigned char)((src_ip >> 16) & 0xFF);
+	embed[15] = (unsigned char)((src_ip >> 24) & 0xFF);
+	embed[16] = (unsigned char)(local      & 0xFF);
+	embed[17] = (unsigned char)((local >>  8) & 0xFF);
+	embed[18] = (unsigned char)((local >> 16) & 0xFF);
+	embed[19] = (unsigned char)((local >> 24) & 0xFF);
+	unsigned int copy = total < 8u ? total : 8u;
+	const unsigned char *p = (const unsigned char *)payload;
+	for (unsigned int i = 0; i < copy; i++)
+		embed[20 + i] = p[i];
+
+	icmp_send_unreachable(src_ip, ICMP_CODE_PORT_UNREACH, embed, 20u + copy);
 }

@@ -5,8 +5,15 @@
 
 #include "net.h"
 
-#define ICMP_TYPE_ECHO_REPLY   0
-#define ICMP_TYPE_ECHO_REQUEST 8
+#define ICMP_TYPE_ECHO_REPLY     0
+#define ICMP_TYPE_DEST_UNREACH   3
+#define ICMP_TYPE_ECHO_REQUEST   8
+
+/* RFC 792 codes for type=3 (Destination Unreachable). */
+#define ICMP_CODE_NET_UNREACH    0
+#define ICMP_CODE_HOST_UNREACH   1
+#define ICMP_CODE_PROTO_UNREACH  2
+#define ICMP_CODE_PORT_UNREACH   3
 
 struct icmp_hdr {
 	unsigned char  type;
@@ -31,5 +38,13 @@ void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
  * Single outstanding ping at a time (the stack is single-threaded). */
 void icmp_ping_arm(unsigned short identifier, unsigned short sequence);
 int  icmp_ping_replied(void);
+
+/* Send an ICMP type=3 (Destination Unreachable) reply. RFC 792 mandates
+ * embedding the offending packet's IP header + first 8 bytes of payload
+ * inside the ICMP body so the original sender can route the rejection back
+ * to the right socket. `code` picks the sub-reason (PORT_UNREACH for
+ * closed UDP ports, PROTO_UNREACH for unsupported protocols, ...). */
+int  icmp_send_unreachable(ipv4_t dst, unsigned char code,
+                           const void *orig_ip_packet, unsigned int orig_len);
 
 #endif
