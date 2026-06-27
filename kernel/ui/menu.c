@@ -339,6 +339,22 @@ void menu_run(void)
 
 	if (fs_init() != 0)
 		serial_write("menu: fs init failed (disk read error)\n");
+
+	/* First-boot hook: the installer leaves FIRSTBOOT.RUN on the target
+	 * before cloning, then strips it from the source after. The presence
+	 * of that file on this disk means we are the freshly installed copy
+	 * and have never run before. Lay down sane defaults (a generic
+	 * hostname, anything else first-boot-only should plug in here) and
+	 * delete the marker so subsequent boots take the fast path. */
+	if (fs_file_size("FIRSTBOOT.RUN") >= 0) {
+		serial_write("first-boot: initialising fresh install\n");
+		const char *seed = "hostname=stinkos-fresh\n";
+		unsigned int n = 0;
+		while (seed[n]) n++;
+		fs_file_write("STINK.CONF", seed, n);
+		fs_file_delete("FIRSTBOOT.RUN");
+	}
+
 	load_app_list();
 	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
 	redraw();

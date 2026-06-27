@@ -135,6 +135,18 @@ void main(void)
 	draw_status(160, "source:", src_model, COLOR_DIM);
 	draw_status(180, "target:", dst_model, COLOR_DIM);
 
+	/* Drop a first-boot marker into the source StinkFS BEFORE the clone so
+	 * the target inherits it byte-for-byte. The kernel deletes the marker
+	 * on the target's first boot after running the one-shot init path
+	 * (regenerate STINK.CONF with a default hostname, etc.). We remove it
+	 * from the source after the clone so the install media itself does not
+	 * re-run first-boot on every boot. */
+	const char *marker = "v0.4";
+	if (sys_fwrite("FIRSTBOOT.RUN", marker, 4) != 0) {
+		draw_status(420, "could not seed first-boot marker", "", COLOR_ERR);
+		wait_key(0); sys_exit();
+	}
+
 	unsigned int total = src_sectors;
 	unsigned int copied = 0;
 	const unsigned int chunk = 256;             /* 128 KiB per syscall */
@@ -151,6 +163,9 @@ void main(void)
 		copied += (unsigned int)did;
 		draw_progress(copied, total);
 	}
+
+	/* Strip the marker from the source so the install media stays idempotent. */
+	sys_fdelete("FIRSTBOOT.RUN");
 
 	draw_chrome("step 3/3: complete");
 	draw_status(180, "result:", "INSTALL SUCCEEDED", COLOR_OK);
