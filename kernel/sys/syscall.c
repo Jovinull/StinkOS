@@ -220,6 +220,16 @@ void app_return(void)
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
 void syscall_dispatch(struct regs *r)
 {
+	/* Re-enable interrupts immediately so long-running syscalls (file I/O,
+	 * network polls, mixer-aware sleeps) no longer block the PIT for their
+	 * whole duration. The CPU cleared IF on the interrupt gate entry; the
+	 * sti here is what unblocks preemption inside this syscall. Args are
+	 * already snapshotted into struct regs on the kernel stack, so the
+	 * scheduler may freely context-switch us out and back without losing
+	 * any state. iret restores the caller's EFLAGS (typically IF=1 for
+	 * ring-3 callers), so the on-return state is unchanged. */
+	__asm__ volatile ("sti");
+
 	switch (r->eax) {
 	case 1:                                    /* SYS_LOG: ebx = string */
 		serial_write("ring3: ");
