@@ -137,7 +137,8 @@ static void show_menu(void)
 	sys_drawtext(140, 170, "u  update repo index",             COLOR_TEXT);
 	sys_drawtext(140, 190, "s  search repo for a name",        COLOR_TEXT);
 	sys_drawtext(140, 210, "i  install a package by name",     COLOR_TEXT);
-	sys_drawtext(140, 215, "I  install without resolving deps", COLOR_DIM);
+	sys_drawtext(160, 215, "I  install without resolving deps",  COLOR_DIM);
+	sys_drawtext(160, 222, "R  replay STINKPKG.LCK lockfile",    COLOR_DIM);
 	sys_drawtext(140, 230, "g  upgrade installed packages",    COLOR_TEXT);
 	sys_drawtext(140, 250, "r  remove an installed package",   COLOR_TEXT);
 	sys_drawtext(140, 270, "y  inspect a .stinkpkg in StinkFS",COLOR_TEXT);
@@ -695,6 +696,63 @@ static void cmd_install(void)
 	wait_any_key(310, "press any key.", COLOR_DIM);
 }
 
+/* Re-install every entry of STINKPKG.LCK that isn't already in STINKDB.
+ * Each lockfile line is "<name> <version> <sha256>"; we ignore the SHA
+ * (the install path re-verifies against the current repo index) and the
+ * version (we install whatever the index publishes today). */
+static void cmd_replay(void)
+{
+	draw_header("replay (re-install from lockfile)");
+
+	char lock[2048];
+	int  n = sys_fread("STINKPKG.LCK", lock, sizeof(lock) - 1);
+	if (n <= 0) {
+		sys_drawtext(140, 150, "no STINKPKG.LCK found.", COLOR_ERR);
+		wait_any_key(180, "press any key.", COLOR_DIM);
+		return;
+	}
+	lock[n] = '\0';
+
+	int y = 150;
+	int installed = 0;
+	int skipped   = 0;
+	int ls        = 0;
+	for (int i = 0; i <= n; i++) {
+		if (lock[i] != '\n' && lock[i] != '\0')
+			continue;
+		lock[i] = '\0';
+		if (i > ls) {
+			char name[32];
+			int j = ls;
+			int k = 0;
+			while (j < i && lock[j] != ' ' && k + 1 < (int)sizeof(name))
+				name[k++] = lock[j++];
+			name[k] = '\0';
+			if (name[0]) {
+				if (pkg_installed(name)) {
+					skipped++;
+				} else {
+					sys_drawtext(140, y, name, COLOR_TEXT);
+					if (install_pkg(name, 0, y + 20, 0, 0) == 0)
+						installed++;
+					y += 60;
+					if (y > 600) break;
+				}
+			}
+		}
+		ls = i + 1;
+	}
+
+	char num[16];
+	uitoa((unsigned int)installed, 10, num);
+	sys_drawtext(140, y, "installed:", COLOR_OK);
+	sys_drawtext(280, y, num, COLOR_TEXT);
+	uitoa((unsigned int)skipped, 10, num);
+	sys_drawtext(140, y + 18, "already present:", COLOR_DIM);
+	sys_drawtext(320, y + 18, num, COLOR_DIM);
+	wait_any_key(y + 50, "press any key.", COLOR_DIM);
+}
+
 static void cmd_install_no_deps(void)
 {
 	draw_header("install (no deps)");
@@ -1024,6 +1082,7 @@ void main(void)
 		case 's': cmd_search();  break;
 		case 'i': cmd_install();        break;
 		case 'I': cmd_install_no_deps(); break;
+		case 'R': cmd_replay();         break;
 		case 'g': cmd_upgrade();        break;
 		case 'y': cmd_query();          break;
 		case 'r': cmd_remove();  break;
