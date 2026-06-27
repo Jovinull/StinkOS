@@ -413,6 +413,18 @@ void syscall_dispatch(struct regs *r)
 	case 76:                                   /* SYS_SET_KEYMAP: ebx=layout(0=US,1=BR) -> previous */
 		r->eax = (unsigned int)keyboard_set_layout((int)r->ebx);
 		break;
+	case 77:                                   /* SYS_RTC_SET_ALARM: ebx=packed h<<16 | m<<8 | s -> 0/-1 */
+		r->eax = (unsigned int)rtc_set_alarm((r->ebx >> 16) & 0xFFu,
+		                                     (r->ebx >>  8) & 0xFFu,
+		                                      r->ebx        & 0xFFu);
+		break;
+	case 78:                                   /* SYS_RTC_CLEAR_ALARM -> 0 */
+		rtc_clear_alarm();
+		r->eax = 0;
+		break;
+	case 79:                                   /* SYS_RTC_ALARM_FIRED -> 1 if fired (and clears) else 0 */
+		r->eax = (unsigned int)rtc_alarm_fired();
+		break;
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */

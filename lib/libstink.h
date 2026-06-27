@@ -247,6 +247,23 @@ static inline int sys_arp_flush(void)            { return __syscall(75, 0, 0, 0)
 #define SYS_KEYMAP_BR  1
 static inline int sys_set_keymap(int layout)     { return __syscall(76, layout, 0, 0); }
 
+/* RTC alarm. set: arms a one-shot IRQ8 at the next occurrence of
+ * HH:MM:SS (00-23, 00-59, 00-59); returns -1 on out-of-range. clear:
+ * disarms. fired: returns 1 (and clears) if the alarm fired since the
+ * last call, else 0. Without ACPI sleep these don't wake the machine
+ * from low power, but they do let userland act on a wall-clock event
+ * without busy-polling rtc_read(). */
+static inline int sys_rtc_set_alarm(int h, int m, int s)
+{
+	return __syscall(77,
+	    (((unsigned int)(h & 0xFF)) << 16) |
+	    (((unsigned int)(m & 0xFF)) <<  8) |
+	     ((unsigned int)(s & 0xFF)),
+	    0, 0);
+}
+static inline int sys_rtc_clear_alarm(void)      { return __syscall(78, 0, 0, 0); }
+static inline int sys_rtc_alarm_fired(void)      { return __syscall(79, 0, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).

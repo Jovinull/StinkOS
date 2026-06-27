@@ -176,6 +176,8 @@ void irq_handler(struct regs *r)
 		keyboard_handle();
 	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
 		audio_handle_irq();
+	} else if (r->int_no == 40) {              /* IRQ8: CMOS RTC alarm */
+		rtc_handle_irq();
 	} else if (r->int_no == 44) {              /* IRQ12: PS/2 mouse */
 		mouse_handle(inb(0x60));
 	}
