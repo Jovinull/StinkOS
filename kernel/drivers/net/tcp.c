@@ -47,6 +47,14 @@
 #define TCP_KEEPALIVE_IDLE      7200       /* 72 s */
 #define TCP_KEEPALIVE_INTERVAL  3000       /* 30 s between probes */
 
+/* Zero-window persist probe (RFC 1122 §4.2.2.17). When the peer
+ * advertises a zero receive window, the sender stops transmitting and
+ * arms a "persist" timer. On expiry it sends a single-byte probe to
+ * elicit a fresh window update. The interval starts at RTO and is
+ * capped at TCP_PERSIST_MAX so a long stall does not pause forever. */
+#define TCP_PERSIST_INITIAL     100        /* 1 s    */
+#define TCP_PERSIST_MAX         6000       /* 60 s   */
+
 struct tcb {
 	enum tcp_state state;
 
@@ -115,6 +123,16 @@ struct tcb {
 		unsigned char buf[TCP_MSS];
 	} ooo[2];
 
+	/* Zero-window persist (RFC 1122 §4.2.2.17). When the peer advertises
+	 * snd_wnd == 0 and we still have tx-pending bytes, persist_armed is
+	 * set; tcp_tick then sends a 1-byte probe every persist_interval
+	 * ticks (doubled on each empty reply, capped at TCP_PERSIST_MAX) so
+	 * a lost "window update" never stalls the connection forever. The
+	 * timer clears when peer announces a non-zero window. */
+	unsigned char   persist_armed;
+	unsigned int    persist_last_tick;
+	unsigned int    persist_interval;
+
 	/* Peer-side SACK scoreboard (RFC 2018, sender-side use): the lowest
 	 * left edge of any SACK block in the most recent ACK. Zero means the
 	 * peer reported no SACKed ranges (or none ahead of snd_una), so the
@@ -176,6 +194,9 @@ static int tcb_alloc(void)
 			t->last_keepalive_ticks = 0;
 			t->dup_acks             = 0;
 			t->peer_sack_lo         = 0;
+			t->persist_armed        = 0;
+			t->persist_last_tick    = 0;
+			t->persist_interval     = TCP_PERSIST_INITIAL;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -393,7 +414,20 @@ static void tcp_drain_tx(struct tcb *t)
 		if (avail == 0)
 			return;
 
-		unsigned int window = (t->snd_wnd != 0) ? t->snd_wnd : avail;
+		/* Strict peer flow control: a peer that advertised 0 means
+		 * "do not send". Arm the persist timer so tcp_tick can poke
+		 * the peer with a 1-byte probe until they reopen the window;
+		 * dropping this check (the old `snd_wnd ? : avail` fallback)
+		 * would blast through and overrun the peer's receive buffer. */
+		if (t->snd_wnd == 0 && in_flight == 0) {
+			if (!t->persist_armed) {
+				t->persist_armed     = 1;
+				t->persist_last_tick = pit_ticks();
+				t->persist_interval  = TCP_PERSIST_INITIAL;
+			}
+			return;
+		}
+		unsigned int window = t->snd_wnd;
 		unsigned int budget = (t->cwnd > in_flight) ? (t->cwnd - in_flight) : 0;
 		if (budget == 0)
 			return;
@@ -874,6 +908,10 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 				/* Trim acked bytes off the head of tx_buf. */
 				t->tx_head = (t->tx_head + acked) % TCP_BUFFER_SIZE;
 				t->snd_wnd = tcp_apply_wscale(t, h);
+				/* Persist probe goal achieved: peer reopened the
+				 * window, drain can resume. */
+				if (t->snd_wnd != 0)
+					t->persist_armed = 0;
 
 				/* Slow start vs. congestion avoidance. cwnd<ssthresh:
 				 * grow by `acked` (effectively doubles per RTT once the
@@ -1024,6 +1062,23 @@ void tcp_tick(void)
 					t->last_keepalive_ticks = now;
 				}
 			}
+		}
+
+		/* Zero-window persist probe: if peer ever closed their window,
+		 * tcp_drain_tx armed persist_armed. Wake up after the current
+		 * persist interval and send a 1-byte probe carrying the next
+		 * unsent byte. Peer either acks with a fresh window (clearing
+		 * persist) or replies with another zero-window ACK -- either
+		 * way the connection makes forward progress instead of stalling
+		 * indefinitely. Interval doubles per probe up to TCP_PERSIST_MAX. */
+		if (t->persist_armed && tx_pending(t) > 0 &&
+		    (now - t->persist_last_tick) >= t->persist_interval) {
+			unsigned char probe = t->tx_buf[t->tx_head];
+			tcp_emit(t, TCP_ACK, &probe, 1);
+			t->persist_last_tick = now;
+			t->persist_interval *= 2u;
+			if (t->persist_interval > TCP_PERSIST_MAX)
+				t->persist_interval = TCP_PERSIST_MAX;
 		}
 
 		if (t->last_seg_ticks == 0)
