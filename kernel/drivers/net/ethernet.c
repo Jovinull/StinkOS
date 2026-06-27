@@ -39,7 +39,12 @@ int eth_send(const unsigned char dst_mac[ETH_ADDR_LEN],
 
 void eth_handle_frame(const void *frame, unsigned int len)
 {
-	if (len < ETH_HDR_LEN)
+	/* Drop frames that are too short to carry a header OR longer than the
+	 * standard MTU. The NIC layer already caps RX, but the upper-layer
+	 * dispatch must not trust that contract -- a single oversized frame
+	 * slipping through would let ARP/IPv4 parse past their own length
+	 * fields. Jumbo support would relax the upper bound; we do not. */
+	if (len < ETH_HDR_LEN || len > ETH_MAX_FRAME)
 		return;
 
 	const struct eth_hdr  *h   = (const struct eth_hdr *)frame;
