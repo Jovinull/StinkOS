@@ -5,6 +5,7 @@
 #include "ipv4.h"
 #include "arp.h"
 #include "ethernet.h"
+#include "dhcp.h"           /* mask + router lookup for routing decisions */
 
 /* Forward declarations for upper-layer dispatchers. icmp / udp / tcp .c
  * files override these temporary stubs in net.c when they land. */
@@ -44,11 +45,25 @@ int ipv4_send(ipv4_t dst, unsigned char protocol,
 		 * bootstrap traffic rely on this path. */
 		for (int i = 0; i < 6; i++)
 			dst_mac[i] = 0xFF;
-	} else if (!arp_lookup(dst, dst_mac)) {
-		/* No L2 binding yet; kick off resolution and let the caller
-		 * retry on a future tick. ICMP/UDP packets are fire-and-forget. */
-		arp_send_request(dst);
-		return -1;
+	} else {
+		/* Routing decision: if dst is off our subnet and DHCP gave us a
+		 * default gateway, forward through that gateway. The IP header
+		 * still carries the original dst_ip -- only the layer-2 ARP
+		 * lookup is redirected to the router's MAC. */
+		ipv4_t local  = net_get_local_ip();
+		ipv4_t mask   = dhcp_get_subnet_mask();
+		ipv4_t router = dhcp_get_router();
+		ipv4_t arp_target = dst;
+		if (mask != 0 && router != 0 &&
+		    ((local & mask) != (dst & mask))) {
+			arp_target = router;
+		}
+		if (!arp_lookup(arp_target, dst_mac)) {
+			/* No L2 binding yet; kick off resolution and let the
+			 * caller retry on a future tick. */
+			arp_send_request(arp_target);
+			return -1;
+		}
 	}
 
 	unsigned char  packet[ETH_MAX_PAYLOAD];
