@@ -424,7 +424,17 @@ void main(void)
 		} else if (strcmp(line, "echo") == 0) {
 			term_print(rest, TERM_FG);
 		} else if (strcmp(line, "uptime") == 0) {
-			tprintf("%u ticks since boot", sys_ticks());
+			/* PIT runs at 100 Hz, so each tick = 10 ms. Convert to h:m:s
+			 * for readability; raw tick count kept on the same line for
+			 * sub-second cases (the only place it matters). */
+			unsigned int t  = sys_ticks();
+			unsigned int s  = t / 100u;
+			unsigned int ms = (t % 100u) * 10u;
+			unsigned int h  = s / 3600u;
+			unsigned int m  = (s % 3600u) / 60u;
+			unsigned int rs = s % 60u;
+			tprintf("%uh %um %u.%03us (%u ticks)",
+			        h, m, rs, ms, t);
 		} else if (strcmp(line, "netstat") == 0) {
 			static const char *state_name[] = {
 				"CLOSED", "LISTEN", "SYN_SENT", "SYN_RCVD",
