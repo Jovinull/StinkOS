@@ -44,6 +44,13 @@ int  audio_start_output(void);
  * not supported without a full audio_stop_output + re-init dance. */
 int  audio_start_output_16bit(void);
 
+/* Stereo signed-16 output -- DMA channel 5 + DSP mode 0x30. Each mono
+ * source is duplicated into both L and R channels until per-channel
+ * panning lands. Same wall-time as the mono variants at the same
+ * sample rate; the DMA ring just holds half as many frames because
+ * each one is 4 bytes (vs 2 for mono s16, or 1 for u8). */
+int  audio_start_output_stereo(void);
+
 /* Pause the DSP + cut the speaker. The DMA channel remains armed so a
  * subsequent audio_start_output picks back up cleanly. */
 void audio_stop_output(void);

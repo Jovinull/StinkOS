@@ -361,10 +361,47 @@ void audio_mix_silence_pid(int pid)
 			channels[i].active = 0;
 }
 
-/* Tracks which output mode is active so audio_handle_irq knows whether
- * the buffer holds u8 samples (mixer_fill_window) or interleaved s16
- * samples (mixer_fill_window_s16). 0 = 8-bit (legacy default), 1 = 16. */
-static int output_is_16bit;
+/* Stereo s16 mixer. Sources are mono u8 -- the same dynamic-range
+ * expansion as mixer_fill_window_s16, then the result is written to
+ * BOTH channels of each interleaved L/R frame. Future per-channel
+ * panning would multiply L and R by separate gains here; today they
+ * just mirror. Buffer holds frames * 4 bytes (2 channels * 2 bytes). */
+static void mixer_fill_window_s16_stereo(unsigned char *dst, unsigned int frames)
+{
+	for (unsigned int i = 0; i < frames; i++) {
+		int sum = 0;
+		for (int c = 0; c < MIX_CHANNELS; c++) {
+			struct mix_channel *ch = &channels[c];
+			if (!ch->active)
+				continue;
+			unsigned int idx = ch->pos >> 16;
+			if (idx >= ch->length) {
+				ch->active = 0;
+				continue;
+			}
+			int s = ((int)ch->src[idx] - 128) << 8;
+			sum += (s * ch->volume) >> 8;
+			ch->pos += ch->step;
+		}
+		sum = (sum * master_volume) >> 8;
+		if (sum >  32767) sum =  32767;
+		if (sum < -32768) sum = -32768;
+		/* L sample, then R sample -- SB16 stereo expects interleaved. */
+		dst[i * 4 + 0] = (unsigned char)(sum & 0xFF);
+		dst[i * 4 + 1] = (unsigned char)((sum >> 8) & 0xFF);
+		dst[i * 4 + 2] = (unsigned char)(sum & 0xFF);
+		dst[i * 4 + 3] = (unsigned char)((sum >> 8) & 0xFF);
+	}
+}
+
+/* Output mode selector for audio_handle_irq:
+ *   0 = mono u8   (mixer_fill_window)
+ *   1 = mono s16  (mixer_fill_window_s16)
+ *   2 = stereo s16 (mixer_fill_window_s16_stereo) */
+#define AUDIO_MODE_MONO_U8     0
+#define AUDIO_MODE_MONO_S16    1
+#define AUDIO_MODE_STEREO_S16  2
+static int output_is_16bit;     /* legacy name: now holds AUDIO_MODE_* value */
 
 /* IRQ5 dispatcher: the SB16 raises this every half-buffer in auto-init mode,
  * so we refill the half that just finished playing (next_fill_half) while
@@ -373,14 +410,20 @@ static int output_is_16bit;
 void audio_handle_irq(void)
 {
 	irq_count++;
-	if (output_is_16bit) {
-		/* 16-bit mono: AUDIO_HALF_SIZE bytes = AUDIO_HALF_SIZE/2 frames. */
-		unsigned int frames = AUDIO_HALF_SIZE / 2u;
-		unsigned char *dst = (unsigned char *)audio_buffer +
-		                     next_fill_half * AUDIO_HALF_SIZE;
-		mixer_fill_window_s16(dst, frames);
-	} else {
+	unsigned char *dst = (unsigned char *)audio_buffer +
+	                     next_fill_half * AUDIO_HALF_SIZE;
+	switch (output_is_16bit) {
+	case AUDIO_MODE_MONO_S16:
+		/* 2 bytes per frame */
+		mixer_fill_window_s16(dst, AUDIO_HALF_SIZE / 2u);
+		break;
+	case AUDIO_MODE_STEREO_S16:
+		/* 4 bytes per frame (L + R, s16 each) */
+		mixer_fill_window_s16_stereo(dst, AUDIO_HALF_SIZE / 4u);
+		break;
+	default:
 		mixer_fill_window(next_fill_half * AUDIO_HALF_SIZE, AUDIO_HALF_SIZE);
+		break;
 	}
 	next_fill_half ^= 1;
 	(void)inb(SB_BASE + 0xE);              /* 8-bit DMA ack */
@@ -426,7 +469,7 @@ int audio_start_output(void)
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
 	next_fill_half = 0;
-	output_is_16bit = 0;
+	output_is_16bit = AUDIO_MODE_MONO_U8;
 	output_running  = 1;
 	serial_write("audio: SB16 output started, 22050 Hz mono u8, half-buffer IRQs\n");
 	return 0;
@@ -462,9 +505,41 @@ int audio_start_output_16bit(void)
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
 	next_fill_half = 0;
-	output_is_16bit = 1;
+	output_is_16bit = AUDIO_MODE_MONO_S16;
 	output_running  = 1;
 	serial_write("audio: SB16 output started, 22050 Hz mono s16, half-buffer IRQs\n");
+	return 0;
+}
+
+/* Stereo signed-16 variant. Same DMA channel 5 wiring as mono s16, only
+ * the DSP mode byte changes to 0x30 and the IRQ uses the stereo mixer
+ * that writes 4 bytes per frame instead of 2. */
+int audio_start_output_stereo(void)
+{
+	if (!sb_present)
+		return -1;
+	if (output_running)
+		return 0;
+
+	dma_channel5_program((unsigned int)audio_buffer,
+	                     AUDIO_BUFFER_SIZE,
+	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
+
+	dsp_write(DSP_SPEAKER_ON);
+	dsp_set_output_rate(AUDIO_RATE_HZ);
+
+	/* DSP block count is in SAMPLE PAIRS for stereo, but in raw "sample
+	 * frame" units; one stereo s16 frame = 4 bytes. */
+	unsigned int count = (AUDIO_HALF_SIZE / 4u) - 1u;
+	dsp_write(DSP_OUTPUT_16BIT_AI);
+	dsp_write(DSP_MODE_STEREO_S16);
+	dsp_write((unsigned char)(count & 0xFF));
+	dsp_write((unsigned char)((count >> 8) & 0xFF));
+
+	next_fill_half = 0;
+	output_is_16bit = AUDIO_MODE_STEREO_S16;
+	output_running  = 1;
+	serial_write("audio: SB16 output started, 22050 Hz stereo s16, half-buffer IRQs\n");
 	return 0;
 }
 
