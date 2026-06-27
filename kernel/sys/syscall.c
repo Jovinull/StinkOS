@@ -242,12 +242,33 @@ void syscall_dispatch(struct regs *r)
 	__asm__ volatile ("sti");
 
 	switch (r->eax) {
-	case 1:                                    /* SYS_LOG: ebx = string */
+	case 1: {                                  /* SYS_LOG: ebx = string */
+		/* Validate + bound: the old version called serial_write on the
+		 * raw user pointer, which would page-fault on a bogus address
+		 * and could leak kernel memory over the serial port if the
+		 * user string lacked a NUL inside the mapped range. Cap the
+		 * scan at 256 bytes and refuse anything that doesn't sit in
+		 * the app's mapped region. */
+		char buf[256];
+		unsigned int n = 0;
+		if (!paging_user_range_ok(r->ebx, 1)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		const char *src = (const char *)r->ebx;
+		while (n < sizeof(buf) - 1 &&
+		       paging_user_range_ok((unsigned int)(src + n), 1) &&
+		       src[n] != '\0') {
+			buf[n] = src[n];
+			n++;
+		}
+		buf[n] = '\0';
 		serial_write("ring3: ");
-		serial_write((const char *)r->ebx);
+		serial_write(buf);
 		serial_putc('\n');
 		r->eax = 0;
 		break;
+	}
 	case 2:                                    /* SYS_DRAW: ebx=x ecx=y edx=rgb */
 		fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
