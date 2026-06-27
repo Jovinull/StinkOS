@@ -16,7 +16,20 @@
 #define TERM_ERR   0xFF5050u   /* error messages: light red       */
 #define TERM_HEAD  0x6090FFu   /* header / info lines: medium blue */
 
+/* Scrollback ring buffer. The terminal keeps the last LOG_MAX output lines
+ * (overwriting oldest on overflow) plus a scroll_offset that PgUp/PgDn move
+ * up and down. scroll_offset = 0 means "pinned to the bottom"; positive
+ * values scroll the view up by that many lines. New output forces the view
+ * back to the bottom so the user never misses a fresh line. */
+#define LOG_MAX  256
+#define SCROLL_PAGE  (TERM_ROWS - 4)
+
 static int term_row = 0;
+static char         log_text [LOG_MAX][TERM_COLS + 1];
+static unsigned int log_color[LOG_MAX];
+static int          log_count;          /* number of populated slots (cap LOG_MAX) */
+static int          log_head;           /* next slot to write */
+static int          scroll_offset;      /* lines scrolled up from bottom */
 
 static void term_clear(void)
 {
@@ -29,13 +42,54 @@ static void term_erase(int row)
 	sys_fillrect(0, row * TERM_GLYPH, TERM_W, TERM_GLYPH, TERM_BG);
 }
 
+/* Append one line to the scrollback ring. */
+static void log_push(const char *s, unsigned int col)
+{
+	int slot = log_head;
+	unsigned int i = 0;
+	while (s[i] && i < TERM_COLS) {
+		log_text[slot][i] = s[i];
+		i++;
+	}
+	log_text[slot][i] = '\0';
+	log_color[slot] = col;
+	log_head = (log_head + 1) % LOG_MAX;
+	if (log_count < LOG_MAX) log_count++;
+}
+
+/* Redraw the visible window of the scrollback ring at the current
+ * scroll_offset. Reserves the bottom row for the live input prompt that
+ * read_line manages. */
+static void redraw_scrollback(void)
+{
+	sys_fillrect(0, 0, TERM_W, TERM_H, TERM_BG);
+	int visible = TERM_ROWS - 1;
+	int total   = log_count;
+	int start   = total - visible - scroll_offset;
+	if (start < 0) start = 0;
+	int end = start + visible;
+	if (end > total) end = total;
+
+	int row = 0;
+	for (int i = start; i < end; i++) {
+		int slot = (log_head - log_count + i + LOG_MAX) % LOG_MAX;
+		sys_drawtext(0, row * TERM_GLYPH, log_text[slot], log_color[slot]);
+		row++;
+	}
+	term_row = row;
+}
+
 static void term_print(const char *s, unsigned int col)
 {
-	if (term_row >= TERM_ROWS)
-		term_clear();
-	term_erase(term_row);
-	sys_drawtext(0, term_row * TERM_GLYPH, s, col);
-	term_row++;
+	log_push(s, col);
+	scroll_offset = 0;                    /* new output jumps back to bottom */
+	if (term_row >= TERM_ROWS - 1) {
+		redraw_scrollback();          /* scroll the window up by one line */
+	} else {
+		term_erase(term_row);
+		sys_drawtext(0, term_row * TERM_GLYPH, s, col);
+		term_row++;
+	}
 }
 
 static void tprintf(const char *fmt, ...)
@@ -150,6 +204,22 @@ static int read_line(char *buf)
 		}
 		if (c == KEY_LEFT || c == KEY_RIGHT)
 			continue;
+		if (c == KEY_PGUP) {
+			int max = log_count - (TERM_ROWS - 1);
+			if (max < 0) max = 0;
+			scroll_offset += SCROLL_PAGE;
+			if (scroll_offset > max) scroll_offset = max;
+			redraw_scrollback();
+			render_input(buf, len, 1);
+			continue;
+		}
+		if (c == KEY_PGDN) {
+			scroll_offset -= SCROLL_PAGE;
+			if (scroll_offset < 0) scroll_offset = 0;
+			redraw_scrollback();
+			render_input(buf, len, 1);
+			continue;
+		}
 		if (c >= 32 && c < 127 && len < LINE_MAX - 1) {
 			buf[len++] = (char)c;
 			render_input(buf, len, 1);
