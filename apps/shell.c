@@ -380,6 +380,7 @@ void main(void)
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
+			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -412,6 +413,37 @@ void main(void)
 				        t.rx_pending, t.tx_pending);
 			}
 			if (!active) term_print("no active TCBs", TERM_FG);
+		} else if (strcmp(line, "kill") == 0) {
+			if (rest[0] == '\0') {
+				term_print("usage: kill <pid>", TERM_ERR);
+			} else {
+				int pid = 0;
+				for (int j = 0; rest[j] >= '0' && rest[j] <= '9'; j++)
+					pid = pid * 10 + (rest[j] - '0');
+				int rc = sys_kill(pid);
+				if (rc == 0) tprintf("killed pid %d", pid);
+				else         tprintf("kill pid %d failed", pid);
+			}
+		} else if (strcmp(line, "suspend") == 0) {
+			if (rest[0] == '\0') {
+				term_print("usage: suspend <pid>", TERM_ERR);
+			} else {
+				int pid = 0;
+				for (int j = 0; rest[j] >= '0' && rest[j] <= '9'; j++)
+					pid = pid * 10 + (rest[j] - '0');
+				if (sys_suspend(pid) == 0) tprintf("suspended pid %d", pid);
+				else                        tprintf("suspend pid %d failed", pid);
+			}
+		} else if (strcmp(line, "resume") == 0) {
+			if (rest[0] == '\0') {
+				term_print("usage: resume <pid>", TERM_ERR);
+			} else {
+				int pid = 0;
+				for (int j = 0; rest[j] >= '0' && rest[j] <= '9'; j++)
+					pid = pid * 10 + (rest[j] - '0');
+				if (sys_resume(pid) == 0) tprintf("resumed pid %d", pid);
+				else                       tprintf("resume pid %d failed", pid);
+			}
 		} else if (strcmp(line, "ps") == 0) {
 			static char ps_buf[1024];
 			int n = sys_proc_info(ps_buf, sizeof(ps_buf));
