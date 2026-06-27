@@ -494,7 +494,10 @@ $(TEST_BIN)/test_sched: $(TEST_DIR)/test_sched.c | $(TEST_BIN)
 $(TEST_BIN)/test_tcp_state: $(TEST_DIR)/test_tcp_state.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_tcp_state.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state
+$(TEST_BIN)/test_ipv4_parse: $(TEST_DIR)/test_ipv4_parse.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_ipv4_parse.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
@@ -503,6 +506,7 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 	$(TEST_BIN)/test_tcp_options
 	$(TEST_BIN)/test_sched
 	$(TEST_BIN)/test_tcp_state
+	$(TEST_BIN)/test_ipv4_parse
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
