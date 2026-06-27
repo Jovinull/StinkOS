@@ -172,6 +172,21 @@ static inline int sys_audio_master(int volume)   { return __syscall(60, volume, 
 static inline int sys_sock_listen(unsigned short port)
                                                  { return __syscall(61, (int)port, 0, 0); }
 
+/* MBR partition entry mirroring `struct mbr_partition` in kernel/fs/mbr.h.
+ * type = 0x00 means slot empty; bootable = 0x80 if the BIOS will jump
+ * into it. first_lba/sector_count are absolute disk units. */
+struct sys_mbr_partition {
+	unsigned char  bootable;
+	unsigned char  type;
+	unsigned int   first_lba;
+	unsigned int   sector_count;
+};
+
+/* Read the MBR partition table of `drive` into out[4]. Returns 0 on success
+ * (signature 0x55AA present), -1 on disk error or missing signature. */
+static inline int sys_mbr_read(int drive, struct sys_mbr_partition *out4)
+                                                 { return __syscall(63, drive, (int)out4, 0); }
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into

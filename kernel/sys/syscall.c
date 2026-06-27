@@ -302,6 +302,15 @@ void syscall_dispatch(struct regs *r)
 	case 61:                                   /* SYS_SOCK_LISTEN: ebx=local_port -> handle or -1 */
 		r->eax = (unsigned int)tcp_listen((unsigned short)r->ebx);
 		break;
+	case 63: {                                 /* SYS_MBR_READ: ebx=drive ecx=*struct mbr_partition[4] -> 0 / -1 */
+		if (!paging_user_range_ok(r->ecx, 4 * sizeof(struct mbr_partition))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)mbr_read((int)r->ebx,
+		                                (struct mbr_partition *)r->ecx);
+		break;
+	}
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
 		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;

@@ -156,6 +156,40 @@ void main(void)
 	}
 	draw_status(280, "size check:", "OK", COLOR_OK);
 
+	/* Show the target's existing MBR partition table (informational --
+	 * the clone overwrites it). Empty / unformatted disks return -1 and
+	 * the message just says "no MBR". Helps the user avoid wiping a disk
+	 * they thought was blank. */
+	struct sys_mbr_partition parts[4];
+	if (sys_mbr_read(TARGET_DRIVE, parts) == 0) {
+		sys_drawtext(140, 280 + 20, "existing target MBR partitions:", COLOR_DIM);
+		int any = 0;
+		for (int pi = 0; pi < 4; pi++) {
+			if (parts[pi].type == 0 || parts[pi].sector_count == 0)
+				continue;
+			any = 1;
+			char line[64], n1[12], n2[12];
+			format_dec(parts[pi].first_lba, n1);
+			format_dec(parts[pi].sector_count, n2);
+			int p = 0;
+			line[p++] = (char)('1' + pi); line[p++] = ':'; line[p++] = ' ';
+			line[p++] = 't'; line[p++] = 'y'; line[p++] = 'p';
+			line[p++] = 'e'; line[p++] = '='; line[p++] = '0'; line[p++] = 'x';
+			static const char hx[] = "0123456789ABCDEF";
+			line[p++] = hx[(parts[pi].type >> 4) & 0xF];
+			line[p++] = hx[parts[pi].type & 0xF];
+			line[p++] = ' '; line[p++] = 'l'; line[p++] = 'b'; line[p++] = 'a';
+			line[p++] = '=';
+			for (int j = 0; n1[j]; j++) line[p++] = n1[j];
+			line[p++] = ' '; line[p++] = 'n'; line[p++] = '=';
+			for (int j = 0; n2[j]; j++) line[p++] = n2[j];
+			line[p] = '\0';
+			sys_drawtext(160, 280 + 40 + pi * 16, line, COLOR_TEXT);
+		}
+		if (!any)
+			sys_drawtext(160, 280 + 40, "(table empty)", COLOR_DIM);
+	}
+
 	/* Optional install size override. Default (blank Enter) clones the
 	 * full source disk; a typed sector count installs a truncated image
 	 * for smaller targets. A floor of 8 MiB (16384 sectors) keeps the
