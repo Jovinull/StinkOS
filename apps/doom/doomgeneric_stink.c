@@ -17,8 +17,18 @@
 
 #include "libstink.h"
 
-#define DOOM_X_OFFSET ((1024 - DOOMGENERIC_RESX) / 2)
-#define DOOM_Y_OFFSET ((768  - DOOMGENERIC_RESY) / 2)
+/* Default 1:1 blit centres Doom's 640x400 into a 1024x768 framebuffer with
+ * pillar/letterbox borders. Fullscreen mode upscales to 1024x640 (preserving
+ * the 16:10 Doom aspect at 1.6x both axes) and centres vertically with
+ * 64-px black bands. Pick the mode by writing "stinkdoom_fullscreen=1" into
+ * STINK.CONF; the file is the same one the shell uses for hostname. */
+#define DOOM_X_OFFSET    ((1024 - DOOMGENERIC_RESX) / 2)
+#define DOOM_Y_OFFSET    ((768  - DOOMGENERIC_RESY) / 2)
+#define DOOM_FULL_W      1024
+#define DOOM_FULL_H      640
+#define DOOM_FULL_OFF_Y  ((768 - DOOM_FULL_H) / 2)
+
+static int doom_fullscreen;            /* set in main() from STINK.CONF */
 
 /* Translated Doom key events, queued between sys_get_keyevent polls and the
  * DG_GetKey calls from doomgeneric. Each entry is (pressed << 8) | doomKey. */
@@ -165,9 +175,16 @@ void DG_DrawFrame(void)
 {
 	drain_keyboard();
 	poll_mouse_events();
-	sys_blit(DOOM_X_OFFSET, DOOM_Y_OFFSET,
-	         DOOMGENERIC_RESX, DOOMGENERIC_RESY,
-	         (const unsigned int *)DG_ScreenBuffer);
+	if (doom_fullscreen) {
+		sys_blit_scaled(0, DOOM_FULL_OFF_Y,
+		                DOOM_FULL_W, DOOM_FULL_H,
+		                (const unsigned int *)DG_ScreenBuffer,
+		                DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+	} else {
+		sys_blit(DOOM_X_OFFSET, DOOM_Y_OFFSET,
+		         DOOMGENERIC_RESX, DOOMGENERIC_RESY,
+		         (const unsigned int *)DG_ScreenBuffer);
+	}
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -239,6 +256,31 @@ static int load_extra_args(void)
 	return count;
 }
 
+static void load_fullscreen_flag(void)
+{
+	char buf[512];
+	int n = sys_fread("STINK.CONF", buf, sizeof(buf) - 1);
+	if (n <= 0) return;
+	buf[n] = '\0';
+	const char *key = "stinkdoom_fullscreen=";
+	int klen = 0;
+	while (key[klen]) klen++;
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (buf[i] != '\n' && buf[i] != '\0') continue;
+		buf[i] = '\0';
+		const char *line = buf + ls;
+		int match = 1;
+		for (int j = 0; j < klen; j++)
+			if (line[j] != key[j]) { match = 0; break; }
+		if (match) {
+			doom_fullscreen = (line[klen] == '1');
+			return;
+		}
+		ls = i + 1;
+	}
+}
+
 int main(int argc, char **argv)
 {
 	static char  arg0[]   = "doom";
@@ -248,6 +290,8 @@ int main(int argc, char **argv)
 
 	(void)argc;
 	(void)argv;
+
+	load_fullscreen_flag();
 
 	full_argv[0] = arg0;
 	full_argv[1] = arg1;
