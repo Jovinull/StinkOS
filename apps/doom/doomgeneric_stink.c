@@ -205,17 +205,58 @@ void DG_SetWindowTitle(const char *title)
 #define STINKDOOM_IWAD "FREEDOOM1.WAD"
 #endif
 
+/* Optional extra arguments loaded from the StinkFS file DOOMARGS.CFG.
+ * Whitespace-separated tokens are appended after the locked -iwad pair,
+ * so a user can drop a config like "-record DEMO1.LMP" or "-playdemo
+ * DEMO1.LMP" without rebuilding the Doom ELF. Cap of 8 tokens keeps the
+ * pre-allocated argv table small. */
+#define EXTRA_ARGS_MAX  8
+#define ARGS_BUF_SIZE   256
+
+static char  extra_buf[ARGS_BUF_SIZE];
+static char *extra_argv[EXTRA_ARGS_MAX];
+
+static int load_extra_args(void)
+{
+	int n = sys_fread("DOOMARGS.CFG", extra_buf, sizeof(extra_buf) - 1);
+	if (n <= 0)
+		return 0;
+	extra_buf[n] = '\0';
+
+	int count = 0;
+	int i = 0;
+	while (i < n && count < EXTRA_ARGS_MAX) {
+		while (i < n && (extra_buf[i] == ' ' || extra_buf[i] == '\t' ||
+		                 extra_buf[i] == '\n' || extra_buf[i] == '\r'))
+			extra_buf[i++] = '\0';
+		if (i >= n)
+			break;
+		extra_argv[count++] = &extra_buf[i];
+		while (i < n && extra_buf[i] != ' ' && extra_buf[i] != '\t' &&
+		       extra_buf[i] != '\n' && extra_buf[i] != '\r')
+			i++;
+	}
+	return count;
+}
+
 int main(int argc, char **argv)
 {
 	static char  arg0[]   = "doom";
 	static char  arg1[]   = "-iwad";
 	static char  arg2[]   = STINKDOOM_IWAD;
-	static char *fake_argv[3] = { arg0, arg1, arg2 };
+	static char *full_argv[3 + EXTRA_ARGS_MAX];
 
 	(void)argc;
 	(void)argv;
 
-	doomgeneric_Create(3, fake_argv);
+	full_argv[0] = arg0;
+	full_argv[1] = arg1;
+	full_argv[2] = arg2;
+	int extra = load_extra_args();
+	for (int i = 0; i < extra; i++)
+		full_argv[3 + i] = extra_argv[i];
+
+	doomgeneric_Create(3 + extra, full_argv);
 
 	for (;;)
 		doomgeneric_Tick();
