@@ -1,0 +1,123 @@
+name: repo-pages
+
+# Publishes the sample stink-pkg repository (built by `make sample-packages`)
+# to GitHub Pages so a fresh StinkOS install can install packages out of the
+# box. Fires on every push to master and on v* tag pushes. To make the
+# deployed URL usable, the repo owner must enable Pages in repository
+# settings with source = "GitHub Actions".
+on:
+  push:
+    branches: [master]
+    tags:     ['v*']
+  workflow_dispatch:
+
+# Pages deploy needs `pages: write` + `id-token: write` so the official
+# deploy-pages action can verify the upload through OIDC.
+permissions:
+  contents: read
+  pages:    write
+  id-token: write
+
+# Only one Pages deploy at a time; in-flight runs get queued so the latest
+# push wins.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: build sample repo and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url:  ${{ steps.deploy.outputs.page_url }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex texinfo wget \
+            libgmp3-dev libmpc-dev libmpfr-dev libisl-dev \
+            qemu-system-x86 python3
+
+      - name: Restore i386-elf cross-toolchain cache
+        id: cache-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/opt/cross
+          key:  cross-toolchain-${{ hashFiles('tools/build-cross-toolchain.sh') }}-v1
+
+      - name: Build cross-toolchain (cache miss only)
+        if: steps.cache-cross.outputs.cache-hit != 'true'
+        run: bash tools/build-cross-toolchain.sh
+
+      - name: Add toolchain to PATH
+        run: echo "$HOME/opt/cross/bin" >> $GITHUB_PATH
+
+      - name: Build sample packages
+        run: make sample-packages
+
+      - name: Generate index.txt for the repo
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, struct
+          REPO = "repo"
+          HDR  = "<IHH32s16s128sIIII"
+          HDR_SIZE = struct.calcsize(HDR)
+          MAGIC = 0x474B5053
+
+          def cstr(b):
+              i = b.find(b"\x00")
+              return (b if i < 0 else b[:i]).decode("ascii", errors="replace")
+
+          out = []
+          for fn in sorted(os.listdir(REPO)):
+              if not fn.endswith(".stinkpkg"):
+                  continue
+              p = os.path.join(REPO, fn)
+              with open(p, "rb") as f:
+                  head = f.read(HDR_SIZE)
+              if len(head) < HDR_SIZE: continue
+              fields = struct.unpack(HDR, head)
+              if fields[0] != MAGIC: continue
+              name = cstr(fields[3])
+              ver  = cstr(fields[4])
+              h = hashlib.sha256()
+              with open(p, "rb") as f:
+                  for chunk in iter(lambda: f.read(65536), b""):
+                      h.update(chunk)
+              out.append(f"{name} {ver} {h.hexdigest()}\n")
+
+          with open(os.path.join(REPO, "index.txt"), "w") as f:
+              f.writelines(out)
+          PY
+
+      - name: Lay out Pages artifact
+        run: |
+          mkdir -p _pages/pkg
+          cp repo/*.stinkpkg _pages/pkg/
+          cp repo/index.txt  _pages/index.txt
+          cat > _pages/README.md <<'EOF'
+          # StinkOS sample package repository
+
+          Stand-alone snapshot built from this repository. Point a StinkOS
+          install at this base URL by writing `STINKPKG.CONF`:
+
+              repo_url=https://<owner>.github.io/StinkOS
+
+          See docs/PACKAGING.md for details.
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _pages
+
+      - name: Deploy to GitHub Pages
+        id:   deploy
+        uses: actions/deploy-pages@v4
