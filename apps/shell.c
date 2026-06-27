@@ -110,6 +110,49 @@ static char history[HISTORY_MAX][LINE_MAX];
 static int  history_count;
 static int  history_pos;
 
+#define HISTORY_FILE "SHELL.HIS"
+
+/* Serialize the in-memory history array into one line per entry and write it
+ * back to SHELL.HIS so the next boot can replay it. Keeps the file size to
+ * at most HISTORY_MAX * LINE_MAX bytes (~512 bytes), well within StinkFS. */
+static void history_save(void)
+{
+	char buf[HISTORY_MAX * LINE_MAX];
+	int  off = 0;
+	for (int i = 0; i < history_count; i++) {
+		for (int j = 0; history[i][j] && off < (int)sizeof(buf) - 1; j++)
+			buf[off++] = history[i][j];
+		if (off < (int)sizeof(buf))
+			buf[off++] = '\n';
+	}
+	sys_fwrite(HISTORY_FILE, buf, (unsigned int)off);
+}
+
+/* Populate the in-memory history array from SHELL.HIS at startup. Silently
+ * starts with an empty history if the file is missing or unreadable; the
+ * first command written triggers a fresh history_save(). */
+static void history_load_persistent(void)
+{
+	char buf[HISTORY_MAX * LINE_MAX];
+	int  n = sys_fread(HISTORY_FILE, buf, sizeof(buf));
+	if (n <= 0)
+		return;
+	int ls = 0;
+	for (int i = 0; i < n; i++) {
+		if (buf[i] != '\n')
+			continue;
+		int len = i - ls;
+		if (len > LINE_MAX - 1) len = LINE_MAX - 1;
+		if (len > 0 && history_count < HISTORY_MAX) {
+			for (int k = 0; k < len; k++)
+				history[history_count][k] = buf[ls + k];
+			history[history_count][len] = '\0';
+			history_count++;
+		}
+		ls = i + 1;
+	}
+}
+
 static void history_push(const char *line)
 {
 	if (line[0] == '\0')
@@ -124,6 +167,7 @@ static void history_push(const char *line)
 	memcpy(history[history_count], line, n);
 	history[history_count][n] = '\0';
 	history_count++;
+	history_save();
 }
 
 static int history_load(char *buf)
@@ -253,6 +297,7 @@ static void print_fileinfo(const char *name, int size)
 void main(void)
 {
 	term_clear();
+	history_load_persistent();
 	term_print("STINKOS SHELL  (type 'help', 'exit' to quit)", TERM_HEAD);
 	term_row++;   /* blank line after header */
 
