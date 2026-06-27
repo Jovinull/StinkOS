@@ -930,6 +930,14 @@ void syscall_dispatch(struct regs *r)
 		unsigned int dst_drv  = r->ecx;
 		unsigned int count    = r->edx;
 		unsigned int src_lba  = r->esi;
+		/* Cap one syscall at 4096 sectors (~2 MiB). Without this a
+		 * userland app passing count = 0xFFFFFFFF would pin the kernel
+		 * inside the synchronous ATA loop until every sector read
+		 * failed -- many seconds during which keyboard / network IRQs
+		 * still run but no other process gets scheduled. The installer
+		 * already chunks at 256 sectors per call. */
+		if (count > 4096u)
+			count = 4096u;
 		unsigned char buf[512];
 		unsigned int copied = 0;
 		for (unsigned int i = 0; i < count; i++) {
