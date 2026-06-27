@@ -55,6 +55,14 @@
 #define TCP_PERSIST_INITIAL     100        /* 1 s    */
 #define TCP_PERSIST_MAX         6000       /* 60 s   */
 
+/* 2 * Maximum Segment Lifetime. RFC 793 picks MSL = 2 min; many real
+ * stacks use 30 s for 2*MSL = 60 s, which is the sweet spot between
+ * "long enough for any late retransmit to die in the network" and
+ * "short enough that the 8-slot TCB table doesn't leak after every
+ * graceful close". Without this, a closed connection used to sit in
+ * TIME_WAIT forever and the slot stayed pinned until reboot. */
+#define TCP_2MSL_TICKS          6000
+
 struct tcb {
 	enum tcp_state state;
 
@@ -122,6 +130,11 @@ struct tcb {
 		unsigned int  len;
 		unsigned char buf[TCP_MSS];
 	} ooo[2];
+
+	/* TIME_WAIT 2*MSL timer. Stamped on entry; tcp_tick frees the slot
+	 * once TCP_2MSL_TICKS have elapsed so a connection can't pin a TCB
+	 * forever after a graceful close. */
+	unsigned int    time_wait_ticks;
 
 	/* Zero-window persist (RFC 1122 §4.2.2.17). When the peer advertises
 	 * snd_wnd == 0 and we still have tx-pending bytes, persist_armed is
@@ -197,6 +210,7 @@ static int tcb_alloc(void)
 			t->persist_armed        = 0;
 			t->persist_last_tick    = 0;
 			t->persist_interval     = TCP_PERSIST_INITIAL;
+			t->time_wait_ticks      = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -981,6 +995,7 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		if (h->flags & TCP_FIN) {
 			t->rcv_nxt = seg_seq + 1;
 			t->state = TCP_TIME_WAIT;
+			t->time_wait_ticks = pit_ticks();
 			tcp_emit(t, TCP_ACK, (void *)0, 0);
 		}
 		break;
@@ -989,6 +1004,7 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		if (h->flags & TCP_FIN) {
 			t->rcv_nxt = seg_seq + 1;
 			t->state = TCP_TIME_WAIT;
+			t->time_wait_ticks = pit_ticks();
 			tcp_emit(t, TCP_ACK, (void *)0, 0);
 		}
 		break;
@@ -1062,6 +1078,18 @@ void tcp_tick(void)
 					t->last_keepalive_ticks = now;
 				}
 			}
+		}
+
+		/* TIME_WAIT 2*MSL cleanup: once enough time has passed that any
+		 * delayed retransmit of the peer's FIN would have died in the
+		 * network, free the slot so another connection can reuse it.
+		 * Without this the 8-entry TCB table leaks on every graceful
+		 * close. */
+		if (t->state == TCP_TIME_WAIT &&
+		    (now - t->time_wait_ticks) >= TCP_2MSL_TICKS) {
+			t->state  = TCP_CLOSED;
+			t->in_use = 0;
+			continue;
 		}
 
 		/* Zero-window persist probe: if peer ever closed their window,
