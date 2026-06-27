@@ -36,6 +36,18 @@
 #define DSP_OUTPUT_8BIT_AI 0xC6u   /* SB16 PIO: 8-bit DAC, auto-init, FIFO */
 #define DSP_MODE_MONO_U8   0x00u   /* mono, unsigned 8-bit samples           */
 
+/* 16-bit auto-init equivalents (SB16 only -- earlier SB2/Pro lack the
+ * 16-bit DSP path). The mode byte's low nibble picks channel layout +
+ * signedness: 0x10 = mono signed, 0x30 = stereo signed. The 16-bit path
+ * uses DMA channel 5 (slave controller) and acknowledges via the 16-bit
+ * IRQ-ack port (0xF instead of 0xE). Defined here so the eventual
+ * switch-over has the constants ready; not yet used by audio_start_output. */
+#define DSP_OUTPUT_16BIT_AI 0xB6u   /* 16-bit DAC, auto-init, FIFO          */
+#define DSP_PAUSE_16BIT     0xD5u
+#define DSP_RESUME_16BIT    0xD6u
+#define DSP_MODE_MONO_S16   0x10u   /* mono,   signed 16-bit samples         */
+#define DSP_MODE_STEREO_S16 0x30u   /* stereo, signed 16-bit samples         */
+
 /* Audio sample rate for the kernel DMA loop. Doom internally renders at
  * 11025 Hz; 22050 gives headroom for fixed-point mixing without aliasing
  * and is well inside what SB16 handles. */
