@@ -40,6 +40,13 @@
 #define TCP_RTO_MAX      6000
 #define TCP_MAX_RETRIES  5
 
+/* Keepalive: after KEEPALIVE_IDLE ticks of no incoming data on an
+ * ESTABLISHED connection, send one probe every KEEPALIVE_INTERVAL ticks.
+ * Peer's ACK refreshes last_activity_ticks, suppressing further probes
+ * until the next idle window. */
+#define TCP_KEEPALIVE_IDLE      7200       /* 72 s */
+#define TCP_KEEPALIVE_INTERVAL  3000       /* 30 s between probes */
+
 struct tcb {
 	enum tcp_state state;
 
@@ -84,6 +91,12 @@ struct tcb {
 	 * the peer is willing to buffer. Our own receive window stays small
 	 * enough to fit in the raw 16-bit field, so we never emit kind=3. */
 	unsigned char   peer_wscale;
+
+	/* Keepalive: last_activity_ticks bumps on every RX; last_keepalive_ticks
+	 * paces the probes themselves. Both unused (zero) until we've seen the
+	 * first byte from the peer in ESTABLISHED. */
+	unsigned int    last_activity_ticks;
+	unsigned int    last_keepalive_ticks;
 
 	/* Out-of-order receive queue. A single dropped packet on a steady
 	 * stream typically causes the next two packets to arrive ahead of the
@@ -134,6 +147,8 @@ static int tcb_alloc(void)
 			t->cwnd           = 2u * TCP_MSS;     /* IW=2 segments */
 			t->ssthresh       = 64u * TCP_MSS;    /* high; first loss tightens it */
 			t->peer_wscale    = 0;
+			t->last_activity_ticks  = 0;
+			t->last_keepalive_ticks = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -600,6 +615,10 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		return;
 	}
 
+	/* Any incoming segment counts as activity for keepalive purposes. */
+	t->last_activity_ticks  = pit_ticks();
+	t->last_keepalive_ticks = 0;
+
 	switch (t->state) {
 	case TCP_LISTEN:
 		/* Only a bare SYN advances a LISTEN socket; everything else gets
@@ -797,13 +816,44 @@ int tcp_get_info(int idx, struct tcp_info *out)
 	return 0;
 }
 
+/* Send a keepalive probe: ACK with seq = snd_una - 1. The peer must respond
+ * with an ACK confirming our connection is still alive. Doesn't consume
+ * sequence space, doesn't disturb the data flow. */
+static void tcp_send_keepalive(struct tcb *t)
+{
+	unsigned int saved = t->snd_nxt;
+	t->snd_nxt = t->snd_una - 1u;
+	tcp_emit(t, TCP_ACK, (void *)0, 0);
+	t->snd_nxt = saved;
+}
+
 void tcp_tick(void)
 {
 	unsigned int now = pit_ticks();
 
 	for (int i = 0; i < TCP_MAX_CONNS; i++) {
 		struct tcb *t = &conns[i];
-		if (!t->in_use || t->last_seg_ticks == 0)
+		if (!t->in_use)
+			continue;
+
+		/* Keepalive path: idle ESTABLISHED connections get a periodic
+		 * probe so dead peers / NAT rebinds surface as a CLOSED state
+		 * instead of hanging forever in tcp_recv. Runs independently of
+		 * the retransmit loop below. */
+		if (t->state == TCP_ESTABLISHED && t->last_activity_ticks != 0) {
+			unsigned int idle = now - t->last_activity_ticks;
+			if (idle >= TCP_KEEPALIVE_IDLE) {
+				unsigned int since_probe = (t->last_keepalive_ticks == 0)
+				    ? TCP_KEEPALIVE_INTERVAL
+				    : (now - t->last_keepalive_ticks);
+				if (since_probe >= TCP_KEEPALIVE_INTERVAL) {
+					tcp_send_keepalive(t);
+					t->last_keepalive_ticks = now;
+				}
+			}
+		}
+
+		if (t->last_seg_ticks == 0)
 			continue;
 		if (t->snd_una == t->snd_nxt) {
 			/* Nothing unacked anymore; defensive clear in case the ACK
