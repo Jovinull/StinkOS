@@ -126,6 +126,32 @@ If you're reporting a bug, the issue template covers it. Short version:
 
 If you're pitching a feature, tell me what it makes possible. Don't write a design doc until we've agreed it should exist.
 
+## Adding a new kernel subsystem
+
+The codebase splits the kernel into self-contained subsystems under
+`kernel/<area>/`. If you want to land a new driver or service (e.g. a new
+NIC, a sensor, a filesystem), follow the existing shape so the result drops
+in with zero special-cases.
+
+1. **Pick the right area.** Drivers go under `kernel/drivers/<kind>/` (audio, input, net, storage, video, misc). Cross-cutting subsystems go under `kernel/sys/` (process table, timers, pipes). Filesystem-shaped code goes under `kernel/fs/`.
+
+2. **Create `foo.h` + `foo.c`.** Header documents the public API only — what kernel boot code, syscalls, and other subsystems can call. Keep all state `static` in the `.c` file.
+
+3. **Wire it into the build.**
+   - Add the source basename to `C_SRCS` in the Makefile.
+   - If the `.c` lives in a directory not already on `VPATH` / `KINCLUDES`, add it.
+   - Add `#include "foo.h"` to `kernel/defs.h` so other translation units pick it up via the umbrella header.
+
+4. **Initialise from `kmain` (`kernel/main.c`).** Match the existing pattern: call the init, then a single `bootdiag_add("name: brief", BOOT_OK_or_FAIL)` so the POST screen reflects the new subsystem. Place the init in dependency order (after anything it depends on, before anything that depends on it).
+
+5. **Expose a syscall if userland needs it.** Add a numbered `case` in `kernel/sys/syscall.c`, validate every pointer via `paging_user_range_ok`, and document the new number + ABI in [`docs/SYSCALLS.md`](docs/SYSCALLS.md). Add a `sys_<name>` inline in `lib/libstink.h`.
+
+6. **Document.** A new driver gets a one-paragraph entry in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) under "Subsystem highlights". A new on-disk layout gets a fresh `docs/<NAME>.md`. New net-stack pieces extend [`docs/NETWORK.md`](docs/NETWORK.md).
+
+7. **Land it incrementally.** Subsystem-shaped PRs are best as a *series* of small commits: data structures first, then init + POST entry, then the first consumer (syscall or kernel caller), then the second consumer, etc. Each commit should leave the build green.
+
+A worked example: the `kernel/sys/proc.c` PCB + scheduler landed across ~6 commits — first the PCB struct, then the process table, then the kernel-thread spawn helper, then the context-switch asm, then the PIT-driven yield, then the syscall wrappers. Each step compiled and booted on its own.
+
 ## Credit
 
 Every contributor lands in git history — that's the real credit, and it's permanent. If you want your name in a `CONTRIBUTORS` file too, add yourself in your PR.
