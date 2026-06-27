@@ -42,16 +42,35 @@ static void term_erase(int row)
 	sys_fillrect(0, row * TERM_GLYPH, TERM_W, TERM_GLYPH, TERM_BG);
 }
 
-/* Append one line to the scrollback ring. */
+/* Append one line to the scrollback ring. Bytes above 0x7F are
+ * collapsed to '?' so a UTF-8 multi-byte sequence renders as a single
+ * placeholder instead of garbage page-437 glyphs. (Full UTF-8 rendering
+ * would need a glyph map for the BMP, far beyond what the 256-entry
+ * 8x8 console font carries.) Continuation bytes following a lead are
+ * dropped without producing extra '?'s. */
 static void log_push(const char *s, unsigned int col)
 {
 	int slot = log_head;
+	unsigned int out = 0;
 	unsigned int i = 0;
-	while (s[i] && i < TERM_COLS) {
-		log_text[slot][i] = s[i];
-		i++;
+	while (s[i] && out < TERM_COLS) {
+		unsigned char c = (unsigned char)s[i];
+		if (c < 0x80u) {
+			log_text[slot][out++] = (char)c;
+			i++;
+		} else if ((c & 0xC0u) == 0xC0u) {
+			/* UTF-8 lead byte: emit one '?' then skip continuations. */
+			log_text[slot][out++] = '?';
+			i++;
+			while ((unsigned char)s[i] >= 0x80u &&
+			       (unsigned char)s[i] <  0xC0u)
+				i++;
+		} else {
+			/* Stray continuation byte -- swallow silently. */
+			i++;
+		}
 	}
-	log_text[slot][i] = '\0';
+	log_text[slot][out] = '\0';
 	log_color[slot] = col;
 	log_head = (log_head + 1) % LOG_MAX;
 	if (log_count < LOG_MAX) log_count++;
