@@ -381,6 +381,7 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
+			term_print("clock  shutdown  reboot", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -413,6 +414,21 @@ void main(void)
 				        t.rx_pending, t.tx_pending);
 			}
 			if (!active) term_print("no active TCBs", TERM_FG);
+		} else if (strcmp(line, "clock") == 0) {
+			struct sys_rtc_time t;
+			if (sys_rtc_read(&t) != 0) {
+				term_print("clock read failed", TERM_ERR);
+			} else {
+				tprintf("%u-%02u-%02u %02u:%02u:%02u",
+				        t.year, t.month, t.day,
+				        t.hour, t.minute, t.second);
+			}
+		} else if (strcmp(line, "shutdown") == 0) {
+			term_print("powering off...", TERM_HEAD);
+			sys_shutdown();
+		} else if (strcmp(line, "reboot") == 0) {
+			term_print("rebooting...", TERM_HEAD);
+			sys_reboot();
 		} else if (strcmp(line, "kill") == 0) {
 			if (rest[0] == '\0') {
 				term_print("usage: kill <pid>", TERM_ERR);
