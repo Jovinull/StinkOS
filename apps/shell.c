@@ -409,7 +409,7 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
-			term_print("clock  shutdown  reboot  arp [-d]  dns <host>  version", TERM_FG);
+			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>  version", TERM_FG);
 		} else if (strcmp(line, "version") == 0) {
 			/* Stamped at compile time so a runtime user can answer
 			 * "which build is this" without rebooting -- handy when
@@ -457,6 +457,30 @@ void main(void)
 				tprintf("%u-%02u-%02u %02u:%02u:%02u",
 				        t.year, t.month, t.day,
 				        t.hour, t.minute, t.second);
+			}
+		} else if (strcmp(line, "alarm") == 0) {
+			/* "alarm HH MM SS"  -> arm the CMOS RTC alarm at that
+			 * time-of-day. "alarm off" -> disarm. "alarm" -> show
+			 * whether it has fired since the last check. */
+			if (rest[0] == '\0') {
+				tprintf("alarm: fired=%d", sys_rtc_alarm_fired());
+			} else if (strcmp(rest, "off") == 0) {
+				sys_rtc_clear_alarm();
+				term_print("alarm: disarmed", TERM_FG);
+			} else {
+				int h = 0, m = 0, s = 0;
+				/* Skim the next three integers; whitespace-separated. */
+				const char *p = rest;
+				while (*p == ' ') p++;
+				while (*p >= '0' && *p <= '9') h = h*10 + (*p++ - '0');
+				while (*p == ' ') p++;
+				while (*p >= '0' && *p <= '9') m = m*10 + (*p++ - '0');
+				while (*p == ' ') p++;
+				while (*p >= '0' && *p <= '9') s = s*10 + (*p++ - '0');
+				if (sys_rtc_set_alarm(h, m, s) == 0)
+					tprintf("alarm: armed at %02d:%02d:%02d", h, m, s);
+				else
+					term_print("alarm: bad time (range or syscall failed)", TERM_ERR);
 			}
 		} else if (strcmp(line, "shutdown") == 0) {
 			term_print("powering off...", TERM_HEAD);
