@@ -379,7 +379,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  history  exit", TERM_FG);
+			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -412,6 +412,17 @@ void main(void)
 				        t.rx_pending, t.tx_pending);
 			}
 			if (!active) term_print("no active TCBs", TERM_FG);
+		} else if (strcmp(line, "mem") == 0) {
+			struct sys_meminfo m;
+			if (sys_meminfo(&m) != 0) {
+				term_print("meminfo failed", TERM_ERR);
+			} else {
+				unsigned int used = m.total_pages - m.free_pages;
+				tprintf("phys: %u/%u pages (%u KiB used / %u KiB total)",
+				        used, m.total_pages,
+				        used * 4, m.total_pages * 4);
+				tprintf("user brk: 0x%x", m.user_brk);
+			}
 		} else if (strcmp(line, "hostname") == 0) {
 			if (rest[0] == '\0') {
 				term_print(hostname, TERM_FG);

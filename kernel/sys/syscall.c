@@ -285,6 +285,18 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
+		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		unsigned int *m = (unsigned int *)r->ebx;
+		m[0] = pmm_total_pages();
+		m[1] = pmm_free_pages();
+		m[2] = paging_user_brk();
+		r->eax = 0;
+		break;
+	}
 	case 58: {                                 /* SYS_NETSTAT: ebx=idx ecx=*tcp_info -> 0 / -1 */
 		if (!paging_user_range_ok(r->ecx, sizeof(struct tcp_info))) {
 			r->eax = (unsigned int)-1;

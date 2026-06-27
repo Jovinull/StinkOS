@@ -277,6 +277,16 @@ static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 
 static inline int sys_wait(void)                 { return __syscall(47, 0, 0, 0); }
 static inline int sys_waitpid(int pid)           { return __syscall(48, pid, 0, 0); }
 
+/* System memory snapshot. Total / free pages are 4 KiB each; user_brk is the
+ * caller's current program break in bytes. Returns 0 ok, -1 on bad pointer. */
+struct sys_meminfo {
+	unsigned int total_pages;
+	unsigned int free_pages;
+	unsigned int user_brk;
+};
+static inline int sys_meminfo(struct sys_meminfo *out)
+                                                 { return __syscall(59, (int)out, 0, 0); }
+
 /* Reserve `size` bytes (rounded up to 4 KiB) of fresh user memory and return
  * the base virtual address; 0 on failure. Independent of malloc/sbrk -- ideal
  * for large allocations or shared-memory regions that should not interleave
