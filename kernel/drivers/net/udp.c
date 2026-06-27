@@ -66,6 +66,50 @@ void udp_unbind(unsigned short port)
 	}
 }
 
+/* One's-complement verify of an incoming UDP packet against the IPv4
+ * pseudo-header (RFC 768 / RFC 1071). Returns 1 if the checksum is
+ * correct OR if the sender opted out by leaving it zero, 0 otherwise.
+ * The packet bytes are NOT modified -- the existing checksum field is
+ * included in the sum, which folds to 0xFFFF when valid. */
+static int udp_checksum_ok(ipv4_t src, ipv4_t dst,
+                           const unsigned char *pkt, unsigned int total)
+{
+	if (((unsigned short)pkt[6] << 8 | pkt[7]) == 0)
+		return 1;          /* sender opted out -- legal on IPv4 */
+
+	unsigned int sum = 0;
+	const unsigned char *p;
+
+	/* Pseudo-header: src_ip, dst_ip, zero, protocol(17=UDP), udp_length. */
+	unsigned char ph[12];
+	ph[0] = (unsigned char)(src      & 0xFF);
+	ph[1] = (unsigned char)((src >>  8) & 0xFF);
+	ph[2] = (unsigned char)((src >> 16) & 0xFF);
+	ph[3] = (unsigned char)((src >> 24) & 0xFF);
+	ph[4] = (unsigned char)(dst      & 0xFF);
+	ph[5] = (unsigned char)((dst >>  8) & 0xFF);
+	ph[6] = (unsigned char)((dst >> 16) & 0xFF);
+	ph[7] = (unsigned char)((dst >> 24) & 0xFF);
+	ph[8] = 0;
+	ph[9] = 17;
+	ph[10] = (unsigned char)((total >> 8) & 0xFF);
+	ph[11] = (unsigned char)( total       & 0xFF);
+
+	p = ph;
+	for (unsigned int i = 0; i + 1 < sizeof(ph); i += 2)
+		sum += ((unsigned int)p[i] << 8) | p[i + 1];
+
+	p = pkt;
+	for (unsigned int i = 0; i + 1 < total; i += 2)
+		sum += ((unsigned int)p[i] << 8) | p[i + 1];
+	if (total & 1)
+		sum += (unsigned int)p[total - 1] << 8;
+
+	while (sum >> 16)
+		sum = (sum & 0xFFFFu) + (sum >> 16);
+	return (sum & 0xFFFFu) == 0xFFFFu;
+}
+
 void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 {
 	if (len < sizeof(struct udp_hdr))
@@ -75,6 +119,14 @@ void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	unsigned short dst_port = ntohs(h->dst_port);
 	unsigned short total    = ntohs(h->length);
 	if (total > len || total < sizeof(*h))
+		return;
+
+	/* Validate the UDP checksum BEFORE handing the payload to any
+	 * upper-layer parser. A non-zero checksum that fails verification
+	 * means the packet was corrupted in flight; silently dropping is
+	 * safer than feeding garbage to DHCP / DNS state machines. */
+	if (!udp_checksum_ok(src_ip, net_get_local_ip(),
+	                     (const unsigned char *)payload, total))
 		return;
 
 	for (int i = 0; i < UDP_MAX_HANDLERS; i++) {
