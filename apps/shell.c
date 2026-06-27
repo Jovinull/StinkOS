@@ -409,7 +409,8 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
-			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>  version", TERM_FG);
+			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
+			term_print("keymap us|br  version", TERM_FG);
 		} else if (strcmp(line, "version") == 0) {
 			/* Stamped at compile time so a runtime user can answer
 			 * "which build is this" without rebooting -- handy when
@@ -481,6 +482,19 @@ void main(void)
 					tprintf("alarm: armed at %02d:%02d:%02d", h, m, s);
 				else
 					term_print("alarm: bad time (range or syscall failed)", TERM_ERR);
+			}
+		} else if (strcmp(line, "keymap") == 0) {
+			/* "keymap" -> show current layout (best-effort: we set what
+			 * the previous call returned, can't query directly).
+			 * "keymap us"/"keymap br" -> switch. */
+			if (strcmp(rest, "us") == 0) {
+				sys_set_keymap(SYS_KEYMAP_US);
+				term_print("keymap: US", TERM_FG);
+			} else if (strcmp(rest, "br") == 0) {
+				sys_set_keymap(SYS_KEYMAP_BR);
+				term_print("keymap: BR ABNT2", TERM_FG);
+			} else {
+				term_print("usage: keymap us|br", TERM_DIM);
 			}
 		} else if (strcmp(line, "shutdown") == 0) {
 			term_print("powering off...", TERM_HEAD);
