@@ -11,7 +11,8 @@
 
 /* Forward declarations for upper-layer dispatchers. icmp / udp / tcp .c
  * files override these temporary stubs in net.c when they land. */
-void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
+void icmp_handle(const void *payload, unsigned int len,
+                 ipv4_t src_ip, ipv4_t dst_ip);
 void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
 void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
 
@@ -229,7 +230,7 @@ void ip_handle(const void *payload, unsigned int len)
 	if (frag_off == 0 && !more) {
 		/* Whole datagram in one packet -- common path. */
 		switch (h->protocol) {
-		case IP_PROTO_ICMP: icmp_handle(pld, pld_len, h->src_ip); break;
+		case IP_PROTO_ICMP: icmp_handle(pld, pld_len, h->src_ip, h->dst_ip); break;
 		case IP_PROTO_UDP:  udp_handle(pld, pld_len, h->src_ip);  break;
 		case IP_PROTO_TCP:  tcp_handle(pld, pld_len, h->src_ip);  break;
 		default: break;
@@ -263,11 +264,12 @@ void ip_handle(const void *payload, unsigned int len)
 	/* Snapshot before freeing the slot so the dispatch sees stable bytes. */
 	unsigned char  proto = r->protocol;
 	ipv4_t         src   = r->src_ip;
+	ipv4_t         dst   = r->dst_ip;
 	unsigned int   len   = r->total_len;
 	const unsigned char *full = r->buf;
 
 	switch (proto) {
-	case IP_PROTO_ICMP: icmp_handle(full, len, src); break;
+	case IP_PROTO_ICMP: icmp_handle(full, len, src, dst); break;
 	case IP_PROTO_UDP:  udp_handle(full, len, src);  break;
 	case IP_PROTO_TCP:  tcp_handle(full, len, src);  break;
 	default: break;

@@ -48,7 +48,8 @@ int icmp_send_echo_request(ipv4_t dst, unsigned short identifier,
 	return ipv4_send(dst, IP_PROTO_ICMP, scratch, total);
 }
 
-void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
+void icmp_handle(const void *payload, unsigned int len,
+                 ipv4_t src_ip, ipv4_t dst_ip)
 {
 	if (len < sizeof(struct icmp_hdr))
 		return;
@@ -76,6 +77,16 @@ void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	}
 
 	if (h->type != ICMP_TYPE_ECHO_REQUEST)
+		return;
+
+	/* RFC 1122 §3.2.2.6: do not reply to echo requests aimed at a
+	 * broadcast or multicast destination. This is the classic Smurf
+	 * mitigation -- one attacker pings the LAN broadcast with the
+	 * victim's IP as the spoofed source; every host on the segment
+	 * floods echo replies at the victim. Replying only to unicast
+	 * requests breaks the amplifier. */
+	if (dst_ip == 0xFFFFFFFFu ||
+	    (dst_ip & 0x000000F0u) == 0x000000E0u)
 		return;
 
 	/* Mirror the entire packet back with type swapped to echo reply.

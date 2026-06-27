@@ -29,8 +29,11 @@ int  icmp_send_echo_request(ipv4_t dst, unsigned short identifier,
                             unsigned short sequence,
                             const void *payload, unsigned int payload_len);
 
-/* Called by ipv4.c on IP_PROTO_ICMP packets. */
-void icmp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
+/* Called by ipv4.c on IP_PROTO_ICMP packets. dst_ip is the destination
+ * the IPv4 layer parsed before dispatch -- used by the echo-request
+ * branch to drop Smurf-style broadcast pings. */
+void icmp_handle(const void *payload, unsigned int len,
+                 ipv4_t src_ip, ipv4_t dst_ip);
 
 /* Echo-reply wait, for an outbound ping driven by the SYS_PING syscall. Arm
  * with the id/sequence about to be sent, then poll icmp_ping_replied() while
