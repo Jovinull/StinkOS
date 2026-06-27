@@ -243,7 +243,7 @@ static void tcp_retransmit(struct tcb *t)
 
 	switch (t->state) {
 	case TCP_SYN_SENT:
-		tcp_emit(t, TCP_SYN, (void *)0, 0);
+		tcp_emit_syn(t, TCP_SYN);
 		break;
 	case TCP_FIN_WAIT_1:
 	case TCP_LAST_ACK:
@@ -425,7 +425,7 @@ tcp_handle_t tcp_connect(ipv4_t dst_ip, unsigned short dst_port)
 	initial_seq   += 64000u;       /* coarse ISN bump, avoids reuse */
 
 	t->state = TCP_SYN_SENT;
-	tcp_emit(t, TCP_SYN, (void *)0, 0);
+	tcp_emit_syn(t, TCP_SYN);
 	t->snd_nxt += 1;                /* SYN consumes one sequence slot */
 	tcp_arm_rto(t);
 	return idx;
@@ -512,6 +512,37 @@ enum tcp_state tcp_get_state(tcp_handle_t h)
 	if (h < 0 || h >= TCP_MAX_CONNS || !conns[h].in_use)
 		return TCP_CLOSED;
 	return conns[h].state;
+}
+
+/* Emit a SYN (or SYN-ACK) carrying our MSS option so the peer caps its
+ * outbound chunks at our buffer's reach. Option layout: kind=2 len=4 +
+ * mss(2). Padded with two NOPs to keep data_off aligned at 6 dwords.
+ * Used by tcp_connect (TCP_SYN) and the LISTEN -> SYN_RECEIVED path
+ * (TCP_SYN | TCP_ACK). */
+static void tcp_emit_syn(struct tcb *t, unsigned char flags)
+{
+	unsigned char  buf[40];                  /* 20 hdr + 4 MSS + 4 NOP padding */
+	struct tcp_hdr *h = (struct tcp_hdr *)buf;
+	h->src_port = htons(t->local_port);
+	h->dst_port = htons(t->remote_port);
+	h->seq      = htonl(t->snd_nxt);
+	h->ack      = htonl(t->rcv_nxt);
+	h->flags    = flags;
+	h->window   = htons((unsigned short)t->rcv_wnd);
+	h->checksum = 0;
+	h->urg      = 0;
+
+	unsigned int off = sizeof(*h);
+	buf[off++] = 2;                                  /* kind = MSS */
+	buf[off++] = 4;                                  /* length */
+	buf[off++] = (TCP_MSS >> 8) & 0xFF;
+	buf[off++] =  TCP_MSS       & 0xFF;
+	while (off & 3u)
+		buf[off++] = 1;                          /* NOP padding */
+
+	h->data_off = (unsigned char)((off >> 2) << 4);
+	h->checksum = tcp_checksum(t->local_ip, t->remote_ip, buf, off);
+	ipv4_send(t->remote_ip, IP_PROTO_TCP, buf, off);
 }
 
 /* Emit an ACK segment that optionally carries SACK blocks describing the
@@ -681,7 +712,7 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			t->snd_wnd     = tcp_apply_wscale(t, h);
 			initial_seq   += 64000u;
 			t->state       = TCP_SYN_RECEIVED;
-			tcp_emit(t, TCP_SYN | TCP_ACK, (void *)0, 0);
+			tcp_emit_syn(t, TCP_SYN | TCP_ACK);
 			t->snd_nxt += 1;            /* our SYN consumes one slot */
 			tcp_arm_rto(t);
 		} else if (!(h->flags & TCP_RST)) {
