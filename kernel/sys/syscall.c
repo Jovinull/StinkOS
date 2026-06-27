@@ -372,6 +372,9 @@ void syscall_dispatch(struct regs *r)
 		arp_flush();
 		r->eax = 0;
 		break;
+	case 76:                                   /* SYS_SET_KEYMAP: ebx=layout(0=US,1=BR) -> previous */
+		r->eax = (unsigned int)keyboard_set_layout((int)r->ebx);
+		break;
 	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                       /* never freeze the kernel proc */

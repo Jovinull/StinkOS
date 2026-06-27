@@ -363,6 +363,15 @@ void main(void)
 {
 	term_clear();
 	config_get("hostname", hostname, sizeof(hostname));
+	/* Apply keymap from STINK.CONF: keymap=br switches to Brazilian
+	 * ABNT2; anything else stays on the default US layout. */
+	{
+		char km[8];
+		km[0] = '\0';
+		config_get("keymap", km, sizeof(km));
+		if (km[0] == 'b' && km[1] == 'r')
+			sys_set_keymap(SYS_KEYMAP_BR);
+	}
 	history_load_persistent();
 	term_print("STINKOS SHELL  (type 'help', 'exit' to quit)", TERM_HEAD);
 	term_row++;   /* blank line after header */

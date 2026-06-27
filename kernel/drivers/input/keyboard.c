@@ -49,6 +49,59 @@ static const char map_shift[128] = {
 	'M', '<', '>', '?', 0,  '*', 0,  ' ', 0,   0,
 };
 
+/* Brazilian ABNT2 best-effort layout. Differences from US that the kernel
+ * can honour without UTF-8 support:
+ *   ;  ->  c  (the cedilla key, no diacritic so plain ASCII fallback)
+ *   :  ->  C
+ *   /  ->  ;  (the Brazilian semicolon key sits where US has the slash)
+ *   ?  ->  :
+ *   '  ->  ~  (no dead-key behaviour yet)
+ *   "  ->  ^  (no dead-key)
+ * Anything else falls through to the US table. */
+static char map_br_normal[128];
+static char map_br_shift [128];
+
+/* Initialised at first switch-in -- copies US, then patches the BR diffs. */
+static int br_initialised;
+
+static void init_br_layout(void)
+{
+	if (br_initialised) return;
+	for (int i = 0; i < 128; i++) {
+		map_br_normal[i] = map_normal[i];
+		map_br_shift [i] = map_shift [i];
+	}
+	map_br_normal[0x27] = 'c';   /* ; -> c (cedilla pos) */
+	map_br_shift [0x27] = 'C';
+	map_br_normal[0x35] = ';';   /* / -> ; */
+	map_br_shift [0x35] = ':';
+	map_br_normal[0x28] = '~';   /* ' -> ~ (no dead key) */
+	map_br_shift [0x28] = '^';
+	br_initialised = 1;
+}
+
+static int current_layout = KEYMAP_US;
+
+int keyboard_set_layout(int layout)
+{
+	int prev = current_layout;
+	if (layout == KEYMAP_BR && !br_initialised)
+		init_br_layout();
+	if (layout == KEYMAP_US || layout == KEYMAP_BR)
+		current_layout = layout;
+	return prev;
+}
+
+static const char *active_map_normal(void)
+{
+	return current_layout == KEYMAP_BR ? map_br_normal : map_normal;
+}
+
+static const char *active_map_shift(void)
+{
+	return current_layout == KEYMAP_BR ? map_br_shift : map_shift;
+}
+
 static int shift_down = 0;
 static int capslock_on = 0;
 static int ctrl_down = 0;
@@ -183,13 +236,16 @@ void keyboard_handle(void)
 		return;
 	}
 
+	const char *mn = active_map_normal();
+	const char *ms = active_map_shift();
+
 	/* Caps Lock only flips the case of letters, not digits/symbols -- so it
 	 * has to look at whether THIS scancode maps to a letter, not just XOR
 	 * the shift state unconditionally. */
-	int is_letter = map_normal[sc] >= 'a' && map_normal[sc] <= 'z';
+	int is_letter = mn[sc] >= 'a' && mn[sc] <= 'z';
 	int use_shift_map = is_letter ? (shift_down != capslock_on) : shift_down;
 
-	char c = use_shift_map ? map_shift[sc] : map_normal[sc];
+	char c = use_shift_map ? ms[sc] : mn[sc];
 	if (c == 0)
 		return;
 
@@ -197,7 +253,7 @@ void keyboard_handle(void)
 	 * Ctrl+Z=26), same convention real terminals use -- Shift/Caps Lock
 	 * don't affect it, so only the unshifted letter map matters here. */
 	if (ctrl_down) {
-		char base = map_normal[sc];
+		char base = mn[sc];
 		if (base < 'a' || base > 'z')
 			return;                 /* no Ctrl+digit/symbol support yet */
 		c = base - 'a' + 1;

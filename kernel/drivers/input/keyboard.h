@@ -33,4 +33,11 @@ char keyboard_getchar(void);  /* dequeue a decoded char, or 0 if none */
  * state instead of just typed characters. */
 unsigned int keyboard_get_event(void);
 
+/* Layout selector. 0 = US (default), 1 = Brazilian ABNT2. Changes which
+ * scancode -> ASCII table the driver consults at decode time; the raw
+ * event queue is layout-agnostic. Returns the previous layout id. */
+#define KEYMAP_US   0
+#define KEYMAP_BR   1
+int keyboard_set_layout(int layout);
+
 #endif

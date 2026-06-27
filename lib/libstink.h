@@ -240,6 +240,13 @@ static inline int sys_arp_info(char *buf, unsigned int cap)
  * from scratch. Useful when peers change MAC underneath us. */
 static inline int sys_arp_flush(void)            { return __syscall(75, 0, 0, 0); }
 
+/* Pick keyboard layout: 0 = US (default), 1 = Brazilian ABNT2. Returns
+ * the previous layout. The shell wires this from STINK.CONF `keymap=...`
+ * at startup. */
+#define SYS_KEYMAP_US  0
+#define SYS_KEYMAP_BR  1
+static inline int sys_set_keymap(int layout)     { return __syscall(76, layout, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).
