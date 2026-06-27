@@ -37,6 +37,13 @@ unsigned int audio_irq_count_get(void);
  * success, -1 if no DSP is present. Idempotent (no-op when already running). */
 int  audio_start_output(void);
 
+/* Same contract as audio_start_output but uses DMA channel 5 + DSP 0xB6
+ * to clock mono signed 16-bit samples instead of mono u8. The mixer
+ * automatically widens its u8 sources to the s16 dynamic range. Pick
+ * one and stick with it for the lifetime of the boot; mode-switching is
+ * not supported without a full audio_stop_output + re-init dance. */
+int  audio_start_output_16bit(void);
+
 /* Pause the DSP + cut the speaker. The DMA channel remains armed so a
  * subsequent audio_start_output picks back up cleanly. */
 void audio_stop_output(void);

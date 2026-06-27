@@ -361,6 +361,11 @@ void audio_mix_silence_pid(int pid)
 			channels[i].active = 0;
 }
 
+/* Tracks which output mode is active so audio_handle_irq knows whether
+ * the buffer holds u8 samples (mixer_fill_window) or interleaved s16
+ * samples (mixer_fill_window_s16). 0 = 8-bit (legacy default), 1 = 16. */
+static int output_is_16bit;
+
 /* IRQ5 dispatcher: the SB16 raises this every half-buffer in auto-init mode,
  * so we refill the half that just finished playing (next_fill_half) while
  * the chip streams the other half. Toggling the flag keeps the two halves
@@ -368,7 +373,15 @@ void audio_mix_silence_pid(int pid)
 void audio_handle_irq(void)
 {
 	irq_count++;
-	mixer_fill_window(next_fill_half * AUDIO_HALF_SIZE, AUDIO_HALF_SIZE);
+	if (output_is_16bit) {
+		/* 16-bit mono: AUDIO_HALF_SIZE bytes = AUDIO_HALF_SIZE/2 frames. */
+		unsigned int frames = AUDIO_HALF_SIZE / 2u;
+		unsigned char *dst = (unsigned char *)audio_buffer +
+		                     next_fill_half * AUDIO_HALF_SIZE;
+		mixer_fill_window_s16(dst, frames);
+	} else {
+		mixer_fill_window(next_fill_half * AUDIO_HALF_SIZE, AUDIO_HALF_SIZE);
+	}
 	next_fill_half ^= 1;
 	(void)inb(SB_BASE + 0xE);              /* 8-bit DMA ack */
 	(void)inb(SB_BASE + 0xF);              /* 16-bit DMA ack */
@@ -413,8 +426,45 @@ int audio_start_output(void)
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
 	next_fill_half = 0;
-	output_running = 1;
+	output_is_16bit = 0;
+	output_running  = 1;
 	serial_write("audio: SB16 output started, 22050 Hz mono u8, half-buffer IRQs\n");
+	return 0;
+}
+
+/* Auto-init signed 16-bit mono PCM via DMA channel 5 + DSP command
+ * 0xB6. Same half-buffer ping-pong as the 8-bit path; the IRQ branches
+ * on output_is_16bit to pick mixer_fill_window_s16. Buffer holds half
+ * as many samples (2 bytes each) but the same wall-time at the same
+ * sample rate. Either start function can be called; the most recent
+ * wins, but tearing down + re-arming the DSP between modes is the
+ * caller's job. */
+int audio_start_output_16bit(void)
+{
+	if (!sb_present)
+		return -1;
+	if (output_running)
+		return 0;
+
+	dma_channel5_program((unsigned int)audio_buffer,
+	                     AUDIO_BUFFER_SIZE,
+	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
+
+	dsp_write(DSP_SPEAKER_ON);
+	dsp_set_output_rate(AUDIO_RATE_HZ);
+
+	/* 16-bit DSP block size is in SAMPLES, not bytes. AUDIO_HALF_SIZE
+	 * bytes = AUDIO_HALF_SIZE/2 frames in mono s16. */
+	unsigned int count = (AUDIO_HALF_SIZE / 2u) - 1u;
+	dsp_write(DSP_OUTPUT_16BIT_AI);
+	dsp_write(DSP_MODE_MONO_S16);
+	dsp_write((unsigned char)(count & 0xFF));
+	dsp_write((unsigned char)((count >> 8) & 0xFF));
+
+	next_fill_half = 0;
+	output_is_16bit = 1;
+	output_running  = 1;
+	serial_write("audio: SB16 output started, 22050 Hz mono s16, half-buffer IRQs\n");
 	return 0;
 }
 
