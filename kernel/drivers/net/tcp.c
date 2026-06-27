@@ -27,7 +27,6 @@
 #define TCP_MAX_CONNS    8
 #define TCP_BUFFER_SIZE  4096
 #define TCP_MSS          1460
-#define TCP_DEFAULT_WIN  4096
 
 #define EPHEMERAL_BASE   49152
 
@@ -76,7 +75,8 @@ struct tcb {
 	unsigned int    snd_nxt;        /* next seq to send      */
 	unsigned int    snd_wnd;        /* peer-advertised window */
 	unsigned int    rcv_nxt;        /* next seq we expect    */
-	unsigned int    rcv_wnd;        /* our advertised window */
+	/* note: advertised receive window is computed fresh from rx ring
+	 * free space at every emit -- no static field needed. */
 
 	unsigned char   rx_buf[TCP_BUFFER_SIZE];
 	unsigned int    rx_head;        /* next byte to deliver to user */
@@ -202,7 +202,6 @@ static int tcb_alloc(void)
 			t->state  = TCP_CLOSED;
 			t->rx_head = t->rx_tail = 0;
 			t->tx_head = t->tx_tail = 0;
-			t->rcv_wnd = TCP_BUFFER_SIZE;
 			t->last_seg_ticks = 0;
 			t->rto_ticks      = TCP_RTO_INITIAL;
 			t->retries        = 0;
@@ -535,7 +534,7 @@ static void tcp_emit_rst(ipv4_t src_ip, const struct tcp_hdr *in_hdr)
 	scratch.snd_nxt     = (in_hdr->flags & TCP_ACK) ? ntohl(in_hdr->ack) : 0;
 	scratch.rcv_nxt     = ntohl(in_hdr->seq) +
 	                      ((in_hdr->flags & TCP_SYN) ? 1u : 0u);
-	scratch.rcv_wnd     = 0;
+	scratch.rx_head = scratch.rx_tail = 0;  /* tcb_rx_wnd reads these */
 	tcp_emit(&scratch, TCP_RST | TCP_ACK, (void *)0, 0);
 }
 
