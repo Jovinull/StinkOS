@@ -651,8 +651,38 @@ void main(void)
 			if (n <= 0) {
 				term_print("(klog empty)", TERM_FG);
 			} else {
-				int ls = 0;
-				for (int i = 0; i < n; i++) {
+				/* `dmesg -n N` or `dmesg N` shows only the last N lines.
+				 * Useful when the ring is full and only the tail matters
+				 * (e.g. boot is done, we just want recent activity). */
+				int tail_n = 0;
+				const char *p = rest;
+				if (p[0] == '-' && p[1] == 'n') {
+					p += 2;
+					while (*p == ' ' || *p == '\t') p++;
+				}
+				while (*p >= '0' && *p <= '9') {
+					tail_n = tail_n * 10 + (*p - '0');
+					p++;
+				}
+				int start = 0;
+				if (tail_n > 0) {
+					int total = 0;
+					for (int i = 0; i < n; i++)
+						if (klog_buf[i] == '\n') total++;
+					if (klog_buf[n - 1] != '\n') total++;
+					int skip = total - tail_n;
+					if (skip > 0) {
+						int seen = 0;
+						for (int i = 0; i < n && seen < skip; i++) {
+							if (klog_buf[i] == '\n') {
+								seen++;
+								start = i + 1;
+							}
+						}
+					}
+				}
+				int ls = start;
+				for (int i = start; i < n; i++) {
 					if (klog_buf[i] == '\n' || i == n - 1) {
 						int end = (i == n - 1 && klog_buf[i] != '\n') ? i + 1 : i;
 						char line2[TERM_COLS + 1];
