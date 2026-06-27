@@ -234,6 +234,41 @@ static void mixer_fill_window(unsigned int offset, unsigned int n)
 	}
 }
 
+/* 16-bit signed equivalent of mixer_fill_window. Walks the same channel
+ * table the IRQ owns, but expands each per-channel u8-centred sample to
+ * the full s16 range (multiply by 256) before summing, then clamps to
+ * [-32768, 32767] and stores little-endian into the destination buffer.
+ * Used by the SB16 16-bit DMA path when audio_start_output is wired to
+ * channel 5; harmless to call early -- nothing reads its output until
+ * the playback path flips over. */
+static void mixer_fill_window_s16(unsigned char *dst, unsigned int frames)
+{
+	for (unsigned int i = 0; i < frames; i++) {
+		int sum = 0;
+		for (int c = 0; c < MIX_CHANNELS; c++) {
+			struct mix_channel *ch = &channels[c];
+			if (!ch->active)
+				continue;
+			unsigned int idx = ch->pos >> 16;
+			if (idx >= ch->length) {
+				ch->active = 0;
+				continue;
+			}
+			/* u8 -> s16: subtract bias, scale by 256 to expand the
+			 * 8-bit dynamic range into the 16-bit slot. Per-channel
+			 * volume is still applied as a 0..256 fixed-point gain. */
+			int s = ((int)ch->src[idx] - 128) << 8;
+			sum += (s * ch->volume) >> 8;
+			ch->pos += ch->step;
+		}
+		sum = (sum * master_volume) >> 8;
+		if (sum >  32767) sum =  32767;
+		if (sum < -32768) sum = -32768;
+		dst[i * 2 + 0] = (unsigned char)(sum & 0xFF);
+		dst[i * 2 + 1] = (unsigned char)((sum >> 8) & 0xFF);
+	}
+}
+
 void audio_set_master(int volume)
 {
 	if (volume < 0)   volume = 0;
