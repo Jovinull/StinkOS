@@ -47,6 +47,41 @@ static int wait_key(int allowed)
 	}
 }
 
+/* Read a decimal-digit line ending in Enter. Returns the parsed value,
+ * or -1 on escape, or -2 on empty Enter (caller picks a default). */
+static int read_uint_line(int x, int y, unsigned int *out)
+{
+	char buf[12];
+	unsigned int len = 0;
+	*out = 0;
+	for (;;) {
+		int c = sys_getkey();
+		if (c == 0) { sys_sleep_ms(20); continue; }
+		if (c == 27) return -1;
+		if (c == '\n' || c == '\r') {
+			if (len == 0) return -2;
+			buf[len] = '\0';
+			unsigned int v = 0;
+			for (unsigned int i = 0; i < len; i++)
+				v = v * 10u + (unsigned int)(buf[i] - '0');
+			*out = v;
+			return 0;
+		}
+		if (c == '\b' && len > 0) {
+			len--;
+			sys_fillrect(x, y, (int)sizeof(buf) * 8, 16, COLOR_PANEL);
+			buf[len] = '\0';
+			if (len > 0) sys_drawtext(x, y, buf, COLOR_TEXT);
+			continue;
+		}
+		if (c >= '0' && c <= '9' && len < sizeof(buf) - 1) {
+			buf[len++] = (char)c;
+			buf[len]   = '\0';
+			sys_drawtext(x, y, buf, COLOR_TEXT);
+		}
+	}
+}
+
 static void format_dec(unsigned int v, char *out)
 {
 	char tmp[12];
@@ -121,13 +156,37 @@ void main(void)
 	}
 	draw_status(280, "size check:", "OK", COLOR_OK);
 
-	sys_drawtext(140, 320,
+	/* Optional install size override. Default (blank Enter) clones the
+	 * full source disk; a typed sector count installs a truncated image
+	 * for smaller targets. A floor of 8 MiB (16384 sectors) keeps the
+	 * kernel + StinkFS dir + a tiny data region safe. */
+	const unsigned int MIN_SECTORS = 16384u;            /* 8 MiB */
+	unsigned int install_sectors = src_sectors;
+	sys_drawtext(140, 310, "install size (sectors, Enter=full):", COLOR_DIM);
+	unsigned int typed = 0;
+	int rl = read_uint_line(500, 310, &typed);
+	if (rl == -1) {
+		draw_status(400, "cancelled.", "", COLOR_DIM);
+		sys_sleep_ms(800); sys_exit();
+	}
+	if (rl == 0) {
+		if (typed < MIN_SECTORS || typed > src_sectors) {
+			draw_status(400, "size out of range",
+			            "(min 16384, max source)", COLOR_ERR);
+			wait_key(0); sys_exit();
+		}
+		install_sectors = typed;
+	}
+	format_dec(install_sectors, num);
+	draw_status(330, "chosen size:", num, COLOR_OK);
+
+	sys_drawtext(140, 360,
 	             "WARNING: everything on the target will be overwritten.", COLOR_WARN);
-	sys_drawtext(140, 340, "press y to install, esc to abort.", COLOR_TEXT);
+	sys_drawtext(140, 380, "press y to install, esc to abort.", COLOR_TEXT);
 
 	int k = wait_key(0);
 	if (k != 'y') {
-		draw_status(400, "cancelled.", "", COLOR_DIM);
+		draw_status(440, "cancelled.", "", COLOR_DIM);
 		sys_sleep_ms(800); sys_exit();
 	}
 
@@ -147,7 +206,7 @@ void main(void)
 		wait_key(0); sys_exit();
 	}
 
-	unsigned int total = src_sectors;
+	unsigned int total = install_sectors;
 	unsigned int copied = 0;
 	const unsigned int chunk = 256;             /* 128 KiB per syscall */
 	while (copied < total) {
