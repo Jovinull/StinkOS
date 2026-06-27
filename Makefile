@@ -566,7 +566,10 @@ $(TEST_BIN)/test_rtc_alarm: $(TEST_DIR)/test_rtc_alarm.c | $(TEST_BIN)
 $(TEST_BIN)/test_tcp_tcb_sim: $(TEST_DIR)/test_tcp_tcb_sim.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_tcp_tcb_sim.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim
+$(TEST_BIN)/test_audio_mode: $(TEST_DIR)/test_audio_mode.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_audio_mode.c
+
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim $(TEST_BIN)/test_audio_mode
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
@@ -599,6 +602,7 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 	$(TEST_BIN)/test_ipv4_srcroute
 	$(TEST_BIN)/test_rtc_alarm
 	$(TEST_BIN)/test_tcp_tcb_sim
+	$(TEST_BIN)/test_audio_mode
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
