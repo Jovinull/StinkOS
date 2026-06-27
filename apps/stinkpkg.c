@@ -139,6 +139,7 @@ static void show_menu(void)
 	sys_drawtext(140, 210, "i  install a package by name",     COLOR_TEXT);
 	sys_drawtext(160, 215, "I  install without resolving deps",  COLOR_DIM);
 	sys_drawtext(160, 222, "R  replay STINKPKG.LCK lockfile",    COLOR_DIM);
+	sys_drawtext(160, 229, "V  verify STINKDB vs lockfile",      COLOR_DIM);
 	sys_drawtext(140, 230, "g  upgrade installed packages",    COLOR_TEXT);
 	sys_drawtext(140, 250, "r  remove an installed package",   COLOR_TEXT);
 	sys_drawtext(140, 270, "y  inspect a .stinkpkg in StinkFS",COLOR_TEXT);
@@ -703,6 +704,103 @@ static void cmd_install(void)
 	wait_any_key(310, "press any key.", COLOR_DIM);
 }
 
+/* Look up `name` in STINKPKG.LCK and copy its SHA into out_hex.
+ * Returns 0 on hit, -1 if the lockfile is missing or the name isn't there. */
+static int lock_sha(const char *name, char *out_hex)
+{
+	char lock[2048];
+	int  n = sys_fread("STINKPKG.LCK", lock, sizeof(lock) - 1);
+	if (n <= 0)
+		return -1;
+	lock[n] = '\0';
+
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (lock[i] != '\n' && lock[i] != '\0')
+			continue;
+		lock[i] = '\0';
+		const char *line = lock + ls;
+		int k = 0;
+		while (name[k] && line[k] == name[k]) k++;
+		if (name[k] == '\0' && line[k] == ' ') {
+			const char *p = line + k + 1;
+			while (*p == ' ') p++;
+			while (*p && *p != ' ') p++;           /* skip version */
+			while (*p == ' ') p++;
+			int h = 0;
+			while (h < 64 && p[h] && p[h] != ' ') {
+				out_hex[h] = p[h];
+				h++;
+			}
+			out_hex[h] = '\0';
+			return h == 64 ? 0 : -1;
+		}
+		ls = i + 1;
+	}
+	return -1;
+}
+
+/* Walk STINKDB and report each installed package's lockfile status: green
+ * if STINKPKG.LCK has a matching SHA entry, dim red if not. Catches
+ * packages that landed via a non-standard path (manual sys_fwrite, partial
+ * install, etc) so the user knows the lockfile is incomplete. */
+static void cmd_verify(void)
+{
+	draw_header("verify (STINKDB vs STINKPKG.LCK)");
+
+	char db[2048];
+	int  dn = sys_fread("STINKDB", db, sizeof(db) - 1);
+	if (dn <= 0) {
+		sys_drawtext(140, 150, "no STINKDB -- nothing installed.", COLOR_DIM);
+		wait_any_key(180, "press any key.", COLOR_DIM);
+		return;
+	}
+	db[dn] = '\0';
+
+	int y = 150;
+	int locked = 0, unlocked = 0;
+	int ls = 0;
+	for (int i = 0; i <= dn; i++) {
+		if (db[i] != '\n' && db[i] != '\0')
+			continue;
+		db[i] = '\0';
+		if (i > ls) {
+			char name[32];
+			int j = ls, k = 0;
+			while (j < i && db[j] != ' ' && k + 1 < (int)sizeof(name))
+				name[k++] = db[j++];
+			name[k] = '\0';
+			if (name[0]) {
+				char sha[65];
+				int rc = lock_sha(name, sha);
+				if (rc == 0) {
+					locked++;
+					sys_drawtext(140, y, name, COLOR_OK);
+					sys_drawtext(280, y, "locked  ", COLOR_OK);
+					sha[16] = '\0';            /* trim for screen width */
+					sys_drawtext(380, y, sha, COLOR_DIM);
+				} else {
+					unlocked++;
+					sys_drawtext(140, y, name, COLOR_ERR);
+					sys_drawtext(280, y, "no lockfile entry", COLOR_ERR);
+				}
+				y += 16;
+				if (y > 600) break;
+			}
+		}
+		ls = i + 1;
+	}
+
+	char num[16];
+	uitoa((unsigned int)locked, 10, num);
+	sys_drawtext(140, y + 8, "locked:",   COLOR_OK);
+	sys_drawtext(220, y + 8, num,         COLOR_TEXT);
+	uitoa((unsigned int)unlocked, 10, num);
+	sys_drawtext(280, y + 8, "unlocked:", COLOR_ERR);
+	sys_drawtext(380, y + 8, num,         COLOR_TEXT);
+	wait_any_key(y + 40, "press any key.", COLOR_DIM);
+}
+
 /* Re-install every entry of STINKPKG.LCK that isn't already in STINKDB.
  * Each lockfile line is "<name> <version> <sha256>"; we ignore the SHA
  * (the install path re-verifies against the current repo index) and the
@@ -1090,6 +1188,7 @@ void main(void)
 		case 'i': cmd_install();        break;
 		case 'I': cmd_install_no_deps(); break;
 		case 'R': cmd_replay();         break;
+		case 'V': cmd_verify();         break;
 		case 'g': cmd_upgrade();        break;
 		case 'y': cmd_query();          break;
 		case 'r': cmd_remove();  break;
