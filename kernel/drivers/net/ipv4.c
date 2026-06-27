@@ -231,6 +231,28 @@ void ip_handle(const void *payload, unsigned int len)
 	if (ipv4_checksum(h, ihl) != 0)
 		return;
 
+	/* RFC 1812 §5.3.5 / RFC 7126: source-routed packets (LSRR opt 131,
+	 * SSRR opt 137) let an attacker dictate the return path. Every
+	 * modern host drops them on receive. The IPv4 options sit between
+	 * the fixed 20-byte header and ihl*4; walk them looking for the
+	 * dangerous kinds. */
+	if (ihl > sizeof(struct ipv4_hdr)) {
+		const unsigned char *opts =
+		    (const unsigned char *)payload + sizeof(struct ipv4_hdr);
+		unsigned int olen = ihl - sizeof(struct ipv4_hdr);
+		for (unsigned int i = 0; i < olen; ) {
+			unsigned char kind = opts[i];
+			if (kind == 0) break;          /* end of options */
+			if (kind == 1) { i++; continue; } /* NOP */
+			if (i + 1 >= olen) break;
+			unsigned char optlen = opts[i + 1];
+			if (optlen < 2 || i + optlen > olen) break;
+			if (kind == 131 || kind == 137) /* LSRR / SSRR */
+				return;
+			i += optlen;
+		}
+	}
+
 	const unsigned char *pld = (const unsigned char *)payload + ihl;
 	unsigned int         pld_len = total - ihl;
 
