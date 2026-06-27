@@ -410,7 +410,7 @@ void main(void)
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
 			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
-			term_print("keymap us|br  version", TERM_FG);
+			term_print("audio [u8|s16|stereo]  keymap us|br  version", TERM_FG);
 		} else if (strcmp(line, "version") == 0) {
 			/* Stamped at compile time so a runtime user can answer
 			 * "which build is this" without rebooting -- handy when
@@ -482,6 +482,27 @@ void main(void)
 					tprintf("alarm: armed at %02d:%02d:%02d", h, m, s);
 				else
 					term_print("alarm: bad time (range or syscall failed)", TERM_ERR);
+			}
+		} else if (strcmp(line, "audio") == 0) {
+			/* "audio" -> show current mode.
+			 * "audio u8|s16|stereo" -> switch (stops current playback). */
+			if (rest[0] == '\0') {
+				int m = sys_audio_query();
+				if (m < 0) term_print("audio: not armed", TERM_DIM);
+				else if (m == 0) term_print("audio: mono u8", TERM_FG);
+				else if (m == 1) term_print("audio: mono s16", TERM_FG);
+				else if (m == 2) term_print("audio: stereo s16", TERM_FG);
+			} else {
+				int target = -1;
+				if      (strcmp(rest, "u8")     == 0) target = SYS_AUDIO_MODE_MONO_U8;
+				else if (strcmp(rest, "s16")    == 0) target = SYS_AUDIO_MODE_MONO_S16;
+				else if (strcmp(rest, "stereo") == 0) target = SYS_AUDIO_MODE_STEREO_S16;
+				if (target < 0)
+					term_print("usage: audio u8|s16|stereo", TERM_DIM);
+				else if (sys_audio_mode(target) == 0)
+					tprintf("audio: switched to mode %d", target);
+				else
+					term_print("audio: switch failed (no SB16?)", TERM_ERR);
 			}
 		} else if (strcmp(line, "keymap") == 0) {
 			/* "keymap" -> show current layout (best-effort: we set what
