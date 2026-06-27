@@ -135,11 +135,16 @@ unsigned int paging_user_stack_top(void)  { return USER_STACK_TOP; }
 
 /* Release every heap page the previous app mapped, then rewind the bump
  * pointer. Also restores the FB PDE to a kernel-only identity mapping so the
- * next app cannot access the LFB until it explicitly calls SYS_MAP_FB. */
+ * next app cannot access the LFB until it explicitly calls SYS_MAP_FB.
+ * Counts and logs the frame reclamation so a memory-leak sweep can spot
+ * regressions in app teardown. */
 void paging_reset_user_heap(void)
 {
-	for (unsigned int v = USER_HEAP_LO; v < user_heap_next; v += PAGE_4KB)
+	unsigned int reclaimed = 0;
+	for (unsigned int v = USER_HEAP_LO; v < user_heap_next; v += PAGE_4KB) {
 		unmap_user_page(v);
+		reclaimed++;
+	}
 	user_heap_next = USER_HEAP_LO;
 
 	if (fb_pde_mapped) {
@@ -147,6 +152,15 @@ void paging_reset_user_heap(void)
 		page_dir[idx] = (idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
 		fb_pde_mapped = 0;
 		load_cr3();
+	}
+
+	if (reclaimed > 0) {
+		extern void serial_write(const char *);
+		extern void serial_write_dec(unsigned int);
+		extern void serial_putc(char);
+		serial_write("paging: reclaimed ");
+		serial_write_dec(reclaimed);
+		serial_write(" user heap frames\n");
 	}
 }
 
@@ -210,6 +224,20 @@ unsigned int paging_user_mmap(unsigned int size)
 		user_heap_next += PAGE_4KB;
 	}
 	return base;
+}
+
+unsigned int paging_user_mapped_pages(void)
+{
+	unsigned int n = 0;
+	for (unsigned int p = 0; p < USER_PDES; p++) {
+		unsigned int *pt = user_pts[p];
+		if (!pt)
+			continue;
+		for (unsigned int e = 0; e < ENTRIES; e++)
+			if (pt[e] & PG_PRESENT)
+				n++;
+	}
+	return n;
 }
 
 int paging_user_munmap(unsigned int addr, unsigned int size)

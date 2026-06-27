@@ -26,6 +26,13 @@ unsigned int paging_user_mmap(unsigned int size);
  * success, -1 if the range falls outside the heap region. */
 int          paging_user_munmap(unsigned int addr, unsigned int size);
 
+/* Diagnostics: counts present PTEs across the user region. The kernel logs
+ * a "paging: reclaimed N frames" line on every app reset; a follow-up call
+ * lets a test harness assert "the user region is fully drained" instead of
+ * trusting the log. Excludes the framebuffer PSE PDE -- it is mapped on
+ * demand by SYS_MAP_FB and tracked separately. */
+unsigned int paging_user_mapped_pages(void);
+
 /* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
 int paging_user_range_ok(unsigned int addr, unsigned int len);
 
