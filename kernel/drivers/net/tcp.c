@@ -115,6 +115,15 @@ struct tcb {
 		unsigned char buf[TCP_MSS];
 	} ooo[2];
 
+	/* Peer-side SACK scoreboard (RFC 2018, sender-side use): the lowest
+	 * left edge of any SACK block in the most recent ACK. Zero means the
+	 * peer reported no SACKed ranges (or none ahead of snd_una), so the
+	 * retransmit path falls back to plain Reno. When non-zero AND ahead
+	 * of snd_una, tcp_retransmit clamps its chunk so we never resend
+	 * bytes the peer has already acknowledged out-of-order. Only the
+	 * lowest left edge is tracked -- that's the gap we MUST fill. */
+	unsigned int    peer_sack_lo;
+
 	/* Fast retransmit (RFC 5681 §3.2): count consecutive duplicate ACKs.
 	 * A "dup ACK" is an ACK that does not advance snd_una, carries no
 	 * payload, and does not shrink/grow the peer window. After 3 dups in
@@ -166,6 +175,7 @@ static int tcb_alloc(void)
 			t->last_activity_ticks  = 0;
 			t->last_keepalive_ticks = 0;
 			t->dup_acks             = 0;
+			t->peer_sack_lo         = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
 			return i;
 		}
@@ -264,6 +274,15 @@ static void tcp_retransmit(struct tcb *t)
 		unsigned int chunk = saved - t->snd_una;
 		if (chunk > TCP_MSS)
 			chunk = TCP_MSS;
+		/* SACK sender-side: if the peer has SACKed bytes ahead of us,
+		 * clamp the retransmit so it stops at the lowest sacked left
+		 * edge -- peer already has the rest. peer_sack_lo is only set
+		 * when it lies strictly above snd_una (see ACK handler). */
+		if (t->peer_sack_lo != 0) {
+			unsigned int gap = t->peer_sack_lo - t->snd_una;
+			if (gap > 0 && chunk > gap)
+				chunk = gap;
+		}
 		unsigned char linear[TCP_MSS];
 		for (unsigned int i = 0; i < chunk; i++)
 			linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
@@ -654,6 +673,44 @@ static unsigned char tcp_parse_wscale(const unsigned char *opts,
 	return 0;
 }
 
+/* Scan TCP options for kind=5 (SACK, RFC 2018) and return the LOWEST left
+ * edge across all reported blocks, in host order. Zero means the option is
+ * absent or malformed; the caller must treat zero as "no SACK info". The
+ * option payload is `n * 8` bytes of [left, right] pairs, each in network
+ * order. We only need the smallest left edge -- that's the start of the
+ * earliest hole the peer is asking us to fill. */
+static unsigned int tcp_parse_sack_lo(const unsigned char *opts,
+                                      unsigned int opts_len)
+{
+	unsigned int lowest = 0;
+	int seen = 0;
+	for (unsigned int i = 0; i < opts_len; ) {
+		unsigned char kind = opts[i];
+		if (kind == 0) break;
+		if (kind == 1) { i++; continue; }
+		if (i + 1 >= opts_len) break;
+		unsigned char optlen = opts[i + 1];
+		if (optlen < 2 || i + optlen > opts_len) break;
+		if (kind == 5 && optlen >= 10 && ((optlen - 2u) % 8u) == 0) {
+			unsigned int n = (optlen - 2u) / 8u;
+			for (unsigned int b = 0; b < n; b++) {
+				unsigned int off = i + 2u + b * 8u;
+				unsigned int left =
+				    ((unsigned int)opts[off + 0] << 24) |
+				    ((unsigned int)opts[off + 1] << 16) |
+				    ((unsigned int)opts[off + 2] <<  8) |
+				    ((unsigned int)opts[off + 3]);
+				if (!seen || left < lowest) {
+					lowest = left;
+					seen = 1;
+				}
+			}
+		}
+		i += optlen;
+	}
+	return seen ? lowest : 0u;
+}
+
 /* Scale the peer's raw 16-bit window value by their advertised shift. */
 static unsigned int tcp_apply_wscale(const struct tcb *t, const struct tcp_hdr *h)
 {
@@ -781,6 +838,20 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			unsigned int data_off_dbg = (h->data_off >> 4) * 4u;
 			unsigned int payload_dbg = (data_off_dbg <= len)
 			    ? (len - data_off_dbg) : 0;
+			/* Refresh the peer's SACK scoreboard. Anything <= snd_una
+			 * is irrelevant (peer ACKed it cumulatively); store only
+			 * the lowest left edge that lies ahead of snd_una. */
+			{
+				const unsigned char *opts =
+				    (const unsigned char *)payload + sizeof(struct tcp_hdr);
+				unsigned int olen = (data_off_dbg >= sizeof(struct tcp_hdr))
+				    ? (data_off_dbg - sizeof(struct tcp_hdr)) : 0;
+				unsigned int lo = tcp_parse_sack_lo(opts, olen);
+				if (lo != 0 && (int)(lo - t->snd_una) > 0)
+					t->peer_sack_lo = lo;
+				else
+					t->peer_sack_lo = 0;
+			}
 			/* Dup-ACK detector: ACK that does NOT advance snd_una,
 			 * carries no payload, and still has unacked data in
 			 * flight. Three such ACKs in a row trigger fast
