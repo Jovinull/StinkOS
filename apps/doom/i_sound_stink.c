@@ -105,9 +105,12 @@ static int Stink_StartSound(sfxinfo_t *sfx, int channel, int vol, int sep)
 
 	const unsigned char *src = lump + 8;
 
-	/* Upsample 11025 -> 22050 by duplicating each sample. Wastes CPU + RAM
-	 * compared to fixed-point step in the mixer, but it's simple and keeps
-	 * the kernel side at one playback rate. Refactor when latency matters. */
+	/* Upsample 11025 -> 22050 with linear interpolation. Each source sample
+	 * keeps its position at the even output index, and the interleaved odd
+	 * index gets the average of its two neighbours. This costs one add and
+	 * one shift per inserted sample vs. plain duplication, removing the
+	 * audible staircase that the prior sample-duplication path produced --
+	 * especially noticeable on tonal SFX (chainsaw idle, BFG charge). */
 	unsigned int up_len = num_samples * 2;
 	unsigned char *up = malloc(up_len);
 	if (!up) {
@@ -115,8 +118,10 @@ static int Stink_StartSound(sfxinfo_t *sfx, int channel, int vol, int sep)
 		return -1;
 	}
 	for (unsigned int i = 0; i < num_samples; i++) {
-		up[i * 2]     = src[i];
-		up[i * 2 + 1] = src[i];
+		unsigned char cur = src[i];
+		unsigned char nxt = (i + 1 < num_samples) ? src[i + 1] : cur;
+		up[i * 2]     = cur;
+		up[i * 2 + 1] = (unsigned char)(((unsigned)cur + (unsigned)nxt) >> 1);
 	}
 	W_ReleaseLumpNum(sfx->lumpnum);
 
