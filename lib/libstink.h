@@ -211,6 +211,13 @@ static inline int sys_rtc_read(struct sys_rtc_time *out)
 static inline int sys_klog_read(void *buf, unsigned int cap)
                                                  { return __syscall(68, (int)buf, (int)cap, 0); }
 
+/* Pause / resume a process by PID. sys_suspend also silences the target's
+ * mixer channels so a backgrounded app does not keep emitting audio.
+ * sys_resume flips it back to PROC_READY so the next scheduler tick picks
+ * it up. Returns 0 / -1. PID 1 (kinit) cannot be suspended. */
+static inline int sys_suspend(int pid)           { return __syscall(69, pid, 0, 0); }
+static inline int sys_resume(int pid)            { return __syscall(70, pid, 0, 0); }
+
 /* Power off / reboot the machine. Both calls block until the operation
  * completes (or wedge forever on hardware that lacks the conventional
  * shutdown port -- the kernel falls back to a `hlt` loop in that case).

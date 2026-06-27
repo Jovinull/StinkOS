@@ -331,6 +331,33 @@ void syscall_dispatch(struct regs *r)
 		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
 		serial_write("shutdown: requested but no compatible path -- halting\n");
 		for (;;) __asm__ volatile ("cli; hlt");
+	case 69: {                                 /* SYS_SUSPEND: ebx=pid -> 0 / -1 */
+		int pid = (int)r->ebx;
+		if (pid <= 1) {                       /* never freeze the kernel proc */
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *target = proc_get(pid);
+		if (!target || target->state == PROC_ZOMBIE) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		target->state = PROC_SLEEPING;
+		audio_mix_silence_pid(pid);           /* hush its mixer channels */
+		r->eax = 0;
+		break;
+	}
+	case 70: {                                 /* SYS_RESUME: ebx=pid -> 0 / -1 */
+		int pid = (int)r->ebx;
+		struct proc *target = proc_get(pid);
+		if (!target || target->state != PROC_SLEEPING) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		target->state = PROC_READY;
+		r->eax = 0;
+		break;
+	}
 	case 68: {                                 /* SYS_KLOG_READ: ebx=buf ecx=cap -> bytes copied */
 		if (!paging_user_range_ok(r->ebx, r->ecx)) {
 			r->eax = (unsigned int)-1;
