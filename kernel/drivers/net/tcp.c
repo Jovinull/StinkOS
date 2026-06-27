@@ -92,6 +92,12 @@ struct tcb {
 	 * enough to fit in the raw 16-bit field, so we never emit kind=3. */
 	unsigned char   peer_wscale;
 
+	/* Maximum segment size the peer announced via TCP option kind=2.
+	 * Clamps our outbound chunk size in tcp_drain_tx; defaults to TCP_MSS
+	 * (matches the legacy 536-byte minimum RFC 879 path-MTU when the
+	 * peer omits the option). */
+	unsigned short  peer_mss;
+
 	/* Keepalive: last_activity_ticks bumps on every RX; last_keepalive_ticks
 	 * paces the probes themselves. Both unused (zero) until we've seen the
 	 * first byte from the peer in ESTABLISHED. */
@@ -147,6 +153,7 @@ static int tcb_alloc(void)
 			t->cwnd           = 2u * TCP_MSS;     /* IW=2 segments */
 			t->ssthresh       = 64u * TCP_MSS;    /* high; first loss tightens it */
 			t->peer_wscale    = 0;
+			t->peer_mss       = TCP_MSS;
 			t->last_activity_ticks  = 0;
 			t->last_keepalive_ticks = 0;
 			for (int k = 0; k < 2; k++) t->ooo[k].used = 0;
@@ -368,8 +375,9 @@ static void tcp_drain_tx(struct tcb *t)
 			budget = peer_room;
 
 		unsigned int chunk = avail;
-		if (chunk > TCP_MSS) chunk = TCP_MSS;
-		if (chunk > budget)  chunk = budget;
+		unsigned int cap   = t->peer_mss ? t->peer_mss : TCP_MSS;
+		if (chunk > cap)    chunk = cap;
+		if (chunk > budget) chunk = budget;
 		if (chunk == 0)
 			return;
 
@@ -559,6 +567,26 @@ static void tcp_emit_sack_ack(struct tcb *t)
 	ipv4_send(t->remote_ip, IP_PROTO_TCP, buf, off);
 }
 
+/* Scan TCP options for kind=2 (Maximum Segment Size, RFC 793). Returns the
+ * announced MSS in host order, or 0 if absent / malformed. Caller clamps. */
+static unsigned short tcp_parse_mss(const unsigned char *opts,
+                                    unsigned int opts_len)
+{
+	for (unsigned int i = 0; i < opts_len; ) {
+		unsigned char kind = opts[i];
+		if (kind == 0) break;
+		if (kind == 1) { i++; continue; }
+		if (i + 1 >= opts_len) break;
+		unsigned char optlen = opts[i + 1];
+		if (optlen < 2 || i + optlen > opts_len) break;
+		if (kind == 2 && optlen == 4 && i + 4 <= opts_len) {
+			return (unsigned short)((opts[i + 2] << 8) | opts[i + 3]);
+		}
+		i += optlen;
+	}
+	return 0;
+}
+
 /* Scan TCP options between the fixed 20-byte header and `data_off` for the
  * window-scale (kind=3, len=3) option. Returns the shift count (0..14) the
  * peer advertised, or 0 if no scale option is present or the option set is
@@ -632,16 +660,22 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 			t->snd_una     = initial_seq;
 			t->snd_nxt     = initial_seq;
 			t->rcv_nxt     = seg_seq + 1;
-			/* Pick up the peer's window-scale before applying the
-			 * window so snd_wnd starts at the correct byte count. */
+			/* Pick up the peer's window-scale + MSS before applying
+			 * the window so snd_wnd starts at the correct byte
+			 * count and tcp_drain_tx caps chunks correctly. */
 			{
 				unsigned int data_off = (h->data_off >> 4) * 4u;
 				if (data_off > sizeof(struct tcp_hdr) &&
 				    data_off <= len) {
-					t->peer_wscale = tcp_parse_wscale(
+					const unsigned char *opts =
 					    (const unsigned char *)payload +
-					        sizeof(struct tcp_hdr),
-					    data_off - sizeof(struct tcp_hdr));
+					        sizeof(struct tcp_hdr);
+					unsigned int olen =
+					    data_off - sizeof(struct tcp_hdr);
+					t->peer_wscale = tcp_parse_wscale(opts, olen);
+					unsigned short mss = tcp_parse_mss(opts, olen);
+					if (mss >= 64 && mss <= TCP_MSS)
+						t->peer_mss = mss;
 				}
 			}
 			t->snd_wnd     = tcp_apply_wscale(t, h);
@@ -670,15 +704,20 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 		    seg_ack == t->snd_nxt) {
 			t->rcv_nxt = seg_seq + 1;
 			t->snd_una = seg_ack;
-			/* SYN-ACK is the only chance to learn the peer scale. */
+			/* SYN-ACK is the only chance to learn peer scale + MSS. */
 			{
 				unsigned int data_off = (h->data_off >> 4) * 4u;
 				if (data_off > sizeof(struct tcp_hdr) &&
 				    data_off <= len) {
-					t->peer_wscale = tcp_parse_wscale(
+					const unsigned char *opts =
 					    (const unsigned char *)payload +
-					        sizeof(struct tcp_hdr),
-					    data_off - sizeof(struct tcp_hdr));
+					        sizeof(struct tcp_hdr);
+					unsigned int olen =
+					    data_off - sizeof(struct tcp_hdr);
+					t->peer_wscale = tcp_parse_wscale(opts, olen);
+					unsigned short mss = tcp_parse_mss(opts, olen);
+					if (mss >= 64 && mss <= TCP_MSS)
+						t->peer_mss = mss;
 				}
 			}
 			t->snd_wnd = tcp_apply_wscale(t, h);
