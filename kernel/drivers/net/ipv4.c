@@ -281,11 +281,26 @@ void ip_handle(const void *payload, unsigned int len)
 	if (!r)
 		return;
 
+	unsigned int unit_start = frag_off / REASM_UNIT;
+	unsigned int units      = (pld_len + REASM_UNIT - 1u) / REASM_UNIT;
+
+	/* RFC 5722 / RFC 8200: drop the whole datagram if any incoming
+	 * fragment overlaps a unit we've already received. The Teardrop
+	 * class of attacks relies on the overwrite of in-place reassembly
+	 * bytes; silently discarding the entire slot frees the resources
+	 * and forces the legitimate sender (if any) to start over. */
+	for (unsigned int u = unit_start; u < unit_start + units; u++) {
+		if (u >= REASM_MAXLEN / REASM_UNIT)
+			break;
+		if (r->bitmap[u >> 3] & (unsigned char)(1u << (u & 7u))) {
+			reasm_clear(r);
+			return;
+		}
+	}
+
 	for (unsigned int i = 0; i < pld_len; i++)
 		r->buf[frag_off + i] = pld[i];
 
-	unsigned int unit_start = frag_off / REASM_UNIT;
-	unsigned int units      = (pld_len + REASM_UNIT - 1u) / REASM_UNIT;
 	reasm_mark_units(r, unit_start, units);
 
 	if (!more)
