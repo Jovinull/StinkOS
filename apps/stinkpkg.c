@@ -522,6 +522,61 @@ static int fetch_and_verify(const char *name, int y)
 	return n;
 }
 
+/* Read the pinned version for `name` out of STINKPKG.PIN (one "name version"
+ * line per pin). Writes into out_ver, returns 0 on hit, -1 if no pin file
+ * or no matching line. STINKPKG.PIN is user-editable -- there is no auto-
+ * generated pin today; the user pins by writing the file with the shell. */
+static int pin_get(const char *name, char *out_ver, unsigned int cap)
+{
+	char pinned[1024];
+	int  n = sys_fread("STINKPKG.PIN", pinned, sizeof(pinned) - 1);
+	if (n <= 0)
+		return -1;
+	pinned[n] = '\0';
+
+	int ls = 0;
+	for (int i = 0; i <= n; i++) {
+		if (pinned[i] != '\n' && pinned[i] != '\0')
+			continue;
+		pinned[i] = '\0';
+		const char *line = pinned + ls;
+		int k = 0;
+		while (name[k] && line[k] == name[k]) k++;
+		if (name[k] == '\0' && line[k] == ' ') {
+			const char *p = line + k + 1;
+			unsigned int w = 0;
+			while (*p && *p != ' ' && w + 1 < cap)
+				out_ver[w++] = *p++;
+			out_ver[w] = '\0';
+			return 0;
+		}
+		ls = i + 1;
+	}
+	return -1;
+}
+
+/* Append a lockfile entry for the install we just verified. Format mirrors
+ * the repo index -- "<name> <version> <sha256>\n" -- so the lockfile can
+ * be used as a self-contained reproducibility record (replay the same set
+ * of installs against a different mirror by feeding STINKPKG.LCK back to
+ * stink-pkg via a future "stink-pkg replay" subcommand). */
+static void lockfile_append(const char *name, const char *version,
+                            const char *sha_hex)
+{
+	char line[STINKPKG_NAME_LEN + STINKPKG_VER_LEN + 64 + 8];
+	unsigned int p = 0;
+	for (int i = 0; name[i] && p < sizeof(line) - 1; i++)
+		line[p++] = name[i];
+	if (p < sizeof(line) - 1) line[p++] = ' ';
+	for (int i = 0; version[i] && p < sizeof(line) - 1; i++)
+		line[p++] = version[i];
+	if (p < sizeof(line) - 1) line[p++] = ' ';
+	for (int i = 0; sha_hex[i] && p < sizeof(line) - 1; i++)
+		line[p++] = sha_hex[i];
+	if (p < sizeof(line) - 1) line[p++] = '\n';
+	sys_fappend("STINKPKG.LCK", line, p);
+}
+
 /* Recursive install: walks the header's dependency list, installs anything
  * missing from STINKDB depth-first, then unpacks the requested package.
  * Re-fetches the requested package after the dep loop because the recursive
@@ -544,6 +599,29 @@ static int install_pkg(const char *name, int depth, int progress_y, int force)
 	int n = fetch_and_verify(name, progress_y);
 	if (n < 0)
 		return -1;
+
+	/* Honor STINKPKG.PIN: if the user pinned this package to a specific
+	 * version and the repo index publishes a different one, refuse the
+	 * install instead of silently upgrading past the pin. */
+	{
+		char pinned_ver[STINKPKG_VER_LEN];
+		if (pin_get(name, pinned_ver, sizeof(pinned_ver)) == 0) {
+			char idx_ver[STINKPKG_VER_LEN];
+			if (index_version(name, idx_ver, sizeof(idx_ver)) == 0) {
+				int same = 1;
+				for (unsigned int k = 0; k < sizeof(idx_ver); k++) {
+					if (pinned_ver[k] != idx_ver[k]) { same = 0; break; }
+					if (pinned_ver[k] == '\0') break;
+				}
+				if (!same) {
+					sys_drawtext(140, progress_y,
+					    "pinned to a different version; refusing.",
+					    COLOR_ERR);
+					return -1;
+				}
+			}
+		}
+	}
 
 	/* Snapshot dep names before any recursion clobbers pkg_buf. */
 	const struct stinkpkg_hdr *h = (const struct stinkpkg_hdr *)pkg_buf;
@@ -573,6 +651,26 @@ static int install_pkg(const char *name, int depth, int progress_y, int force)
 	if (unpack_package(pkg_buf, (unsigned int)n) != 0) {
 		sys_drawtext(140, progress_y, "unpack failed (bad format).", COLOR_ERR);
 		return -1;
+	}
+
+	/* Record the install in STINKPKG.LCK so reproducing this exact set on
+	 * another machine is one file copy away. Re-computes the SHA over the
+	 * verified bytes already sitting in pkg_buf -- cheap, and the digest
+	 * needs to land in the lockfile alongside the version. */
+	{
+		const struct stinkpkg_hdr *hh =
+		    (const struct stinkpkg_hdr *)pkg_buf;
+		unsigned char digest[32];
+		sha256(pkg_buf, (unsigned int)n, digest);
+		char sha_hex[65];
+		hex32(digest, sha_hex);
+		char name_z[STINKPKG_NAME_LEN + 1];
+		char ver_z[STINKPKG_VER_LEN + 1];
+		for (int i = 0; i < STINKPKG_NAME_LEN; i++) name_z[i] = hh->name[i];
+		name_z[STINKPKG_NAME_LEN] = '\0';
+		for (int i = 0; i < STINKPKG_VER_LEN; i++) ver_z[i] = hh->version[i];
+		ver_z[STINKPKG_VER_LEN] = '\0';
+		lockfile_append(name_z, ver_z, sha_hex);
 	}
 	return 0;
 }
