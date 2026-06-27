@@ -19,4 +19,10 @@ int    dns_ready(void);
  * failed (NXDOMAIN etc). */
 ipv4_t dns_get_ip(void);
 
+/* Pumped from net_poll_once so an in-flight query that never got a reply
+ * (UDP packet drop) gets retried instead of hanging dns_ready() forever.
+ * Sends up to DNS_MAX_RETRIES copies of the same packet, one per timeout
+ * window, then gives up silently. Cheap when no query is pending. */
+void   dns_tick(void);
+
 #endif

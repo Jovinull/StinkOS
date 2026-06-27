@@ -5,6 +5,7 @@
 #include "ethernet.h"
 #include "e1000.h"
 #include "tcp.h"
+#include "dns.h"
 
 static ipv4_t local_ip;            /* 0 until DHCP (or net_set_local_ip) fills it */
 static mac_t  local_mac;
@@ -30,6 +31,9 @@ int net_poll_once(void)
 	 * arrived -- the wire being silent is precisely when an unacked segment
 	 * needs to be resent. tcp_tick is cheap when no TCB has data in flight. */
 	tcp_tick();
+	/* Same idea for DNS: a dropped UDP query needs a fresh send rather than
+	 * a frozen dns_ready() poll. Cheap when no query is in flight. */
+	dns_tick();
 
 	unsigned char buf[ETH_MAX_FRAME];
 	unsigned int  n = e1000_poll_receive(buf, sizeof(buf));

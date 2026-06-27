@@ -34,6 +34,16 @@ static int               port_bound;
 static int               answer_ready;
 static ipv4_t            answer_ip;
 
+/* Retransmit state for the in-flight query. last_send_tick is set to
+ * pit_ticks() on every send (initial + retry); send_retries counts how
+ * many copies we've already sent. A 2-second timeout per attempt and 3
+ * retries total puts the worst-case latency at ~8 seconds before the
+ * caller's app-level timeout kicks in. */
+#define DNS_RETRY_TICKS   200u    /* 2 s at 100 Hz PIT */
+#define DNS_MAX_RETRIES   3
+static unsigned int       last_send_tick;
+static unsigned char      send_retries;
+
 /* Response cache. 8 entries, fixed 60-second TTL regardless of the per-
  * record TTL the server actually sent -- a hobby OS rarely cares about
  * sub-minute freshness, and dropping the TTL parser keeps this small. */
@@ -194,6 +204,7 @@ static void on_packet(ipv4_t src_ip, unsigned short src_port,
 			unsigned char *ob = (unsigned char *)&answer_ip;
 			ob[0] = p[0]; ob[1] = p[1]; ob[2] = p[2]; ob[3] = p[3];
 			answer_ready = 1;
+			last_send_tick = 0;        /* stop retransmit pump */
 			dns_cache_put(last_query_name, answer_ip);
 			return;
 		}
@@ -254,7 +265,52 @@ int dns_resolve(const char *name)
 	pkt[off++] = 0; pkt[off++] = QTYPE_A;
 	pkt[off++] = 0; pkt[off++] = QCLASS_IN;
 
+	last_send_tick = pit_ticks();
+	send_retries   = 0;
 	return udp_send(dhcp_get_dns(), DNS_PORT, LOCAL_PORT, pkt, off);
+}
+
+/* Re-encode + re-send the same query packet (same id, same qname). The
+ * cached `last_query_name` lets us rebuild the wire format without
+ * holding a static byte buffer. */
+static void dns_retransmit(void)
+{
+	if (!dhcp_bound() || dhcp_get_dns() == 0)
+		return;
+	unsigned char pkt[512];
+	struct dns_hdr *h = (struct dns_hdr *)pkt;
+	h->id       = htons(current_id);
+	h->flags    = htons(DNS_FLAG_RD);
+	h->qd_count = htons(1);
+	h->an_count = 0;
+	h->ns_count = 0;
+	h->ar_count = 0;
+	int qn = encode_qname(last_query_name, pkt + sizeof(*h),
+	                      sizeof(pkt) - sizeof(*h) - 4);
+	if (qn < 0)
+		return;
+	unsigned int off = sizeof(*h) + (unsigned int)qn;
+	pkt[off++] = 0; pkt[off++] = QTYPE_A;
+	pkt[off++] = 0; pkt[off++] = QCLASS_IN;
+	udp_send(dhcp_get_dns(), DNS_PORT, LOCAL_PORT, pkt, off);
+}
+
+void dns_tick(void)
+{
+	if (answer_ready || last_send_tick == 0)
+		return;                    /* nothing in flight */
+	if (send_retries >= DNS_MAX_RETRIES) {
+		/* Exhausted -- mark the slot inert so we don't retry forever.
+		 * The caller's app-level timeout decides what to do next. */
+		last_send_tick = 0;
+		return;
+	}
+	unsigned int now = pit_ticks();
+	if ((now - last_send_tick) < DNS_RETRY_TICKS)
+		return;
+	dns_retransmit();
+	last_send_tick = now;
+	send_retries++;
 }
 
 int    dns_ready(void)   { return answer_ready; }
