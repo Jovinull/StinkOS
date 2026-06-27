@@ -410,7 +410,7 @@ void main(void)
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
 			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
-			term_print("audio [u8|s16|stereo]  keymap us|br  version", TERM_FG);
+			term_print("audio [u8|s16|stereo]  vol [0..256]  keymap us|br  version", TERM_FG);
 		} else if (strcmp(line, "version") == 0) {
 			/* Stamped at compile time so a runtime user can answer
 			 * "which build is this" without rebooting -- handy when
@@ -482,6 +482,27 @@ void main(void)
 					tprintf("alarm: armed at %02d:%02d:%02d", h, m, s);
 				else
 					term_print("alarm: bad time (range or syscall failed)", TERM_ERR);
+			}
+		} else if (strcmp(line, "vol") == 0) {
+			/* "vol" -> show current master.
+			 * "vol N" (0..256) -> set, returns prev. */
+			if (rest[0] == '\0') {
+				int prev = sys_audio_master(-1);  /* read-back: passes
+				                                   * -1 which the
+				                                   * kernel clamps to 0
+				                                   * before applying;
+				                                   * we just want prev. */
+				tprintf("vol: previous master was %d / 256", prev);
+				sys_audio_master(prev);           /* restore */
+			} else {
+				int n = 0;
+				const char *p = rest;
+				while (*p == ' ') p++;
+				while (*p >= '0' && *p <= '9') n = n*10 + (*p++ - '0');
+				if (n < 0) n = 0;
+				if (n > 256) n = 256;
+				int prev = sys_audio_master(n);
+				tprintf("vol: %d -> %d (0..256)", prev, n);
 			}
 		} else if (strcmp(line, "audio") == 0) {
 			/* "audio" -> show current mode.
