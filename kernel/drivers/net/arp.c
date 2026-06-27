@@ -4,6 +4,7 @@
  * two peers + a default gateway. */
 #include "arp.h"
 #include "ethernet.h"
+#include "interrupts.h"     /* pit_ticks() for arp request rate limit */
 
 #define ARP_HW_ETHERNET 1
 #define ARP_PROTO_IPV4  0x0800
@@ -74,6 +75,21 @@ int arp_lookup(ipv4_t ip, mac_t out)
 
 void arp_send_request(ipv4_t target_ip)
 {
+	/* Rate-limit: ipv4_send fires arp_send_request lazily on every TX
+	 * call that hits an unresolved peer, so a userland app that bursts
+	 * UDP packets to a missing destination used to flood the LAN with
+	 * ARP broadcasts. 10 ticks (100 ms at 100 Hz PIT) caps us at ~10
+	 * requests/second per host -- plenty for a real resolve, useless to
+	 * an attacker. State is global (single in-flight resolve is the
+	 * common case); per-target accounting would need a table. */
+	{
+		static unsigned int last_request_tick;
+		unsigned int now = pit_ticks();
+		if (last_request_tick != 0 && (now - last_request_tick) < 10u)
+			return;
+		last_request_tick = now;
+	}
+
 	struct arp_packet p;
 	mac_t my_mac;
 	net_get_local_mac(my_mac);
