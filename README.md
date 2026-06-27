@@ -173,6 +173,20 @@ every subsystem header so they need a single include instead of a long list.
 | ELF loader + Ring 3 entry            | `kernel/sys/elf.c`, `kernel/ui/menu.c`, `boot/usermode_asm.s` |
 | Userland C library                   | `lib/libstink.h`, `apps/crt0.s` |
 
+## Docs
+
+Deep dives live under `docs/`:
+
+| File | Covers |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kernel layout, paging, process model, app lifecycle |
+| [`docs/SYSCALLS.md`](docs/SYSCALLS.md) | Full `int 0x80` number table, args, returns |
+| [`docs/NETWORK.md`](docs/NETWORK.md) | TCP/IP layering, DHCP boot timing, TCP state graph |
+| [`docs/STINKFS.md`](docs/STINKFS.md) | On-disk filesystem format |
+| [`docs/PACKAGING.md`](docs/PACKAGING.md) | How to author a `.stinkpkg` |
+| [`docs/MEMORY.md`](docs/MEMORY.md) | Memory accounting + leak-sweep methodology |
+| [`docs/TUTORIAL.md`](docs/TUTORIAL.md) | Build from scratch in 10 steps |
+
 ## Toolchain — why a cross-compiler?
 
 The host `gcc` assumes it's producing programs for the host OS. Forcing it to emit bare-metal code works for tiny examples and becomes a source of subtle bugs as the OS grows. The `i386-elf` cross-compiler carries none of those assumptions — it produces ELF binaries for a freestanding i386 target, period. It's the boring, correct foundation.
