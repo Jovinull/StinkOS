@@ -409,7 +409,14 @@ void main(void)
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
 			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
-			term_print("clock  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
+			term_print("clock  shutdown  reboot  arp [-d]  dns <host>  version", TERM_FG);
+		} else if (strcmp(line, "version") == 0) {
+			/* Stamped at compile time so a runtime user can answer
+			 * "which build is this" without rebooting -- handy when
+			 * triaging an installed disk vs a fresh boot image. */
+			term_print("StinkOS v0.4-dev (multitasking-loader branch)", TERM_FG);
+			term_print("kernel: 32-bit i386, paging, scheduler, TCP/IP, SB16", TERM_DIM);
+			term_print("see CHANGELOG.md for the full feature set", TERM_DIM);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
