@@ -6,6 +6,7 @@
 #include "ipv4.h"
 #include "ethernet.h"
 #include "icmp.h"           /* send port-unreachable for unbound dst ports */
+#include "interrupts.h"     /* pit_ticks() for ICMP unreachable rate limit */
 
 #define UDP_MAX_HANDLERS 8
 
@@ -112,6 +113,20 @@ void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	const unsigned char *p = (const unsigned char *)payload;
 	for (unsigned int i = 0; i < copy; i++)
 		embed[20 + i] = p[i];
+
+	/* RFC 1812 §4.3.2.8: throttle ICMP "destination unreachable" replies
+	 * so a flood of packets to closed ports cannot turn the host into an
+	 * amplifier. PIT is 100 Hz, so a 33-tick minimum interval caps us at
+	 * ~3 unreachable replies per second, plenty for a real misconfigured
+	 * peer but useless to an attacker. State is global rather than per-
+	 * peer; per-peer accounting would need a table we have no room for. */
+	{
+		static unsigned int last_unreach_tick;
+		unsigned int now = pit_ticks();
+		if (last_unreach_tick != 0 && (now - last_unreach_tick) < 33u)
+			return;
+		last_unreach_tick = now;
+	}
 
 	icmp_send_unreachable(src_ip, ICMP_CODE_PORT_UNREACH, embed, 20u + copy);
 }
