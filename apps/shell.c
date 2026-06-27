@@ -379,7 +379,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("hostname [name]  run <appname>  netinfo  ping <ip>  history  exit", TERM_FG);
+			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  history  exit", TERM_FG);
 		} else if (strcmp(line, "history") == 0) {
 			for (int i = 0; i < history_count; i++)
 				term_print(history[i], TERM_FG);
@@ -387,6 +387,31 @@ void main(void)
 			term_print(rest, TERM_FG);
 		} else if (strcmp(line, "uptime") == 0) {
 			tprintf("%u ticks since boot", sys_ticks());
+		} else if (strcmp(line, "netstat") == 0) {
+			static const char *state_name[] = {
+				"CLOSED", "LISTEN", "SYN_SENT", "SYN_RCVD",
+				"ESTAB", "FIN_W1", "FIN_W2", "CLOSE_W",
+				"CLOSING", "LAST_ACK", "TIME_W"
+			};
+			term_print("idx state    local         remote        rx    tx", TERM_HEAD);
+			int active = 0;
+			for (int i = 0; i < SYS_TCP_SLOT_MAX; i++) {
+				struct sys_tcp_info t;
+				if (sys_netstat(i, &t) != 0 || !t.in_use) continue;
+				active++;
+				const char *st = (t.state < sizeof(state_name) / sizeof(state_name[0]))
+				                 ? state_name[t.state] : "?";
+				/* Render remote IP as a.b.c.d (network byte order: lowest byte first). */
+				unsigned char r0 = (unsigned char)(t.remote_ip      );
+				unsigned char r1 = (unsigned char)(t.remote_ip >>  8);
+				unsigned char r2 = (unsigned char)(t.remote_ip >> 16);
+				unsigned char r3 = (unsigned char)(t.remote_ip >> 24);
+				tprintf("%d   %-8s :%-5u  %u.%u.%u.%u:%-5u  %u   %u",
+				        i, st, (unsigned)t.local_port,
+				        r0, r1, r2, r3, (unsigned)t.remote_port,
+				        t.rx_pending, t.tx_pending);
+			}
+			if (!active) term_print("no active TCBs", TERM_FG);
 		} else if (strcmp(line, "hostname") == 0) {
 			if (rest[0] == '\0') {
 				term_print(hostname, TERM_FG);

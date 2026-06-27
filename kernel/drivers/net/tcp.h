@@ -87,4 +87,21 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip);
  * Called from net_poll_once() so it runs whenever the kernel pumps the NIC. */
 void tcp_tick(void);
 
+/* Read-only snapshot of one TCB slot. Powers the userland netstat tool;
+ * unused slots return state=TCP_CLOSED and zero everywhere else. */
+struct tcp_info {
+	unsigned int    state;         /* enum tcp_state, widened to u32 */
+	unsigned int    local_ip;      /* network byte order */
+	unsigned int    remote_ip;     /* network byte order */
+	unsigned short  local_port;    /* host order */
+	unsigned short  remote_port;
+	unsigned int    rx_pending;    /* bytes ready for tcp_recv */
+	unsigned int    tx_pending;    /* bytes queued for send (unsent+unacked) */
+	unsigned int    in_use;        /* 1 = slot active, 0 = free */
+};
+
+/* Fill `out` with the snapshot of slot `idx` (0..7). Returns 0 on success,
+ * -1 if idx is out of range or out is NULL. */
+int tcp_get_info(int idx, struct tcp_info *out);
+
 #endif

@@ -553,6 +553,23 @@ void tcp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	}
 }
 
+int tcp_get_info(int idx, struct tcp_info *out)
+{
+	if (!out || idx < 0 || idx >= TCP_MAX_CONNS)
+		return -1;
+	struct tcb *t = &conns[idx];
+	out->in_use      = (unsigned int)t->in_use;
+	out->state       = (unsigned int)t->state;
+	out->local_ip    = t->local_ip;
+	out->remote_ip   = t->remote_ip;
+	out->local_port  = t->local_port;
+	out->remote_port = t->remote_port;
+	out->rx_pending  = (t->rx_tail + TCP_BUFFER_SIZE - t->rx_head) %
+	                   TCP_BUFFER_SIZE;
+	out->tx_pending  = tx_pending(t) + (t->snd_nxt - t->snd_una);
+	return 0;
+}
+
 void tcp_tick(void)
 {
 	unsigned int now = pit_ticks();

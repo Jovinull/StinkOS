@@ -285,6 +285,15 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)(cur ? cur->pid : 1);
 		break;
 	}
+	case 58: {                                 /* SYS_NETSTAT: ebx=idx ecx=*tcp_info -> 0 / -1 */
+		if (!paging_user_range_ok(r->ecx, sizeof(struct tcp_info))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)tcp_get_info((int)r->ebx,
+		                                    (struct tcp_info *)r->ecx);
+		break;
+	}
 	case 56: {                                 /* SYS_MMAP: ebx=size -> vaddr (0 if OOM) */
 		r->eax = paging_user_mmap(r->ebx);
 		break;

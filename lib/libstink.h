@@ -243,6 +243,27 @@ static inline int sys_netinfo(struct sys_net_info *out)
 static inline int sys_ping(unsigned int ip, unsigned int timeout_ms)
                                                  { return __syscall(44, (int)ip, (int)timeout_ms, 0); }
 
+/* Snapshot of one kernel TCB slot, matching `struct tcp_info` in tcp.h
+ * byte-for-byte. state values match `enum tcp_state` (0 CLOSED, 1 LISTEN,
+ * ..., 10 TIME_WAIT). Used by the netstat shell command. */
+struct sys_tcp_info {
+	unsigned int   state;
+	unsigned int   local_ip;
+	unsigned int   remote_ip;
+	unsigned short local_port;
+	unsigned short remote_port;
+	unsigned int   rx_pending;
+	unsigned int   tx_pending;
+	unsigned int   in_use;
+};
+
+#define SYS_TCP_SLOT_MAX  8
+
+/* Read TCB slot `idx` (0..SYS_TCP_SLOT_MAX-1) into *out. Returns 0 on
+ * success, -1 if the slot index is out of range or the pointer is bad. */
+static inline int sys_netstat(int idx, struct sys_tcp_info *out)
+                                                 { return __syscall(58, idx, (int)out, 0); }
+
 /* Process control. PIDs are dense small integers; 1 is the kernel boot
  * process. sys_getpid never fails. sys_kill marks the target PROC_ZOMBIE
  * with exit_code = 137 (SIGKILL convention) and returns 0 on success, -1
