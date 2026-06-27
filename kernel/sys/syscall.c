@@ -311,6 +311,15 @@ void syscall_dispatch(struct regs *r)
 		                                (struct mbr_partition *)r->ecx);
 		break;
 	}
+	case 64: {                                 /* SYS_RTC_READ: ebx=*struct rtc_time -> 0 / -1 */
+		if (!paging_user_range_ok(r->ebx, sizeof(struct rtc_time))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		rtc_read((struct rtc_time *)r->ebx);
+		r->eax = 0;
+		break;
+	}
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
 		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;

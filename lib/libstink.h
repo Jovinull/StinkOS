@@ -187,6 +187,23 @@ struct sys_mbr_partition {
 static inline int sys_mbr_read(int drive, struct sys_mbr_partition *out4)
                                                  { return __syscall(63, drive, (int)out4, 0); }
 
+/* Wall-clock snapshot from the CMOS RTC. Fields use natural ranges --
+ * year is the full 4-digit value, month 1..12, etc. */
+struct sys_rtc_time {
+	unsigned int year;
+	unsigned int month;
+	unsigned int day;
+	unsigned int hour;
+	unsigned int minute;
+	unsigned int second;
+};
+
+/* Read the wall clock into *out. Returns 0 on success, -1 if the pointer
+ * is rejected. The call spins briefly on the RTC update-in-progress flag,
+ * typically tens of microseconds. */
+static inline int sys_rtc_read(struct sys_rtc_time *out)
+                                                 { return __syscall(64, (int)out, 0, 0); }
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into
