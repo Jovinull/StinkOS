@@ -6,6 +6,7 @@
 #include "e1000.h"
 #include "tcp.h"
 #include "dns.h"
+#include "dhcp.h"
 
 static ipv4_t local_ip;            /* 0 until DHCP (or net_set_local_ip) fills it */
 static mac_t  local_mac;
@@ -34,6 +35,10 @@ int net_poll_once(void)
 	/* Same idea for DNS: a dropped UDP query needs a fresh send rather than
 	 * a frozen dns_ready() poll. Cheap when no query is in flight. */
 	dns_tick();
+	/* And for DHCP: a lost DISCOVER / REQUEST used to leave the client
+	 * stuck in DISCOVERING forever; the tick retransmits with a bounded
+	 * retry budget. No-op once a lease is bound. */
+	dhcp_tick();
 
 	unsigned char buf[ETH_MAX_FRAME];
 	unsigned int  n = e1000_poll_receive(buf, sizeof(buf));

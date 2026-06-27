@@ -9,6 +9,7 @@
 #include "udp.h"
 #include "e1000.h"
 #include "serial.h"
+#include "interrupts.h"     /* pit_ticks() for DISCOVER/REQUEST retransmit */
 
 #define DHCP_CLIENT_PORT  68
 #define DHCP_SERVER_PORT  67
@@ -63,6 +64,16 @@ static ipv4_t          server_id;
 static ipv4_t          subnet_mask;
 static ipv4_t          router_ip;
 static ipv4_t          dns_ip;
+
+/* Retransmit state for whichever DHCP message we're currently waiting
+ * on a reply to (DISCOVER in DISCOVERING, REQUEST in REQUESTING). After
+ * DHCP_MAX_RETRIES failures, the state machine goes DHCP_FAILED so
+ * userland stops polling on a dead lease. PIT runs at 100 Hz; a 4-second
+ * window per attempt and 4 retries puts the worst case at 16 s. */
+#define DHCP_RETRY_TICKS  400u
+#define DHCP_MAX_RETRIES  4u
+static unsigned int    dhcp_last_send;
+static unsigned char   dhcp_retries;
 
 static void log_state(const char *name)
 {
@@ -205,6 +216,8 @@ static void on_packet(ipv4_t src_ip, unsigned short src_port,
 		state = DHCP_REQUESTING;
 		log_state("offer received, requesting lease");
 		send_dhcp(DHCPREQUEST);
+		dhcp_last_send = pit_ticks();   /* fresh retry budget per state */
+		dhcp_retries   = 0;
 		return;
 	}
 	if (state == DHCP_REQUESTING && msg_type == DHCPACK) {
@@ -230,6 +243,31 @@ void dhcp_start(void)
 	state = DHCP_DISCOVERING;
 	log_state("sending DISCOVER");
 	send_dhcp(DHCPDISCOVER);
+	dhcp_last_send = pit_ticks();
+	dhcp_retries   = 0;
+}
+
+void dhcp_tick(void)
+{
+	if (state != DHCP_DISCOVERING && state != DHCP_REQUESTING)
+		return;
+	unsigned int now = pit_ticks();
+	if ((now - dhcp_last_send) < DHCP_RETRY_TICKS)
+		return;
+	if (dhcp_retries >= DHCP_MAX_RETRIES) {
+		log_state("giving up after max retries");
+		state = DHCP_FAILED;
+		return;
+	}
+	if (state == DHCP_DISCOVERING) {
+		log_state("retransmit DISCOVER");
+		send_dhcp(DHCPDISCOVER);
+	} else {
+		log_state("retransmit REQUEST");
+		send_dhcp(DHCPREQUEST);
+	}
+	dhcp_last_send = now;
+	dhcp_retries++;
 }
 
 enum dhcp_state dhcp_get_state(void) { return state; }

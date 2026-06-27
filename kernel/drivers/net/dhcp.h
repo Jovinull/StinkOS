@@ -31,4 +31,11 @@ ipv4_t dhcp_get_subnet_mask(void);
 ipv4_t dhcp_get_router(void);
 ipv4_t dhcp_get_dns(void);
 
+/* Pumped from net_poll_once: re-broadcasts DHCPDISCOVER / DHCPREQUEST if
+ * the corresponding reply never arrived (lost packet on noisy LANs or
+ * race against DHCP server warmup). Gives up after a few retries and
+ * marks the lease DHCP_FAILED so userland can react instead of hanging
+ * on dhcp_bound() forever. Cheap when the state machine is settled. */
+void   dhcp_tick(void);
+
 #endif
