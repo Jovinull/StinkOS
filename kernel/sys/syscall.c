@@ -331,6 +331,22 @@ void syscall_dispatch(struct regs *r)
 		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
 		serial_write("shutdown: requested but no compatible path -- halting\n");
 		for (;;) __asm__ volatile ("cli; hlt");
+	case 67: {                                 /* SYS_BLIT_SCALED: ebx=src ecx=dst_xy(packed) edx=dst_wh(packed) esi=src_wh(packed) -> 0 */
+		unsigned int dst_w = (r->edx >> 16) & 0xFFFFu;
+		unsigned int dst_h =  r->edx        & 0xFFFFu;
+		unsigned int src_w = (r->esi >> 16) & 0xFFFFu;
+		unsigned int src_h =  r->esi        & 0xFFFFu;
+		if (src_w == 0 || src_h == 0 ||
+		    !paging_user_range_ok(r->ebx, src_w * src_h * sizeof(unsigned int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		fb_blit_scaled((r->ecx >> 16) & 0xFFFFu, r->ecx & 0xFFFFu,
+		               dst_w, dst_h,
+		               (const unsigned int *)r->ebx, src_w, src_h);
+		r->eax = 0;
+		break;
+	}
 	case 66:                                   /* SYS_REBOOT: warm-reset via the 8042 keyboard controller */
 		/* The classic PC reset path: pulse the 8042 reset line low. */
 		serial_write("reboot: pulsing 8042 reset line\n");

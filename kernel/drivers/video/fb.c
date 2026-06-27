@@ -92,6 +92,43 @@ void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
 	}
 }
 
+/* Nearest-neighbour upscale / downscale of an ARGB source onto the
+ * framebuffer. Computes the source pixel via integer ratio per dst pixel.
+ * No interpolation -- the goal is "fast enough to scale Doom's 640x400 to
+ * 1024x640 every frame on a 386", not "pretty". Clipped to the visible
+ * area. Bails on degenerate dimensions instead of dividing by zero. */
+void fb_blit_scaled(unsigned int x0, unsigned int y0,
+                    unsigned int dst_w, unsigned int dst_h,
+                    const unsigned int *src,
+                    unsigned int src_w, unsigned int src_h)
+{
+	if (!src || dst_w == 0 || dst_h == 0 || src_w == 0 || src_h == 0)
+		return;
+	if (x0 >= width || y0 >= height)
+		return;
+
+	unsigned int cw = dst_w;
+	unsigned int ch = dst_h;
+	if (x0 + cw > width)  cw = width  - x0;
+	if (y0 + ch > height) ch = height - y0;
+
+	for (unsigned int row = 0; row < ch; row++) {
+		unsigned int sy = (row * src_h) / dst_h;
+		const unsigned int *srow = src + sy * src_w;
+		volatile unsigned char *p = fb + (y0 + row) * pitch + x0 * bytes_pp;
+		for (unsigned int col = 0; col < cw; col++) {
+			unsigned int sx = (col * src_w) / dst_w;
+			unsigned int rgb = srow[sx];
+			p[0] =  rgb        & 0xFF;
+			p[1] = (rgb >> 8)  & 0xFF;
+			p[2] = (rgb >> 16) & 0xFF;
+			if (bytes_pp == 4)
+				p[3] = 0;
+			p += bytes_pp;
+		}
+	}
+}
+
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb)
 {
 	const unsigned char *glyph = font8x8[(unsigned char)c & 0x7F];

@@ -211,6 +211,23 @@ static inline int sys_rtc_read(struct sys_rtc_time *out)
 static inline void sys_shutdown(void)            { __syscall(65, 0, 0, 0); for (;;) ; }
 static inline void sys_reboot(void)              { __syscall(66, 0, 0, 0); for (;;) ; }
 
+/* Nearest-neighbour scaled blit. Source is a src_w*src_h ARGB row-major
+ * buffer; copies it scaled to dst_w*dst_h at (dst_x, dst_y). Useful for
+ * letterboxing a small game (Doom's 640x400) into a larger framebuffer
+ * window without doing the per-pixel math in userland. Returns 0 ok, -1
+ * on bad pointer / zero source dimensions. */
+static inline int sys_blit_scaled(int dst_x, int dst_y,
+                                  unsigned int dst_w, unsigned int dst_h,
+                                  const unsigned int *src,
+                                  unsigned int src_w, unsigned int src_h)
+{
+	return __syscall4(67,
+	    (int)src,
+	    ((dst_x & 0xFFFF) << 16) | (dst_y & 0xFFFF),
+	    ((dst_w & 0xFFFF) << 16) | (dst_h & 0xFFFF),
+	    ((src_w & 0xFFFF) << 16) | (src_h & 0xFFFF));
+}
+
 /* TCP socket-like syscalls. Each connection gets a kernel-side handle
  * (0..7); -1 on failure. All addresses are IPv4 in network byte order, all
  * ports in host byte order. The DNS helpers below convert a hostname into

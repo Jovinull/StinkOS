@@ -14,6 +14,14 @@ void fb_rect(unsigned int x0, unsigned int y0,
              unsigned int w, unsigned int h, unsigned int rgb);
 void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
              const unsigned int *src);
+
+/* Nearest-neighbour scaler. Copies a src_w x src_h ARGB row-major buffer
+ * onto a dst_w x dst_h destination area at (x0, y0). Upscale or downscale;
+ * no filtering. Clipped to the visible framebuffer. */
+void fb_blit_scaled(unsigned int x0, unsigned int y0,
+                    unsigned int dst_w, unsigned int dst_h,
+                    const unsigned int *src,
+                    unsigned int src_w, unsigned int src_h);
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb);
 void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
 
