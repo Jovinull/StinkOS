@@ -1,0 +1,67 @@
+name: release
+
+# Fires on every annotated tag matching v* (e.g. v0.4, v0.4.0, v1.0.0-rc1).
+# Builds the OS image, packages it as stinkos-install.iso with a proper
+# MBR partition table, and attaches the artifact to the matching GitHub
+# release (creating one if it doesn't yet exist).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write     # required for gh release create / upload
+
+jobs:
+  build-iso:
+    name: build stinkos-install.iso
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex texinfo wget \
+            libgmp3-dev libmpc-dev libmpfr-dev libisl-dev \
+            qemu-system-x86 python3
+
+      - name: Restore i386-elf cross-toolchain cache
+        id: cache-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/opt/cross
+          key: cross-toolchain-${{ hashFiles('tools/build-cross-toolchain.sh') }}-v1
+
+      - name: Build cross-toolchain (cache miss only)
+        if: steps.cache-cross.outputs.cache-hit != 'true'
+        run: bash tools/build-cross-toolchain.sh
+
+      - name: Add toolchain to PATH
+        run: echo "$HOME/opt/cross/bin" >> $GITHUB_PATH
+
+      - name: Build install ISO
+        run: make stinkos-install.iso
+
+      - name: Compute SHA-256 of the artifact
+        run: |
+          sha256sum stinkos-install.iso | tee stinkos-install.iso.sha256
+
+      - name: Publish GitHub release with artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          # Create the release if missing (idempotent). --notes-file lets
+          # the repo's changelog drive the body once we add one; until then
+          # a one-line placeholder keeps the API happy.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes "StinkOS $TAG -- see CHANGELOG / commits for details."
+          fi
+          gh release upload "$TAG" stinkos-install.iso stinkos-install.iso.sha256 \
+            --clobber
