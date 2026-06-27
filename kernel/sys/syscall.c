@@ -734,14 +734,31 @@ void syscall_dispatch(struct regs *r)
 	case 20:                                   /* SYS_SEEK: ebx=fd ecx=offset edx=whence */
 		r->eax = (unsigned int)vfs_seek((int)r->ebx, (int)r->ecx, (int)r->edx);
 		break;
-	case 21:                                   /* SYS_DRAWTEXT: ebx=x ecx=y edx=str esi=rgb */
-		if (!paging_user_range_ok(r->edx, 64)) {
+	case 21: {                                 /* SYS_DRAWTEXT: ebx=x ecx=y edx=str esi=rgb */
+		/* fb_text scans the string until NUL with no length cap, so a
+		 * user buffer without a NUL inside its mapped range used to
+		 * let the renderer read past validated memory. Copy into a
+		 * kernel buffer first, terminating as soon as we leave the
+		 * app's region. 128 bytes is wider than the framebuffer can
+		 * draw on one line at 8 px/char (1024/8 = 128). */
+		char kbuf[128];
+		if (!paging_user_range_ok(r->edx, 1)) {
 			r->eax = (unsigned int)-1;
-		} else {
-			fb_text((int)r->ebx, (int)r->ecx, (const char *)r->edx, r->esi);
-			r->eax = 0;
+			break;
 		}
+		const char *us = (const char *)r->edx;
+		unsigned int n = 0;
+		while (n < sizeof(kbuf) - 1 &&
+		       paging_user_range_ok((unsigned int)(us + n), 1) &&
+		       us[n] != '\0') {
+			kbuf[n] = us[n];
+			n++;
+		}
+		kbuf[n] = '\0';
+		fb_text((int)r->ebx, (int)r->ecx, kbuf, r->esi);
+		r->eax = 0;
 		break;
+	}
 	case 22:                                   /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
 		fb_rect(r->ebx >> 16, r->ebx & 0xFFFF,
 		        r->ecx >> 16, r->ecx & 0xFFFF, r->edx);
