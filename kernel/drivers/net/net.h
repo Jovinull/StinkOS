@@ -59,6 +59,24 @@ void   net_set_local_ip(ipv4_t ip);
 ipv4_t net_get_local_ip(void);
 void   net_get_local_mac(mac_t out);
 
+/* Returns 1 if `addr` looks like a routable unicast peer: not the
+ * unspecified address (0.0.0.0), not the limited broadcast
+ * (255.255.255.255), not loopback (127/8), and not class-D multicast
+ * (224.0.0.0/4). Used by every place that wants to refuse sending to,
+ * or processing a peer from, an address that can only be a spoof or
+ * misconfiguration. Address is in network byte order, so the high octet
+ * lives in the low 8 bits of the integer. */
+static inline int ipv4_is_unicast(ipv4_t addr)
+{
+	if (addr == 0 || addr == 0xFFFFFFFFu)
+		return 0;
+	if ((addr & 0x000000FFu) == 0x0000007Fu)   /* 127/8  loopback */
+		return 0;
+	if ((addr & 0x000000F0u) == 0x000000E0u)   /* 224/4  multicast */
+		return 0;
+	return 1;
+}
+
 /* Pumps one frame through the receive path: poll the NIC, dispatch by
  * ethertype, return. Returns 1 if a frame was processed, 0 if the RX ring
  * was empty. Designed to be called from any idle/poll loop. */

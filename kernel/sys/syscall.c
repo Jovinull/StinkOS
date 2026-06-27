@@ -642,22 +642,9 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 44: {                                 /* SYS_PING: ebx=ipv4(net order) ecx=timeout_ms -> rtt_ms or -1 */
-		if (!e1000_present() || r->ebx == 0) {
+		if (!e1000_present() || !ipv4_is_unicast((ipv4_t)r->ebx)) {
 			r->eax = (unsigned int)-1;
 			break;
-		}
-		/* Refuse to ping broadcast / multicast / loopback. Pinging the
-		 * broadcast address invites the same Smurf amplifier we already
-		 * defend against on the receive side; pinging 127/8 has no
-		 * meaning without a loopback driver. */
-		{
-			ipv4_t dst = r->ebx;
-			if (dst == 0xFFFFFFFFu ||
-			    (dst & 0x000000FFu) == 0x0000007Fu ||
-			    (dst & 0x000000F0u) == 0x000000E0u) {
-				r->eax = (unsigned int)-1;
-				break;
-			}
 		}
 		static unsigned short ping_seq;
 		unsigned short id  = 0x5453;       /* 'TS' */
@@ -842,17 +829,13 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	case 31: {                                 /* SYS_SOCK_CONNECT: ebx=ipv4 ecx=port -> handle */
-		/* Reject destinations that don't represent a valid TCP peer:
-		 * 0.0.0.0 (unspecified), 255.255.255.255 (broadcast), 127/8
-		 * (we have no loopback driver), and 224.0.0.0/4 (multicast).
-		 * Letting these through would either get the TCB stuck in
-		 * SYN_SENT forever or splash SYNs onto the LAN broadcast group. */
+		/* Reject destinations that don't represent a valid TCP peer.
+		 * Letting bcast/mcast/loopback through would either get the
+		 * TCB stuck in SYN_SENT forever or splash SYNs onto the LAN
+		 * broadcast group. */
 		ipv4_t dst = (ipv4_t)r->ebx;
 		unsigned short dport = (unsigned short)r->ecx;
-		if (dst == 0 || dst == 0xFFFFFFFFu ||
-		    (dst & 0x000000FFu) == 0x0000007Fu ||
-		    (dst & 0x000000F0u) == 0x000000E0u ||
-		    dport == 0) {
+		if (!ipv4_is_unicast(dst) || dport == 0) {
 			r->eax = (unsigned int)-1;
 			break;
 		}

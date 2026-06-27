@@ -219,16 +219,12 @@ void ip_handle(const void *payload, unsigned int len)
 	/* RFC 1812 §5.3.7 / "Martian" address filter: drop packets whose
 	 * source claims to be our own address (anti-spoof so an attacker
 	 * cannot loop something back into our state machines), the limited
-	 * broadcast, the loopback range (127/8), or class-D multicast as a
-	 * source. We have no use for any of those at the host layer and
-	 * accepting them lets a hostile peer pretend to be us. */
+	 * broadcast, loopback, or class-D multicast as a source. src=0 is
+	 * allowed because DHCP OFFER/ACK legitimately arrives that way
+	 * before our lease binds. */
 	if (local != 0 && h->src_ip == local)
 		return;
-	if (h->src_ip == 0xFFFFFFFFu)
-		return;
-	if ((h->src_ip & 0x000000FFu) == 0x0000007Fu)
-		return;
-	if ((h->src_ip & 0x000000F0u) == 0x000000E0u)
+	if (h->src_ip != 0 && !ipv4_is_unicast(h->src_ip))
 		return;
 
 	/* Verify the header checksum. */

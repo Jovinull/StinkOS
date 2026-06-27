@@ -80,13 +80,10 @@ void icmp_handle(const void *payload, unsigned int len,
 		return;
 
 	/* RFC 1122 §3.2.2.6: do not reply to echo requests aimed at a
-	 * broadcast or multicast destination. This is the classic Smurf
-	 * mitigation -- one attacker pings the LAN broadcast with the
-	 * victim's IP as the spoofed source; every host on the segment
-	 * floods echo replies at the victim. Replying only to unicast
-	 * requests breaks the amplifier. */
-	if (dst_ip == 0xFFFFFFFFu ||
-	    (dst_ip & 0x000000F0u) == 0x000000E0u)
+	 * broadcast or multicast destination. Smurf mitigation -- breaks
+	 * the amplifier where one attacker pings the LAN broadcast with
+	 * the victim's IP spoofed as the source. */
+	if (!ipv4_is_unicast(dst_ip))
 		return;
 
 	/* Mirror the entire packet back with type swapped to echo reply.
@@ -113,15 +110,11 @@ int icmp_send_unreachable(ipv4_t dst, unsigned char code,
                           const void *orig_ip_packet, unsigned int orig_len)
 {
 	/* RFC 1122 §3.2.2: never send ICMP error in response to a broadcast,
-	 * multicast, or the unspecified address. An attacker that spoofs a
-	 * broadcast src into a packet aimed at a closed UDP port could
+	 * multicast, loopback, or the unspecified address. An attacker that
+	 * spoofs such a src into a packet aimed at a closed UDP port could
 	 * otherwise turn this host into a tiny reflector / DoS amplifier
-	 * splashing every neighbour with our unreach reply. The check is
-	 * for the dst we'd send TO -- the source of the original packet. */
-	if (dst == 0 || dst == 0xFFFFFFFFu)
-		return -1;
-	/* 224.0.0.0/4: high nibble 1110 = multicast. */
-	if ((dst & 0x000000F0u) == 0x000000E0u)
+	 * splashing every neighbour with our unreach reply. */
+	if (!ipv4_is_unicast(dst))
 		return -1;
 	unsigned int echo = orig_len;
 	if (echo > 28u) echo = 28u;            /* 20-byte IP hdr + 8 payload bytes */

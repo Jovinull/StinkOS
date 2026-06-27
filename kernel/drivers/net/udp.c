@@ -121,17 +121,13 @@ void udp_handle(const void *payload, unsigned int len, ipv4_t src_ip)
 	if (total > len || total < sizeof(*h))
 		return;
 
-	/* RFC 1122 §4.1.3.5: drop datagrams whose source claims to be
-	 * broadcast / multicast / the unspecified address. The "no handler"
-	 * path below would otherwise bounce an ICMP unreachable straight to
-	 * the LAN broadcast group (the rate limiter caps the splash but a
-	 * single packet per ~330ms is still wasted bandwidth and a tiny
-	 * reflector vector). DHCP DISCOVER is an exception we accept on
-	 * port 68 before this point lands -- but DHCPDISCOVER comes from
-	 * 0.0.0.0 ("we don't have an IP yet"), and our DHCP client BINDS
-	 * port 68 so it skips the no-handler path anyway. */
-	if (src_ip != 0 && (src_ip == 0xFFFFFFFFu ||
-	                    (src_ip & 0x000000F0u) == 0x000000E0u))
+	/* RFC 1122 §4.1.3.5: drop datagrams whose source is broadcast,
+	 * multicast, or loopback. The "no handler" path below would
+	 * otherwise bounce ICMP unreachable straight at the LAN broadcast
+	 * group. src=0 is intentionally allowed -- DHCP OFFERs / ACKs
+	 * legitimately arrive with src=0 before the lease is bound; our
+	 * DHCP client BINDS port 68 so it skips the no-handler path. */
+	if (src_ip != 0 && !ipv4_is_unicast(src_ip))
 		return;
 
 	/* Validate the UDP checksum BEFORE handing the payload to any
