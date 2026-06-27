@@ -433,6 +433,13 @@ stinkos-install.iso: all tools/write-mbr.py
 	    --start $(INSTALL_PART_START) \
 	    --count $(INSTALL_PART_SECTORS)
 
+# Boot the published install image standalone. Verifies the ISO build works
+# end-to-end without going through the regular os.bin path.
+run-iso: stinkos-install.iso
+	qemu-system-i386 -drive format=raw,file=stinkos-install.iso \
+	  -audiodev $(QEMU_AUDIO),id=snd0 -device sb16,audiodev=snd0 \
+	  -netdev user,id=net0 -device e1000,netdev=net0
+
 # Sample .stinkpkg archives. Bundles a handful of built userland ELFs through
 # tools/make-stinkpkg.py and drops them under repo/, ready to be served by
 # tools/repo-server.py. Use after `make` so the .elf inputs exist.
@@ -496,4 +503,4 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
 
-.PHONY: all hex dall run run-install run-installed test-headless audit sample-packages unittest clean
+.PHONY: all hex dall run run-install run-installed run-iso test-headless audit sample-packages unittest clean
