@@ -75,6 +75,40 @@ untracked) for the full pending list.
 - `docs/ARCHITECTURE.md` / `SYSCALLS.md` / `NETWORK.md` / `STINKFS.md` /
   `PACKAGING.md` / `MEMORY.md` / `TUTORIAL.md`, plus `COPYING.GPL`
   for the bundled Doom engine
+- TCP fast retransmit (3 dup-ACK threshold), SACK sender-side scoreboard
+  + retransmit clamp, zero-window persist probe, TIME_WAIT 2*MSL slot
+  cleanup, RFC 5961 RST/SYN gates, RFC 793 SYN_RECEIVED ack mismatch RST,
+  real advertised window from rx ring free space, TCP socket reap on PID
+  death
+- UDP / TCP / ICMP receive checksum verify; ICMP unreachable rate limit
+  (RFC 1812 §4.3.2.8); ICMP echo Smurf mitigation (RFC 1122 §3.2.2.6);
+  IPv4 martian source filter; LSRR/SSRR source-route drop; Teardrop
+  overlapping-fragment guard
+- DHCP DISCOVER/REQUEST retransmit, DNS query retransmit with optional
+  fallback to a secondary server; gratuitous ARP after lease bind; ARP
+  request rate limit + 60s cache entry TTL; DHCP `secs` field populated
+- SB16 16-bit signed and stereo signed-16 playback paths (DMA channel
+  5 + DSP commands 0xB6/0x30); `SYS_AUDIO_MODE` / `SYS_AUDIO_QUERY`;
+  mixer channel silence on SYS_EXIT/SYS_KILL
+- `SYS_MBR_WRITE` + installer writes a real MBR partition table after
+  clone; `SYS_RTC_SET_ALARM` / `SYS_RTC_CLEAR_ALARM` /
+  `SYS_RTC_ALARM_FIRED` via IRQ8
+- Brazilian ABNT2 keyboard layout selectable via `STINK.CONF keymap=br`
+- Shell `version` command; `make help` target; UTF-8 multi-byte
+  sequences collapsed to `?` in the scrollback instead of garbling
+- SYS_LOG / SYS_DRAWTEXT / SYS_DNS_REQUEST user-string bounded copies
+  (kernel no longer deref's arbitrary user pointers); SYS_BLIT_SCALED
+  width*height overflow guard; paging_user_mmap/munmap size overflow
+  guard; SYS_SOCK_CONNECT / SYS_PING / SYS_SOCK_LISTEN dst+port
+  validation; SYS_DISK_COPY 4096-sector cap; fb_rect pre-clip;
+  Doom music stubs declared intentionally silent forever
+- Host-side regression tests: Ethernet MTU, ARP storm + ARP TTL +
+  ARP request rate limit, StinkFS dir, TCP dup-ACK / SACK use /
+  persist / TIME_WAIT / checksum / RST gate / rx wnd / SYN gate /
+  TCB lifecycle / close PID, ICMP rate limit + echo reply, IPv4
+  unicast filter + source route, DNS retry + DHCP retry + DHCP
+  DNS2, RTC alarm, audio mode, MBR write, UTF-8 collapse, blit
+  overflow
 
 ### Changed
 
