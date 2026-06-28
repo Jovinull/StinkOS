@@ -429,6 +429,12 @@ static inline int sys_netstat(int idx, struct sys_tcp_info *out)
 static inline int sys_getpid(void)               { return __syscall(45, 0, 0, 0); }
 static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 0); }
 
+/* TODO §1 step 4: fork the calling process. The parent's user pages are
+ * deep-copied into a fresh per-process pgdir; both processes resume at
+ * the next instruction. Parent gets the child's PID; child gets 0; -1
+ * on PMM exhaustion or PCB table full. No COW in v1. */
+static inline int sys_fork(void)                 { return __syscall(83, 0, 0, 0); }
+
 /* Block until any child of the caller exits, reap it, and return its exit
  * code. Returns -1 if the caller has no children. sys_waitpid blocks for a
  * specific PID and returns -1 if that PID is not a child of the caller. */
