@@ -483,7 +483,17 @@ sample-packages: all tools/make-stinkpkg.py
 # need QEMU or the cross-toolchain. Lives under tests/.
 HOST_CC  ?= gcc
 HOST_CFLAGS = -O2 -Wall -Werror -Wno-unused-function \
-              -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
+              -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast \
+              -Wno-builtin-declaration-mismatch
+# Why -Wno-builtin-declaration-mismatch: libstink.h declares the libc shape
+# (malloc/strlen/snprintf/...) with size_t == unsigned int because the
+# StinkOS userland is i386 with no hosted libc. When the host gcc (x86_64)
+# parses the same header for a unit test, its built-in libc declarations
+# use unsigned long. The mismatch is real but structural -- the kernel
+# can't be size_t-correct without dragging in a libc, and the test
+# binaries don't actually call malloc/strlen via libstink (they include
+# their own arithmetic). Suppressing the one warning lets -Werror keep
+# its grip on every other category.
 TEST_DIR  = tests
 TEST_BIN  = $(BUILD)/tests
 
