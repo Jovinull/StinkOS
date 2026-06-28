@@ -68,7 +68,13 @@
  * for legacy drivers (fb LFB, e1000 BAR) -- xv6 does the same. */
 #define KERNBASE            0x80000000u
 #define KERNEL_DIRECT_MAP   0x10000000u   /* 256 MiB direct map      */
-#define KERNEL_DEVSPACE     0xFE000000u   /* identity-mapped MMIO    */
+/* KERNEL_DEVSPACE must sit BELOW the lowest MMIO BAR we want to keep
+ * identity-mapped. QEMU places the Bochs/Cirrus VBE LFB at 0xFD000000
+ * and the e1000 BAR around 0xFEB80000; anchoring DEVSPACE at 0xFD000000
+ * covers both with room to spare. xv6 picks 0xFE000000 for IOAPIC; we
+ * pick lower because our VBE LFB is the first MMIO above the direct
+ * map. */
+#define KERNEL_DEVSPACE     0xFD000000u   /* identity-mapped MMIO    */
 
 #ifndef __ASSEMBLER__
 #define P2V(phys) ((unsigned int)(phys) + KERNBASE)

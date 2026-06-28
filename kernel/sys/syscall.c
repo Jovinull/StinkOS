@@ -2,6 +2,7 @@
  * layer (trap.c) routes int 0x80 here via syscall_dispatch, and calls
  * app_return when a ring-3 app ends or faults. */
 #include "defs.h"
+#include "memlayout.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -1121,7 +1122,10 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		child->kstack_top = kpage + 4096u;
+		/* P2V: pmm_alloc returns phys; kstack_top is dereferenced as a
+		 * virt pointer (regs clone below, TSS.esp0 on context switch).
+		 * Higher-half mirror routes the deref away from any user PT. */
+		child->kstack_top = P2V(kpage) + 4096u;
 
 		unsigned int *parent_pgdir = (unsigned int *)parent->cr3;
 		if (!parent_pgdir) parent_pgdir = paging_boot_pgdir();

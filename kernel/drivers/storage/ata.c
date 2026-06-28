@@ -16,6 +16,7 @@
 #include "pci.h"
 #include "serial.h"
 #include "io.h"
+#include "memlayout.h"     /* V2P for Bus Master DMA phys addrs */
 
 /* ---- ATA register offsets (from channel base) ---- */
 #define ATA_PRIMARY_BASE   0x1F0
@@ -173,13 +174,13 @@ static int ata_dma_transfer(int drive, unsigned int lba, unsigned int count,
         dma_copy(dma_buf, buffer, bytes);
 
     /* Build a single-entry PRDT covering the entire transfer. */
-    dma_prdt[0].phys  = (unsigned int)(unsigned long)dma_buf;
+    dma_prdt[0].phys  = V2P((unsigned int)dma_buf);
     dma_prdt[0].bytes = (unsigned short)(bytes < 65536u ? bytes : 0u); /* 0 == 64 KiB */
     dma_prdt[0].eot   = 0x8000u;                                       /* end of table */
 
     /* Initialise Bus Master registers. */
     outb(bm + BMIDE_CMD,    0);                           /* stop any prior DMA */
-    outl(bm + BMIDE_PRDT,   (unsigned int)(unsigned long)dma_prdt);
+    outl(bm + BMIDE_PRDT,   V2P((unsigned int)dma_prdt));
     outb(bm + BMIDE_STATUS, inb(bm + BMIDE_STATUS) | 0x06u); /* clear err+IRQ */
     outb(bm + BMIDE_CMD,    is_write ? 0x00u : 0x08u);   /* set direction */
 
