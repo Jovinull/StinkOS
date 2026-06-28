@@ -23,7 +23,14 @@ LD = i386-elf-ld
 # Used by diagnostic targets (readelf-kernel) that invoke other binutils tools.
 BUILD_TOOL_PREFIX = i386-elf-
 CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
-         -ffunction-sections -fdata-sections -Ilib
+         -ffunction-sections -fdata-sections \
+         -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables \
+         -Ilib
+# -fmerge-all-constants: dedup string literals across translation units.
+# -fno-asynchronous-unwind-tables -fno-unwind-tables: drop the C++ exception
+#   tables (.eh_frame, .eh_frame_hdr) we never use -- the kernel is pure C.
+# Combined with --build-id=none on the kernel link these are the "free"
+# size-trim flags from TODO §14: ~500 bytes saved, no codegen change.
 
 # -Ilib above puts the userland C library (lib/libstink.h) on the include path
 # so apps keep using bare `#include "libstink.h"` after the move out of apps/.
@@ -343,7 +350,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	# reach. Paired with -ffunction-sections / -fdata-sections (in CFLAGS)
 	# it strips dead helpers libgcc dragged in plus any kernel symbols that
 	# only fired in older code paths. Cheap insurance against bloat.
-	$(LD) -T boot/kernel.ld --gc-sections -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
+	$(LD) -T boot/kernel.ld --gc-sections --build-id=none -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
 	# --- 3. Strip section headers / symbols for on-disk image ---
 	# kernel.elf is ~120 KiB unstripped (debug info, section headers);
 	# stripped drops to ~75 KiB. bootmain only needs PT_LOAD program
