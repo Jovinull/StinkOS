@@ -54,6 +54,7 @@ void proc_init(void)
 	boot->pid        = 1;
 	boot->parent_pid = 0;
 	boot->state      = PROC_RUNNING;
+	boot->kstack_top = gdt_boot_kstack_top();   /* §1: TSS.esp0 follows on switch */
 	copy_name(boot, "kinit");
 
 	running = boot;
@@ -191,14 +192,18 @@ void proc_yield(void)
 	next->state = PROC_RUNNING;
 	running     = next;
 
-	/* TODO §1 multitasking, step 2: swap CR3 to the incoming process's
-	 * pgdir before swapping the stack. Order matters -- once
-	 * context_switch returns into `next`, every memory access uses
-	 * `next`'s address space. paging_switch is a no-op when next->cr3
-	 * is 0 (the legacy shared-boot-pgdir mode), so the single-process
-	 * boot path stays identical until step 3 starts handing out
-	 * per-process pgdirs. */
 	paging_switch((unsigned int *)next->cr3);
+	/* §1 step 5.5 ROOT-CAUSE FIX: TSS.esp0 selects which kernel stack
+	 * the CPU loads on the NEXT ring-3 -> ring-0 trap. Before this fix
+	 * it pointed at the static kernel_stack[] BSS regardless of which
+	 * proc is running, so two procs trapping into the kernel via int
+	 * 0x80 / IRQ would share the same stack -- the second one would
+	 * overwrite the first one's saved frame and the first one's
+	 * context_switch resume would `ret` into garbage (which happened
+	 * to be the address of trap_return, hence the long-running
+	 * misleading #GP at trap_return's mov %ax,%ds). */
+	if (next->kstack_top)
+		tss_set_kernel_stack(next->kstack_top);
 	context_switch(&prev->esp, next->esp);
 }
 

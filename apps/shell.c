@@ -873,19 +873,29 @@ void main(void)
 					tprintf("not found: %s", rest);
 			}
 		} else if (strcmp(line, "bg") == 0) {
-			/* §1 step 5/6 smoke: simplified fork-only test (no exec)
-			 * to isolate fork-introduced bugs from exec-introduced ones. */
-			sys_log("bg: pre-fork");
-			int pid = sys_fork();
-			if (pid < 0) {
-				sys_log("bg: fork failed");
-			} else if (pid == 0) {
-				sys_log("bg: child");
-				sys_exit();
+			/* §1 step 5: spawn an app in background via fork+exec.
+			 * Child immediately exec()s the requested app; parent
+			 * (shell) prints the child PID and returns to the
+			 * prompt -- both procs run concurrently under the
+			 * round-robin scheduler.
+			 *
+			 * Refs: xv6-public/sh.c (the trailing & in xv6 shell);
+			 * linux-0.01/init/main.c (init clones itself the same way). */
+			if (*rest == '\0') {
+				term_print("usage: bg <appname>", TERM_ERR);
 			} else {
-				sys_log("bg: parent post-fork");
-				sys_wait();
-				sys_log("bg: parent reaped child");
+				int pid = sys_fork();
+				if (pid < 0) {
+					term_print("bg: fork failed (PCB table full?)", TERM_ERR);
+				} else if (pid == 0) {
+					/* Child path: replace cloned shell with the requested
+					 * app. exec never returns on success; on failure exit
+					 * so the duplicate prompt doesn't hang around. */
+					if (sys_exec(rest) < 0)
+						sys_exit();
+				} else {
+					tprintf("bg: launched %s as pid %d", rest, pid);
+				}
 			}
 		} else if (strcmp(line, "netinfo") == 0 || strcmp(line, "ifconfig") == 0) {
 			struct sys_net_info ni;
