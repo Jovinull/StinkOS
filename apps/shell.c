@@ -14,6 +14,7 @@
 #define TERM_IN    0xFFFFFFu   /* committed input line: white     */
 #define TERM_PR    0x00FF88u   /* prompt + live input: green      */
 #define TERM_ERR   0xFF5050u   /* error messages: light red       */
+#define TERM_DIM   0x607080u   /* secondary info: muted slate     */
 #define TERM_HEAD  0x6090FFu   /* header / info lines: medium blue */
 
 /* Scrollback ring buffer. The terminal keeps the last LOG_MAX output lines
