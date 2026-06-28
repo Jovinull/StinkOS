@@ -1,14 +1,22 @@
-/* Kernel linker script: kernel linked at 0x100000 (1 MiB), ELF output
- * with proper PT_LOAD program headers. bootmain.c walks those phdrs
- * and copies each PT_LOAD segment to its p_paddr, then jumps to
- * the ELF entry point (which we set to _kernel_start in kentry.s).
+/* Kernel linker script: kernel linked at virt 0x80100000 (higher-half),
+ * loaded by bootmain at phys 0x100000 via AT() per section.
  *
- * The .multiboot section is forced FIRST in the file/RAM image so
- * a Multiboot-1 loader (e.g. GRUB) sees the magic header within the
- * first 8 KiB and treats us as a bootable kernel. Our own bootmain
- * ignores it (just an unused PT_LOAD payload). */
+ * bootmain reads e_entry from the ELF header and calls it as a function
+ * pointer with paging OFF; kentry.s exports _kernel_phys_entry whose
+ * VALUE is (virt addr of asm entry) - KERNBASE = the phys addr where
+ * the section actually lives. The asm entry sets up a bootstrap pgdir
+ * (identity-low + high-half mirror) and far-jumps to the higher-half
+ * _kernel_start.
+ *
+ * The .multiboot section is forced FIRST so a Multiboot-1 loader (GRUB)
+ * sees the magic header within the first 8 KiB of the file. Our own
+ * bootmain ignores it (just an unused PT_LOAD payload).
+ *
+ * Refs: xv6-public/kernel.ld (canonical higher-half i386 script);
+ * toaruos/kernel/arch/x86_64/link.ld (same AT()-per-section trick on
+ * x86_64). */
 
-ENTRY(_kernel_start)
+ENTRY(_kernel_phys_entry)
 
 PHDRS
 {
@@ -18,30 +26,30 @@ PHDRS
 
 SECTIONS
 {
-	. = 0x100000;
+	. = 0x80100000;
 
-	.multiboot : {
+	.multiboot : AT(ADDR(.multiboot) - 0x80000000) {
 		KEEP(*(.multiboot))
 	} :text
 
-	.text : {
+	.text : AT(ADDR(.text) - 0x80000000) {
 		*(.text)
 		*(.text.*)
 	} :text
 
-	.rodata : {
+	.rodata : AT(ADDR(.rodata) - 0x80000000) {
 		*(.rodata)
 		*(.rodata.*)
 	} :text
 
-	.data : {
+	.data : AT(ADDR(.data) - 0x80000000) {
 		*(.data)
 		*(.data.*)
 	} :data
 
 	. = ALIGN(4);
 	__bss_start = .;
-	.bss : {
+	.bss : AT(ADDR(.bss) - 0x80000000) {
 		*(.bss)
 		*(.bss.*)
 		*(COMMON)

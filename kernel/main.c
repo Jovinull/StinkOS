@@ -1,10 +1,13 @@
 /* StinkOS kernel - entry point in 32-bit protected mode.
  * The bootloader sets a VBE linear-framebuffer mode and hands control here. */
 #include "defs.h"
+#include "memlayout.h"
 
-/* Linker-script symbols (boot/kernel.ld) that bound the kernel image in
- * physical RAM. PMM must start handing out frames AFTER __bss_end so we
- * never let userland or page tables stomp on the kernel's own .text/.bss. */
+/* Linker-script symbol pointing at the END of the kernel image. With the
+ * higher-half link, __bss_end is a VIRT address (~0x801XXXXX); the PMM
+ * tracks PHYS, so we V2P() before handing the watermark off. PMM still
+ * starts allocating frames AFTER the kernel image so no allocator stomps
+ * on .text/.bss. */
 extern char __bss_end[];
 
 void kmain(void)
@@ -17,7 +20,7 @@ void kmain(void)
 	serial_write("gdt: kernel+user segments and tss loaded\n");
 	bootdiag_add("cpu: gdt+tss", BOOT_OK);
 
-	pmm_init((unsigned int)__bss_end, 0x2000000);   /* kernel-end .. 32 MiB */
+	pmm_init(V2P((unsigned int)__bss_end), 0x2000000);   /* kernel-end .. 32 MiB */
 	paging_init();
 	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");

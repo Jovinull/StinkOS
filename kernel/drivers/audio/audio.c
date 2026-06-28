@@ -13,6 +13,7 @@
 #include "io.h"
 #include "serial.h"
 #include "proc.h"
+#include "memlayout.h"
 
 /* SB16 I/O port layout, base 0x220 (the default; mixer register 0x80 can
  * select 0x240/0x260/0x280 on real hardware, but every common configuration
@@ -467,7 +468,7 @@ int audio_start_output(void)
 	if (output_running)
 		return 0;
 
-	dma_channel1_program((unsigned int)audio_buffer,
+	dma_channel1_program(V2P((unsigned int)audio_buffer),
 	                     AUDIO_BUFFER_SIZE,
 	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
 
@@ -505,7 +506,7 @@ int audio_start_output_16bit(void)
 	if (output_running)
 		return 0;
 
-	dma_channel5_program((unsigned int)audio_buffer,
+	dma_channel5_program(V2P((unsigned int)audio_buffer),
 	                     AUDIO_BUFFER_SIZE,
 	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
 
@@ -537,7 +538,7 @@ int audio_start_output_stereo(void)
 	if (output_running)
 		return 0;
 
-	dma_channel5_program((unsigned int)audio_buffer,
+	dma_channel5_program(V2P((unsigned int)audio_buffer),
 	                     AUDIO_BUFFER_SIZE,
 	                     DMA_MODE_SINGLE | DMA_MODE_AUTOINIT | DMA_MODE_READ);
 

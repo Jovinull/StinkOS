@@ -8,6 +8,7 @@
 #include "pci.h"
 #include "serial.h"
 #include "ethernet.h"     /* eth_handle_frame for the IRQ-driven RX path */
+#include "memlayout.h"    /* V2P for DMA descriptor and buffer phys addrs */
 
 /* Register offsets from MMIO base (BAR0). The Intel SDM lists hundreds; we
  * only need a handful at this layer. */
@@ -157,6 +158,10 @@ int e1000_init(void)
 		serial_write("e1000: BAR0 is I/O space, unsupported\n");
 		return 0;
 	}
+	/* MMIO BAR lives at high phys (~0xFEB80000) which the kernel pgdir
+	 * still identity-maps via the DEVSPACE PSE entries (virt = phys for
+	 * everything above KERNEL_DEVSPACE = 0xFE000000). xv6 uses the same
+	 * DEVSPACE trick for the LAPIC / IOAPIC MMIO. */
 	unsigned int mmio_phys = bar0 & 0xFFFFFFF0u;
 	e1000_mmio = (volatile unsigned int *)mmio_phys;
 
@@ -221,19 +226,21 @@ int e1000_get_mac(unsigned char *out)
 }
 
 /* Wire each RX descriptor at its dedicated 2 KiB buffer and tell the chip
- * about the ring. Identity-mapped kernel memory means the virtual address
- * of rx_ring / rx_buffers is the physical address the controller will DMA
- * to. RDT is set one slot behind RDH so the device sees a fully-populated
- * ring (32 buffers ready to fill). */
+ * about the ring. Higher-half kernel link means the buffers live at virt
+ * 0x80XXXXXX (BSS at high virt); the NIC needs PHYS, so we V2P() before
+ * loading descriptors and ring base registers. xv6 does the same dance
+ * in its e1000 driver (vm.c V2P macro). RDT is set one slot behind RDH
+ * so the device sees a fully-populated ring (32 buffers ready to fill).
+ */
 static void setup_rx(void)
 {
 	for (int i = 0; i < RX_RING_COUNT; i++) {
-		rx_ring[i].addr     = (unsigned long long)(unsigned int)rx_buffers[i];
+		rx_ring[i].addr     = (unsigned long long)V2P((unsigned int)rx_buffers[i]);
 		rx_ring[i].status   = 0;
 	}
 	rx_cursor = 0;
 
-	e1000_write(E1000_RDBAL, (unsigned int)rx_ring);
+	e1000_write(E1000_RDBAL, V2P((unsigned int)rx_ring));
 	e1000_write(E1000_RDBAH, 0);
 	e1000_write(E1000_RDLEN, RX_RING_COUNT * sizeof(struct rx_desc));
 	e1000_write(E1000_RDH,   0);
@@ -255,12 +262,12 @@ static void setup_rx(void)
 static void setup_tx(void)
 {
 	for (int i = 0; i < TX_RING_COUNT; i++) {
-		tx_ring[i].addr   = (unsigned long long)(unsigned int)tx_buffers[i];
+		tx_ring[i].addr   = (unsigned long long)V2P((unsigned int)tx_buffers[i]);
 		tx_ring[i].status = E1000_TXD_STAT_DD;
 	}
 	tx_cursor = 0;
 
-	e1000_write(E1000_TDBAL, (unsigned int)tx_ring);
+	e1000_write(E1000_TDBAL, V2P((unsigned int)tx_ring));
 	e1000_write(E1000_TDBAH, 0);
 	e1000_write(E1000_TDLEN, TX_RING_COUNT * sizeof(struct tx_desc));
 	e1000_write(E1000_TDH,   0);

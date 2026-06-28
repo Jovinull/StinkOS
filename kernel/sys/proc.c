@@ -8,6 +8,7 @@
  */
 #include "defs.h"
 #include "proc.h"
+#include "memlayout.h"
 
 static struct proc table[PROC_MAX];
 static struct proc *running;            /* NULL until proc_init() runs */
@@ -147,7 +148,11 @@ struct proc *proc_kthread_create(const char *name, void (*entry)(void))
 		return 0;
 	}
 
-	p->kstack_top = frame + 4096;              /* stack grows down from the top */
+	/* pmm_alloc returns PHYS; the kernel uses kstack_top as a virtual
+	 * pointer (kstack writes, TSS.esp0 load, fork's regs clone). Convert
+	 * to the higher-half mirror so derefs land via the kernel-only
+	 * direct map -- never aliased by any user PT. */
+	p->kstack_top = P2V(frame) + 4096;         /* stack grows down from the top */
 	p->esp        = context_init(p->kstack_top, entry);
 	p->cr3        = 0;                          /* share the kernel page dir */
 	p->state      = PROC_READY;
@@ -213,8 +218,10 @@ int proc_reap(struct proc *p)
 		return -1;
 	int code = p->exit_code;
 	if (p->kstack_top) {
-		/* kstack_top is the EXCLUSIVE top, so the frame base sits 4 KiB below. */
-		pmm_free(p->kstack_top - 4096);
+		/* kstack_top is the EXCLUSIVE top (high-half virt), so the frame
+		 * base sits 4 KiB below; V2P to recover the phys addr the PMM
+		 * tracks. */
+		pmm_free(V2P(p->kstack_top - 4096));
 	}
 	proc_free(p);
 	return code;

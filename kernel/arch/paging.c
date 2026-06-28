@@ -75,34 +75,41 @@ static void load_cr3(void)
 	__asm__ volatile ("mov %0, %%cr3" : : "r"(V2P((unsigned int)page_dir)) : "memory");
 }
 
-/* Build the canonical kernel pgdir layout into `pgdir`:
- *   - identity [0, 4 MiB)          : kernel image + low BSS (transition)
- *   - identity [4 MiB, USER_END)   : carved per-process (cleared here,
- *                                    user PT installed by paging_init_user_pgdir)
- *   - identity [USER_END, KERNBASE): legacy identity, retired in commit 4
- *   - high-half [KERNBASE, KERNBASE+KERNEL_DIRECT_MAP):
- *                                    direct map of phys RAM via PSE 4 MiB
- *                                    -- xv6-public/vm.c:107 (kmap[]).
- *   - identity [KERNEL_DEVSPACE, 4 GiB): MMIO (LFB, e1000 BAR) keeps
- *                                    virt = phys; xv6 DEVSPACE pattern.
+/* Build the canonical xv6-style kernel pgdir layout into `pgdir`:
+ *   - [0, USER_END)                : EMPTY (per-process user PTs install here)
+ *   - [USER_END, KERNBASE)         : EMPTY (no virt below KERNBASE is kernel
+ *                                    territory; this is the firewall that
+ *                                    makes the bug we fixed impossible)
+ *   - [KERNBASE, +KERNEL_DIRECT_MAP): direct map of phys RAM via 4 MiB PSE
+ *                                    -- xv6-public/vm.c:107 kmap[]
+ *   - [KERNEL_DEVSPACE, 4 GiB)     : identity for MMIO (LFB, e1000 BAR)
+ *
+ * NO identity-low here. Bootstrap pgdir in kernel/arch/kentry.s carried
+ * a transient identity-low purely to keep EIP valid between CR0.PG=1 and
+ * the indirect jump to the higher half; once paging_init swaps in this
+ * pgdir, identity-low is dropped forever -- user PTs can never alias
+ * kernel territory because there IS no kernel territory below KERNBASE.
  */
 static void build_kernel_pgdir(unsigned int *pgdir)
 {
-	/* Default: identity-map everything below KERNBASE via PSE. Per-process
-	 * code overwrites the USER window later; that's fine because the
-	 * higher-half mirror provides the kernel-safe alias regardless. */
 	for (unsigned int i = 0; i < ENTRIES; i++)
-		pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+		pgdir[i] = 0;
 
-	/* Higher-half direct map: virt [KERNBASE, KERNBASE+KERNEL_DIRECT_MAP)
-	 * -> phys [0, KERNEL_DIRECT_MAP). Overwrites the legacy PSE entries
-	 * that previously identity-mapped this virt range to itself; those
-	 * entries pointed at phys addresses above PHYSTOP and were never
-	 * used. */
+	/* High-half direct map: virt [KERNBASE, +KERNEL_DIRECT_MAP) -> phys
+	 * [0, KERNEL_DIRECT_MAP). Covers the kernel image (linked at virt
+	 * 0x80100000, phys 0x100000) plus every PMM-managed frame. */
 	unsigned int kern_first = KERNBASE / PAGE_4MB;
 	unsigned int kern_count = KERNEL_DIRECT_MAP / PAGE_4MB;
 	for (unsigned int p = 0; p < kern_count; p++)
 		pgdir[kern_first + p] = (p * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+
+	/* DEVSPACE: identity-map everything from KERNEL_DEVSPACE to 4 GiB so
+	 * fb LFB (0xFD000000), e1000 BAR (~0xFEB80000) and other PCI MMIO
+	 * stay reachable as plain phys = virt pointers. xv6's [DEVSPACE, 4G)
+	 * range. */
+	unsigned int dev_first = KERNEL_DEVSPACE / PAGE_4MB;
+	for (unsigned int i = dev_first; i < ENTRIES; i++)
+		pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
 }
 
 void paging_init(void)
