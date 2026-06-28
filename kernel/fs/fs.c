@@ -62,11 +62,17 @@ int fs_init(void)
 
 /* ---- name helpers ---- */
 
+/* Names always fit in 16 bytes. Dir-entry names are zero-padded to fill
+ * the field, but caller-side literals (C string constants) are only
+ * NUL-terminated -- the bytes past the NUL belong to whatever the
+ * linker placed next in rodata. Stop at the first NUL we see in EITHER
+ * string so the comparison never reads past a literal's terminator. */
 static int name_eq(const char *a, const char *b)
 {
-	for (int i = 0; i < 16; i++)
-		if (a[i] != b[i])
-			return 0;
+	for (int i = 0; i < 16; i++) {
+		if (a[i] != b[i]) return 0;
+		if (a[i] == 0)    return 1;
+	}
 	return 1;
 }
 
@@ -77,6 +83,7 @@ static int name_ci_eq(const char *a, const char *b)
 		if (ca >= 'a' && ca <= 'z') ca -= 32;
 		if (cb >= 'a' && cb <= 'z') cb -= 32;
 		if (ca != cb) return 0;
+		if (ca == 0)  return 1;
 	}
 	return 1;
 }
