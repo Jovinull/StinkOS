@@ -334,11 +334,11 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 		if [ $$bb -gt $$max ]; then \
 			echo "ERROR: bootblock $$bb B > BOOTBLOCK_SECTORS * 512 = $$max B; raise BOOTBLOCK_SECTORS in boot/boot.s AND Makefile"; exit 1; fi
 	# --- 2. Link the kernel as a real ELF at 0x100000 ---
-	# The kernel deliberately does NOT link against libgcc -- every kernel
-	# source file is written to stay in 32-bit arithmetic so the gcc 14
-	# helpers (__udivdi3 etc.) are never referenced. Keeps the kernel
-	# pure and the image smaller.
-	$(LD) -T boot/kernel.ld -o $(BUILD)/kernel.elf $(KERNEL_OBJS)
+	# libgcc.a supplies the 64-bit arithmetic helpers (__udivdi3, __umoddi3)
+	# that audio_mix_play_rate's Q16.16 step computation needs. Pre-§13 we
+	# avoided libgcc to stay under a 64 KiB bootloader cap; with ELF-aware
+	# boot we have headroom and can use the natural 64-bit form.
+	$(LD) -T boot/kernel.ld -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
 	# --- 3. Strip section headers / symbols for on-disk image ---
 	# kernel.elf is ~120 KiB unstripped (debug info, section headers);
 	# stripped drops to ~75 KiB. bootmain only needs PT_LOAD program

@@ -316,22 +316,19 @@ int audio_mix_play_rate(const unsigned char *samples, unsigned int length,
 	int h = audio_mix_play(samples, length, volume);
 	if (h < 0)
 		return -1;
-	/* Q16.16 step = src_rate / output_rate. Clamp to a safe range so a
+	/* Q16.16 step = src_rate / output_rate. Done in 64-bit so any
+	 * realistic source rate (8000 / 11025 / 22050 / 44100 / 48000 / 96000)
+	 * computes exactly; we then clamp the resulting step to [1, 16x] so a
 	 * pathological caller cannot overflow the index in a few samples.
 	 *
-	 * src_rate is capped at 65535 Hz so the (src_rate << 16) intermediate
-	 * fits in 32 bits and we avoid a 64-bit divide -- on a freestanding
-	 * 32-bit kernel that would pull in libgcc's __udivdi3 helper and the
-	 * whole libgcc.a, blowing past the 64 KiB bootloader load limit.
-	 * Every real audio source rate (8000, 11025, 22050, 44100, even 48000)
-	 * comfortably fits in 16 bits; nothing in the SB16 or AC97 family goes
-	 * higher. If a future codec ever needs >65 KHz, see TODO §13 -- once
-	 * the ELF-aware bootloader lands the kernel can grow freely and this
-	 * helper can go back to `unsigned long long`. */
+	 * Pre-§13 this helper was 32-bit-clamped (src_rate <= 65535) to dodge
+	 * a libgcc __udivdi3 dependency that would have pushed the kernel past
+	 * the bootloader's 64 KiB cap. Now that the ELF-aware bootloader is in
+	 * place, the kernel can grow freely; the 64-bit form below is the
+	 * straightforward computation. */
 	if (src_rate == 0)
 		src_rate = AUDIO_RATE_HZ;
-	if (src_rate > 0xFFFFu) src_rate = 0xFFFFu;
-	unsigned int step = (src_rate << 16) / AUDIO_RATE_HZ;
+	unsigned int step = (unsigned int)(((unsigned long long)src_rate << 16) / AUDIO_RATE_HZ);
 	if (step == 0) step = 1;
 	if (step > (16u << 16)) step = (16u << 16);   /* 16x speed ceiling */
 	channels[h].step = step;
