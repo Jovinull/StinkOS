@@ -149,14 +149,26 @@ void isr_handler(struct regs *r)
 	}
 
 	if ((r->cs & 3) == 3) {                    /* fault from ring 3: kill the app */
+		unsigned int cr2 = 0;
+		__asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
 		serial_write("app: fault, killed (exception ");
 		serial_write_dec(r->int_no);
+		serial_write(", eip=0x");
+		serial_write_hex(r->eip);
+		serial_write(", cr2=0x");
+		serial_write_hex(cr2);
 		serial_write(")\n");
 		app_return();                      /* back to the shell or menu (no return) */
 	}
 
+	unsigned int cr2 = 0;
+	__asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
 	serial_write("StinkOS: kernel exception ");
 	serial_write_dec(r->int_no);
+	serial_write(" at eip=0x");
+	serial_write_hex(r->eip);
+	serial_write(" cr2=0x");
+	serial_write_hex(cr2);
 	serial_write(" - halted\n");
 
 	for (;;)
