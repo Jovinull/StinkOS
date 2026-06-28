@@ -467,6 +467,13 @@ run-installed: target.bin
 test-headless: all
 	@python3 tools/test-headless.py
 
+# Multi-process smoke: boots, enters the shell, runs `bg anim` to confirm
+# fork+exec hands the child a working ring-3 entry while the parent keeps
+# serving the prompt. Decoupled from test-headless so it can fail / iterate
+# independently without rerunning the 25 s graphical menu sweep.
+smoke-multiproc: all
+	@python3 tools/smoke-multiproc.py
+
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
 # the target stays useful in any environment, including CI. Vendored sources
@@ -830,4 +837,4 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
 
-.PHONY: all hex dall readelf-kernel run run-install run-installed run-iso test-headless audit sample-packages unittest clean
+.PHONY: all hex dall readelf-kernel run run-install run-installed run-iso test-headless smoke-multiproc audit sample-packages unittest clean
