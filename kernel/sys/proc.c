@@ -191,6 +191,14 @@ void proc_yield(void)
 	next->state = PROC_RUNNING;
 	running     = next;
 
+	/* TODO §1 multitasking, step 2: swap CR3 to the incoming process's
+	 * pgdir before swapping the stack. Order matters -- once
+	 * context_switch returns into `next`, every memory access uses
+	 * `next`'s address space. paging_switch is a no-op when next->cr3
+	 * is 0 (the legacy shared-boot-pgdir mode), so the single-process
+	 * boot path stays identical until step 3 starts handing out
+	 * per-process pgdirs. */
+	paging_switch((unsigned int *)next->cr3);
 	context_switch(&prev->esp, next->esp);
 }
 

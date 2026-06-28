@@ -63,4 +63,13 @@ unsigned int paging_user_fb_base(void);
 unsigned int *paging_create_user_pgdir(void);
 void          paging_destroy_user_pgdir(unsigned int *pgdir);
 
+/* TODO §1 multitasking, step 2: load a process's page directory.
+ *
+ * Called from the scheduler immediately before context_switch so the
+ * incoming process resumes with its own address space active. When the
+ * incoming pgdir is NULL/0 (a legacy proc that still shares the boot
+ * page_dir) we do nothing -- keeps the single-process boot path
+ * bit-identical until step 3 starts handing out per-proc pgdirs. */
+void paging_switch(unsigned int *pgdir);
+
 #endif

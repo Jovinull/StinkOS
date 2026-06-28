@@ -353,6 +353,28 @@ unsigned int *paging_create_user_pgdir(void)
 	return pgdir;
 }
 
+/* Refs:
+ *   - PRIMARY xv6-public/vm.c:157 (switchuvm): xv6 wraps the lcr3 in
+ *       pushcli()/popcli() because its scheduler may run with interrupts
+ *       enabled. We don't need to do that here -- paging_switch is
+ *       called from proc_yield, which is itself only invoked from
+ *       irq_handler (interrupts already off via the asm IRQ stub).
+ *       Callers from cooperative contexts must hold their own IF=0.
+ *   - CONTRAST toaruos/kernel/sys/process.c (switch_next): uses an
+ *       arch_set_kernel_stack + arch_load_page_directory pair; same
+ *       split as xv6 but with C++-ish naming. Our PCB carries cr3
+ *       directly so we don't need the indirection.
+ *
+ * cr3 = 0 means "this proc still shares the boot page_dir" -- skip the
+ * MOV CR3 to keep the single-process boot path identical until step 3
+ * starts handing out per-proc pgdirs. */
+void paging_switch(unsigned int *pgdir)
+{
+	if (!pgdir)
+		return;
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)pgdir) : "memory");
+}
+
 void paging_destroy_user_pgdir(unsigned int *pgdir)
 {
 	if (!pgdir)
