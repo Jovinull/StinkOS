@@ -12,6 +12,7 @@
 #include "dma.h"
 #include "io.h"
 #include "serial.h"
+#include "proc.h"
 
 /* SB16 I/O port layout, base 0x220 (the default; mixer register 0x80 can
  * select 0x240/0x260/0x280 on real hardware, but every common configuration
