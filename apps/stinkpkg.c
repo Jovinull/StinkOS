@@ -594,6 +594,12 @@ static void lockfile_append(const char *name, const char *version,
  * cyclic dependency graphs. `force` skips the already-installed check so
  * the upgrade path can re-pull a package even if it already appears in
  * STINKDB. */
+/* Forward decl: install_pkg consults index_version inside its STINKPKG.PIN
+ * check, but the helper is defined further down (next to the other repo-
+ * index parsers). Without the prototype, gcc 14 rejects the call as an
+ * implicit-decl error. */
+static int index_version(const char *name, char *out_ver, unsigned int cap);
+
 /* `skip_deps` short-circuits the recursive dependency loop -- used by the
  * 'I' menu key for force-installing a single package without pulling its
  * dep graph. Useful for testing and for hand-resolving conflicts. */
