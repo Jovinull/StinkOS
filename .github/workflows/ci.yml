@@ -49,6 +49,9 @@ jobs:
       - name: Build OS image
         run: make
 
+      - name: Run host-side unit tests
+        run: make unittest
+
       - name: Run headless boot test
         run: make test-headless
 
