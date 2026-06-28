@@ -643,6 +643,9 @@ $(TEST_BIN)/test_paging_brk: $(TEST_DIR)/test_paging_brk.c | $(TEST_BIN)
 $(TEST_BIN)/test_proc_reap: $(TEST_DIR)/test_proc_reap.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_proc_reap.c
 
+$(TEST_BIN)/test_mouse_packet: $(TEST_DIR)/test_mouse_packet.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_mouse_packet.c
+
 $(TEST_BIN)/test_rtc_alarm: $(TEST_DIR)/test_rtc_alarm.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_rtc_alarm.c
 
@@ -676,7 +679,7 @@ $(TEST_BIN)/test_arp_ttl: $(TEST_DIR)/test_arp_ttl.c | $(TEST_BIN)
 $(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_pmm.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim $(TEST_BIN)/test_audio_mode $(TEST_BIN)/test_mbr_write $(TEST_BIN)/test_tcp_close_pid $(TEST_BIN)/test_icmp_echo $(TEST_BIN)/test_arp_ratelimit $(TEST_BIN)/test_utf8_collapse $(TEST_BIN)/test_dhcp_dns2 $(TEST_BIN)/test_arp_ttl $(TEST_BIN)/test_pmm $(TEST_BIN)/test_ipv4_martian $(TEST_BIN)/test_ipv4_teardrop $(TEST_BIN)/test_fb_rect_clip $(TEST_BIN)/test_mmap_overflow $(TEST_BIN)/test_blit_scale $(TEST_BIN)/test_tcp_keepalive $(TEST_BIN)/test_dns_cache $(TEST_BIN)/test_tcp_cwnd $(TEST_BIN)/test_tcp_wscale $(TEST_BIN)/test_tcp_ooo $(TEST_BIN)/test_ipv4_reasm_alloc $(TEST_BIN)/test_pipe $(TEST_BIN)/test_klog $(TEST_BIN)/test_timer $(TEST_BIN)/test_tcp_rto $(TEST_BIN)/test_fs_grow $(TEST_BIN)/test_fs_delete $(TEST_BIN)/test_elf_loader $(TEST_BIN)/test_keymap_br $(TEST_BIN)/test_vfs_fd $(TEST_BIN)/test_paging_brk $(TEST_BIN)/test_proc_reap
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim $(TEST_BIN)/test_audio_mode $(TEST_BIN)/test_mbr_write $(TEST_BIN)/test_tcp_close_pid $(TEST_BIN)/test_icmp_echo $(TEST_BIN)/test_arp_ratelimit $(TEST_BIN)/test_utf8_collapse $(TEST_BIN)/test_dhcp_dns2 $(TEST_BIN)/test_arp_ttl $(TEST_BIN)/test_pmm $(TEST_BIN)/test_ipv4_martian $(TEST_BIN)/test_ipv4_teardrop $(TEST_BIN)/test_fb_rect_clip $(TEST_BIN)/test_mmap_overflow $(TEST_BIN)/test_blit_scale $(TEST_BIN)/test_tcp_keepalive $(TEST_BIN)/test_dns_cache $(TEST_BIN)/test_tcp_cwnd $(TEST_BIN)/test_tcp_wscale $(TEST_BIN)/test_tcp_ooo $(TEST_BIN)/test_ipv4_reasm_alloc $(TEST_BIN)/test_pipe $(TEST_BIN)/test_klog $(TEST_BIN)/test_timer $(TEST_BIN)/test_tcp_rto $(TEST_BIN)/test_fs_grow $(TEST_BIN)/test_fs_delete $(TEST_BIN)/test_elf_loader $(TEST_BIN)/test_keymap_br $(TEST_BIN)/test_vfs_fd $(TEST_BIN)/test_paging_brk $(TEST_BIN)/test_proc_reap $(TEST_BIN)/test_mouse_packet
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
@@ -740,6 +743,7 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 	$(TEST_BIN)/test_vfs_fd
 	$(TEST_BIN)/test_paging_brk
 	$(TEST_BIN)/test_proc_reap
+	$(TEST_BIN)/test_mouse_packet
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
