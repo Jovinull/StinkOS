@@ -14,6 +14,11 @@ typedef unsigned char  u8;
 typedef unsigned short u16;
 typedef unsigned int   u32;
 
+/* Same byte layout as boot/elf32.h. The two copies stay in sync by hand:
+ * the bootloader can't pull in kernel typedefs (it runs before paging /
+ * before any kernel code), and the kernel can't pull in boot/ headers
+ * (different include strategy). Both follow the System V ABI Intel 386
+ * supplement -- if you change one, change the other. */
 struct elf32_ehdr {
 	u8  e_ident[16];
 	u16 e_type;

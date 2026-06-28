@@ -6,7 +6,13 @@
  * is still loaded as a flat binary by boot.s itself.
  *
  * Field layout follows the ELF v1 spec (System V ABI, Intel 386
- * supplement); we only declare the subset bootmain.c actually reads. */
+ * supplement); we only declare the subset bootmain.c actually reads.
+ *
+ * The kernel-side userland ELF loader (kernel/sys/elf.c) keeps its own
+ * copy of these two structs with identical byte layout. The two copies
+ * cannot share a single header (bootloader can't reach into kernel
+ * include paths) so a change here must be mirrored there, and vice
+ * versa. */
 
 #ifndef BOOT_ELF32_H
 #define BOOT_ELF32_H
