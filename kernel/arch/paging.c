@@ -298,6 +298,87 @@ unsigned int paging_user_set_brk(unsigned int new_brk)
 	return user_heap_next;
 }
 
+/* ---- TODO §1 multitasking, step 1: per-process page directories ----
+ *
+ * These two routines are the foundation everything else in §1 stacks
+ * onto. They build / tear down a self-contained per-process address
+ * space without touching any of the legacy globals above (page_dir,
+ * user_pts[], user_heap_next, fb_pde_mapped) -- step 1 deliberately
+ * adds no call sites. Steps 2-4 rewire the rest of paging.c to operate
+ * against a passed-in pgdir, at which point the globals retire.
+ *
+ * Refs picked for this commit:
+ *   - PRIMARY: osdev-refs/xv6-public/vm.c
+ *       setupkvm  (line 119): allocate PD, map the kernel into it via a
+ *                              kmap[] table. We diverge -- xv6 has no
+ *                              4 MiB PSE pages; it walks kmap[] and calls
+ *                              mappages for each region. We don't need
+ *                              that machinery because our kernel mapping
+ *                              is just "PSE identity-map of all 4 GiB"
+ *                              that already lives in the running pgdir,
+ *                              so a single memcpy is exactly equivalent.
+ *       freevm   (line 284): walks PDE -> PTE -> kfree each frame, then
+ *                              kfree(pgdir). Same loop, our 4 MiB user
+ *                              PDE range = (USER_BASE / PAGE_4MB ..
+ *                              USER_END / PAGE_4MB).
+ *   - CONTRAST: osdev-refs/linux-0.01/mm/memory.c
+ *       free_page_tables (line 79): Linus's version. Loops over PDEs,
+ *                              releases each PT page, decrements a
+ *                              refcount in mem_map (for COW). We do NOT
+ *                              do refcounts because no COW in v1 -- each
+ *                              user page is owned by exactly one pgdir,
+ *                              freed once. Simpler, but bears watching
+ *                              when COW lands later.
+ *
+ * Why memcpy the kernel half instead of mappages: our paging_init laid
+ * out 1024 4 MiB PSE PDEs covering 0..4 GiB; that mapping IS the kernel
+ * address space. Cloning it byte-for-byte preserves the same kernel
+ * code/data view through any later trap on the new pgdir. Cost: 4 KiB
+ * memcpy per process create.
+ */
+unsigned int *paging_create_user_pgdir(void)
+{
+	unsigned int *pgdir = (unsigned int *)pmm_alloc();
+	if (!pgdir)
+		return 0;
+	/* Inherit the running kernel mapping (every PSE PDE plus whatever
+	 * is in the user-window slots right now) then wipe the user
+	 * window so the new process starts with no mappings of its own. */
+	for (unsigned int i = 0; i < ENTRIES; i++)
+		pgdir[i] = page_dir[i];
+	unsigned int user_first = USER_BASE / PAGE_4MB;
+	unsigned int user_last  = USER_END  / PAGE_4MB;
+	for (unsigned int i = user_first; i < user_last; i++)
+		pgdir[i] = 0;
+	return pgdir;
+}
+
+void paging_destroy_user_pgdir(unsigned int *pgdir)
+{
+	if (!pgdir)
+		return;
+	unsigned int user_first = USER_BASE / PAGE_4MB;
+	unsigned int user_last  = USER_END  / PAGE_4MB;
+	for (unsigned int i = user_first; i < user_last; i++) {
+		unsigned int pde = pgdir[i];
+		if (!(pde & PG_PRESENT))
+			continue;
+		if (pde & PG_PS) {
+			/* 4 MiB user PSE page (e.g. the FB PDE if the user mapped it).
+			 * Skip -- the FB is host MMIO, not pmm-managed RAM. */
+			continue;
+		}
+		unsigned int *pt = (unsigned int *)(pde & FRAME_MASK);
+		for (unsigned int e = 0; e < ENTRIES; e++) {
+			unsigned int pte = pt[e];
+			if (pte & PG_PRESENT)
+				pmm_free(pte & FRAME_MASK);
+		}
+		pmm_free((unsigned int)pt);
+	}
+	pmm_free((unsigned int)pgdir);
+}
+
 /* Validate a userland buffer before the kernel dereferences it: the range must
  * sit wholly inside one mapped span -- code+stack (contiguous) or the portion
  * of the heap that has actually been mapped so far. */
