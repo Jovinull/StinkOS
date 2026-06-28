@@ -99,18 +99,58 @@ jobs:
       - name: Lay out Pages artifact
         run: |
           mkdir -p _pages/pkg
-          cp repo/*.stinkpkg _pages/pkg/
-          cp repo/index.txt  _pages/index.txt
-          cat > _pages/README.md <<'EOF'
-          # StinkOS sample package repository
+          # Static landing + stylesheet (authored under pages/ in the repo).
+          cp pages/index.html _pages/index.html
+          cp pages/style.css  _pages/style.css
+          # Package binaries + plain manifest the stink-pkg client consumes.
+          cp repo/*.stinkpkg  _pages/pkg/
+          cp repo/index.txt   _pages/index.txt
+          # Human-readable browse-able package index. Generated from index.txt
+          # so the table here cannot drift from what the client downloads.
+          python3 - <<'PY'
+          import os
+          rows = []
+          with open("_pages/index.txt") as f:
+              for line in f:
+                  parts = line.strip().split()
+                  if len(parts) != 3: continue
+                  name, ver, sha = parts
+                  size = os.path.getsize(f"_pages/pkg/{name}.stinkpkg") if os.path.exists(f"_pages/pkg/{name}.stinkpkg") else 0
+                  rows.append((name, ver, sha, size))
 
-          Stand-alone snapshot built from this repository. Point a StinkOS
-          install at this base URL by writing `STINKPKG.CONF`:
-
-              repo_url=https://<owner>.github.io/StinkOS
-
-          See docs/PACKAGING.md for details.
-          EOF
+          rows_html = []
+          for name, ver, sha, size in rows:
+              kib = f"{size/1024:.1f} KiB" if size else "-"
+              short = sha[:12] + "..." if len(sha) > 12 else sha
+              rows_html.append(
+                  f'<tr><td><a href="pkg/{name}.stinkpkg">{name}.stinkpkg</a></td>'
+                  f'<td>{ver}</td><td>{kib}</td>'
+                  f'<td class="sha" title="{sha}">{short}</td></tr>'
+              )
+          rows_str = "\n".join(rows_html)
+          html = (
+              '<!DOCTYPE html><html lang="en"><head>'
+              '<meta charset="utf-8">'
+              '<meta name="viewport" content="width=device-width,initial-scale=1">'
+              '<title>StinkOS package repository</title>'
+              '<link rel="stylesheet" href="../style.css">'
+              '</head><body>'
+              '<section><div class="wrap">'
+              '<p><a href="../">&larr; StinkOS</a></p>'
+              '<h2>Package repository</h2>'
+              '<p>Live manifest at <a href="../index.txt">index.txt</a>. '
+              'Point a StinkOS install at this URL via <code>STINKPKG.CONF</code>:</p>'
+              '<pre>repo_url=https://jovinull.github.io/StinkOS</pre>'
+              '<table class="pkg">'
+              '<thead><tr><th>File</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead>'
+              f'<tbody>{rows_str}</tbody>'
+              '</table>'
+              f'<p style="color:var(--fg-muted);font-size:0.85rem;margin-top:24px">{len(rows)} packages</p>'
+              '</div></section></body></html>'
+          )
+          with open("_pages/pkg/index.html", "w") as f:
+              f.write(html)
+          PY
 
       # enablement: true auto-creates the Pages site on first run so the
       # repo owner doesn't have to flip Settings -> Pages -> Source by hand.

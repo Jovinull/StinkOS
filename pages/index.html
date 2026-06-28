@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StinkOS -- a 32-bit x86 hobby OS that runs Doom</title>
+<meta name="description" content="StinkOS is a freestanding 32-bit x86 operating system: ELF-aware bootloader, multitasking kernel, TCP/IP stack, package manager, and a full Doom port. ~110 KiB stripped kernel, 28 userland apps, 62+ host-side unit tests.">
+<meta name="theme-color" content="#0d1117">
+<meta property="og:title" content="StinkOS">
+<meta property="og:description" content="A 32-bit x86 hobby OS with ELF-aware boot, multitasking, TCP/IP, a package manager, and a Doom port. Built from scratch.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+	<div class="wrap">
+		<h1>StinkOS<span class="cursor"></span></h1>
+		<p class="tagline">A 32-bit x86 operating system written from scratch. Boots from a custom ELF-aware bootloader, schedules processes, talks TCP/IP, ships a package manager, and runs Doom.</p>
+		<div class="badges">
+			<span>i386 freestanding</span>
+			<span>MBR boot (no GRUB)</span>
+			<span>multiboot-compatible kernel</span>
+			<span>QEMU + real PC</span>
+			<span>MIT (first-party)</span>
+		</div>
+		<a class="cta" href="#getstarted">Get started &rarr;</a>
+		<a class="cta secondary" href="https://github.com/Jovinull/StinkOS">View on GitHub</a>
+	</div>
+</header>
+
+<section>
+	<div class="wrap">
+		<div class="stats">
+			<div class="stat"><b>~110 KiB</b><span>stripped kernel</span></div>
+			<div class="stat"><b>44</b><span>syscalls</span></div>
+			<div class="stat"><b>28</b><span>userland apps</span></div>
+			<div class="stat"><b>62+</b><span>host unit tests</span></div>
+			<div class="stat"><b>239+</b><span>v0.4 commits</span></div>
+			<div class="stat"><b>0</b><span>third-party libs in kernel</span></div>
+		</div>
+	</div>
+</section>
+
+<section id="features">
+	<div class="wrap">
+		<h2>What is inside</h2>
+		<div class="cols">
+
+			<div>
+				<h3>Boot &amp; kernel</h3>
+				<ul>
+					<li><strong>ELF-aware bootloader</strong>: 16-sector bootblock loads <code>kernel.elf</code> from disk, walks PT_LOAD program headers, jumps to entry.</li>
+					<li><strong>Multiboot-1 header</strong> in the kernel ELF so GRUB can boot it too.</li>
+					<li>Kernel linked at <code>0x100000</code>; userland window at <code>0x400000</code>.</li>
+					<li>Flat 4 GiB identity-mapped paging, separate user code/heap/stack windows.</li>
+					<li>GDT + IDT + PIT @ 100 Hz, PIC remapped, full IRQ dispatch.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Multitasking</h3>
+				<ul>
+					<li>Process control block, process table (PROC_MAX = 16).</li>
+					<li>Kernel-stack context switch; round-robin scheduler driven by the PIT IRQ.</li>
+					<li>Anonymous pipes, cooperative signals (SIGINT/SIGTERM), per-process VFS.</li>
+					<li><code>SYS_GETPID / KILL / WAIT / WAITPID / SETPRIO / SUSPEND / RESUME / PROC_INFO</code>.</li>
+					<li>Mid-syscall preemption (interrupts re-enabled inside <code>syscall_dispatch</code>).</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Network stack</h3>
+				<ul>
+					<li>TCP RFC 793: retransmit + RTO, slow start, cwnd, fast retransmit, OOO reassembly, MSS, window-scale, SACK, keepalive, persist probe, TIME_WAIT reap.</li>
+					<li>IPv4 with martian filter, Teardrop guard, 2-slot fragment reassembly, source-route drop.</li>
+					<li>DHCP (with retry + secondary DNS), DNS cache, ARP cache with TTL eviction.</li>
+					<li>e1000 NIC driver, IRQ-driven RX.</li>
+					<li>BSD-style sockets: <code>bind / listen / accept / connect</code>.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Userland &amp; shell</h3>
+				<ul>
+					<li>30+ shell commands: <code>ps kill suspend resume mem netstat dns arp dmesg vol audio keymap alarm shutdown reboot clock hostname</code>.</li>
+					<li>256-line scrollback, persisted command history (<code>SHELL.HIS</code>).</li>
+					<li>BR ABNT2 + US keymaps, runtime switch.</li>
+					<li>UTF-8 multi-byte collapse in scrollback.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Storage &amp; FS</h3>
+				<ul>
+					<li>StinkFS: contiguous-file FS on a raw partition, ~100 MiB data region.</li>
+					<li>VFS layer with per-process fd table, open/read/write/seek/close.</li>
+					<li>ATA driver with PIIX bus-master DMA + PIO fallback.</li>
+					<li>Real MBR partition tables on install media.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Audio</h3>
+				<ul>
+					<li>SB16 driver, ISA DMA on channels 1 (8-bit) and 5 (16-bit stereo).</li>
+					<li>8-channel software mixer with Q16.16 per-channel resampling.</li>
+					<li>Half-buffer IRQ for low latency, master + per-channel volume.</li>
+					<li>Doom SFX wired to the kernel mixer.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Doom port</h3>
+				<ul>
+					<li>doomgeneric + Freedoom1 / Freedoom2 / FreeDM ship as three apps.</li>
+					<li>Fullscreen via <code>SYS_BLIT_SCALED</code> (kernel-side nearest-neighbour).</li>
+					<li>Save games via VFS; demos via <code>DOOMARGS.CFG</code> (<code>-record</code>, <code>-playdemo</code>).</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Package manager</h3>
+				<ul>
+					<li><code>.stinkpkg</code> archive format with optional compression.</li>
+					<li><code>stink-pkg install / query / upgrade / verify / replay</code>.</li>
+					<li>Recursive dependency resolution.</li>
+					<li>SHA-256-hashed manifests, lockfile (<code>STINKPKG.LCK</code>).</li>
+				</ul>
+			</div>
+
+		</div>
+	</div>
+</section>
+
+<section id="getstarted">
+	<div class="wrap">
+		<h2>Get started</h2>
+		<div class="steps">
+
+			<div class="step">
+				<p class="num">01.</p>
+				<h3>Boot the latest ISO</h3>
+				<p>Download from <a href="https://github.com/Jovinull/StinkOS/releases">GitHub Releases</a>. The ISO is a raw disk image -- write to a USB stick or run in QEMU:</p>
+<pre>qemu-system-i386 -drive format=raw,file=stinkos-install.iso \
+  -netdev user,id=net0 -device e1000,netdev=net0 \
+  -audiodev sdl,id=snd0 -device sb16,audiodev=snd0</pre>
+			</div>
+
+			<div class="step">
+				<p class="num">02.</p>
+				<h3>Build from source</h3>
+				<p>Linux or WSL. Needs an i386-elf cross-toolchain (the build script grabs it):</p>
+<pre>git clone https://github.com/Jovinull/StinkOS.git
+cd StinkOS
+bash tools/build-cross-toolchain.sh   # one-time, ~15 min
+make                                  # builds os.bin + kernel.elf
+make run                              # boots in QEMU</pre>
+			</div>
+
+			<div class="step">
+				<p class="num">03.</p>
+				<h3>Run the tests</h3>
+				<p>62 host-side unit tests pin the kernel's decision logic without QEMU:</p>
+<pre>make unittest          # all 62 host tests
+make test-headless     # full QEMU boot + every app
+make readelf-kernel    # PT_LOAD inspection</pre>
+			</div>
+
+		</div>
+	</div>
+</section>
+
+<section id="packages">
+	<div class="wrap">
+		<h2>Package repository</h2>
+		<p>This site hosts a sample <code>.stinkpkg</code> repository so a fresh StinkOS install can fetch software out of the box. Point your install at this URL by writing <code>STINKPKG.CONF</code>:</p>
+<pre>repo_url=https://jovinull.github.io/StinkOS</pre>
+		<p>Then on the running system:</p>
+<pre>stink-pkg install snake
+stink-pkg install pong
+stink-pkg upgrade</pre>
+		<p><a href="pkg/">Browse the live package index &rarr;</a></p>
+	</div>
+</section>
+
+<section id="docs">
+	<div class="wrap">
+		<h2>Documentation</h2>
+		<p>The kernel is documented in tree -- every subsystem has a markdown doc tied to it.</p>
+		<ul>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/ARCHITECTURE.md">ARCHITECTURE.md</a> -- kernel overview, boot path, memory layout, process model</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/SYSCALLS.md">SYSCALLS.md</a> -- complete <code>int 0x80</code> table</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/NETWORK.md">NETWORK.md</a> -- DHCP boot timing, TCP state graph, the IPv4 path</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/STINKFS.md">STINKFS.md</a> -- on-disk format</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/PACKAGING.md">PACKAGING.md</a> -- <code>.stinkpkg</code> authoring guide</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/TESTING.md">TESTING.md</a> -- host-mirror unit test contract</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/docs/TUTORIAL.md">TUTORIAL.md</a> -- build the toolchain, the kernel, a package, end-to-end</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/CONTRIBUTING.md">CONTRIBUTING.md</a> -- 7-step recipe for adding a subsystem</li>
+			<li><a href="https://github.com/Jovinull/StinkOS/blob/master/CHANGELOG.md">CHANGELOG.md</a></li>
+		</ul>
+	</div>
+</section>
+
+<section id="contrib">
+	<div class="wrap">
+		<h2>Contributing</h2>
+		<p>The repo accepts PRs. Branch protection on <code>master</code> requires the headless boot test to pass; CI runs the cross-toolchain build and every host-side unit test on every push.</p>
+		<p>Open issues for any of the items in the changelog backlog -- per-process CR3, <code>sys_fork</code>, AC97/HDA audio, PXE install, rtl8139 / virtio-net, IPv6 -- and the rest of the multi-process and driver surface.</p>
+		<p>Pick something small to start: there is a list of <code>TODO §X.Y</code> markers across the kernel that are explicitly tagged for new contributors.</p>
+	</div>
+</section>
+
+<footer>
+	<div class="wrap">
+		<p>Built by <a href="https://github.com/Jovinull">Jovinull</a> &middot; MIT for first-party code, GPLv2 for the vendored Doom port &middot; <a href="https://github.com/Jovinull/StinkOS">github.com/Jovinull/StinkOS</a></p>
+	</div>
+</footer>
+
+</body>
+</html>
