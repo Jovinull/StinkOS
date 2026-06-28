@@ -77,3 +77,34 @@ state in `test_klog`.
 
 For an authoritative list run `make help` and look at the `unittest`
 target, or read the `unittest:` prerequisite list in `Makefile`.
+
+## Reproducible QEMU runs: always pass `-snapshot`
+
+StinkOS writes back to its disk during normal operation -- shell command
+history (`SHELL.HIS`), game high scores, `STINK.CONF` edits, and the
+StinkFS directory itself whenever a file grows or is created. QEMU's
+default raw-drive mode propagates those writes straight back to
+`os.bin`, so two consecutive boots see different state. The second boot
+loads a half-modified disk, the menu can come up empty, headless tests
+go non-deterministic, screenshots get corrupted.
+
+`-snapshot` redirects every guest write to a temporary file that QEMU
+discards on exit. `os.bin` stays bit-identical to what `make all`
+produced; every run starts from the same clean image.
+
+When you need it:
+
+| Command | -snapshot? | Why |
+|---|---|---|
+| `make run` | NO | Interactive use -- you want history + saves to persist |
+| `make run-install` | NO | Installer must write the target disk |
+| `make run-installed` | NO | Interactive use of the installed system |
+| `make run-iso` | NO | Same |
+| `make test-headless` | YES (already set in `tools/test-headless.py`) | CI must be deterministic |
+| `tools/capture-screens.py` | YES (set explicitly in the script) | Screenshots reproducible across reruns |
+| Any ad-hoc debug rerun where you want a clean boot | YES | Bypass disk corruption from prior runs |
+
+Rule of thumb: if the QEMU run is supposed to be reproducible across
+invocations, pass `-snapshot`. The flag is one line, the bug it
+prevents costs hours to track down (the symptoms look like kernel
+regressions, not capture-tooling artefacts).
