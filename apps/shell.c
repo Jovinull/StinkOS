@@ -886,11 +886,11 @@ void main(void)
 			} else {
 				int pid = sys_fork();
 				if (pid < 0) {
-					term_print("bg: fork failed (PCB table full?)", TERM_ERR);
+					term_print("bg: fork failed", TERM_ERR);
 				} else if (pid == 0) {
-					/* Child path: replace cloned shell with the requested
-					 * app. exec never returns on success; on failure exit
-					 * so the duplicate prompt doesn't hang around. */
+					/* Child: replace this copy of the shell with the
+					 * requested app. sys_exec only returns on failure;
+					 * exit so the duplicate prompt doesn't linger. */
 					if (sys_exec(rest) < 0)
 						sys_exit();
 				} else {

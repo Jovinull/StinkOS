@@ -48,6 +48,13 @@
 #define USER_FB_PDES     4u
 
 static unsigned int *page_dir;
+/* §1 step 5.5 fix: a permanent kernel-only pgdir kept alive forever.
+ * Kernel code that touches raw physical frames (copy_user_pgdir,
+ * paging_init_user_pgdir, etc.) switches CR3 to this one for the duration
+ * so identity-mapped writes don't accidentally go through whichever
+ * user PT happens to override the [0, USER_END) virtual range in the
+ * currently-active pgdir. Pure 4 MiB PSE identity for all 4 GiB. */
+static unsigned int *kernel_only_pgdir;
 /* §1 step 5.5: user_pts[] cache removed; user_pte derives the PT pointer
  * from page_dir on each call so multi-proc scheduling never sees a
  * stale cache (see commit message + user_pte comment). */
@@ -65,6 +72,11 @@ void paging_init(void)
 
 	for (unsigned int i = 0; i < ENTRIES; i++)
 		page_dir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+
+	/* Reserve a permanent pure-PSE pgdir for kernel-only operations. */
+	kernel_only_pgdir = (unsigned int *)pmm_alloc();
+	for (unsigned int i = 0; i < ENTRIES; i++)
+		kernel_only_pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
 
 	unsigned int cr4;
 	__asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
@@ -139,10 +151,16 @@ static void unmap_user_page(unsigned int vaddr)
  */
 int paging_init_user_pgdir(unsigned int *pgdir)
 {
+	/* See note in paging_copy_user_pgdir. */
+	unsigned int saved_cr3;
+	__asm__ volatile ("mov %%cr3, %0" : "=r"(saved_cr3));
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)kernel_only_pgdir) : "memory");
 	for (unsigned int p = 0; p < USER_PDES; p++) {
 		unsigned int *pt = (unsigned int *)pmm_alloc();
-		if (!pt)
+		if (!pt) {
+			__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 			return -1;
+		}
 		for (unsigned int i = 0; i < ENTRIES; i++)
 			pt[i] = 0;
 		pgdir[(USER_BASE / PAGE_4MB) + p] =
@@ -150,14 +168,20 @@ int paging_init_user_pgdir(unsigned int *pgdir)
 	}
 	for (unsigned int i = 0; i < USER_CODE_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
-		if (!frame) return -1;
+		if (!frame) {
+			__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
+			return -1;
+		}
 		unsigned int va = USER_CODE + i * PAGE_4KB;
 		unsigned int *pt = (unsigned int *)(pgdir[va / PAGE_4MB] & FRAME_MASK);
 		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
 	}
 	for (unsigned int i = 0; i < USER_STACK_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
-		if (!frame) return -1;
+		if (!frame) {
+			__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
+			return -1;
+		}
 		unsigned int va = USER_STACK_LO + i * PAGE_4KB;
 		unsigned int *pt = (unsigned int *)(pgdir[va / PAGE_4MB] & FRAME_MASK);
 		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
@@ -166,6 +190,7 @@ int paging_init_user_pgdir(unsigned int *pgdir)
 	 * call SYS_MAP_FB explicitly to gain ring-3 access to the LFB. */
 	unsigned int fb_idx = USER_FB_BASE / PAGE_4MB;
 	pgdir[fb_idx] = (fb_idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+	__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 	return 0;
 }
 
@@ -217,6 +242,14 @@ unsigned int *paging_boot_pgdir(void)
  */
 int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
 {
+	/* §1 step 5.5: switch to the kernel-only pure-PSE pgdir so identity-
+	 * mapped phys-frame writes (dst_pt zero-init, dst_frame copy) don't
+	 * accidentally walk through the active proc's USER PT and clobber
+	 * its user pages. Restore the caller's CR3 before returning so the
+	 * scheduler resumes whoever called us (sys_fork) without surprise. */
+	unsigned int saved_cr3;
+	__asm__ volatile ("mov %%cr3, %0" : "=r"(saved_cr3));
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)kernel_only_pgdir) : "memory");
 	unsigned int user_first = USER_BASE / PAGE_4MB;
 	unsigned int user_last  = USER_END  / PAGE_4MB;
 	for (unsigned int p = user_first; p < user_last; p++) {
@@ -227,8 +260,10 @@ int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
 			continue;          /* shared MMIO PSE (FB) already inherited */
 		unsigned int *src_pt = (unsigned int *)(spde & FRAME_MASK);
 		unsigned int *dst_pt = (unsigned int *)pmm_alloc();
-		if (!dst_pt)
+		if (!dst_pt) {
+			__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 			return -1;
+		}
 		for (unsigned int e = 0; e < ENTRIES; e++)
 			dst_pt[e] = 0;
 		dst[p] = ((unsigned int)dst_pt) | (spde & 0xFFFu);
@@ -238,8 +273,10 @@ int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
 				continue;
 			unsigned int src_frame = spte & FRAME_MASK;
 			unsigned int dst_frame = pmm_alloc();
-			if (!dst_frame)
+			if (!dst_frame) {
+				__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 				return -1;
+			}
 			/* identity-mapped kernel view: src_frame / dst_frame are
 			 * both addressable as plain pointers. */
 			unsigned int *sp = (unsigned int *)src_frame;
@@ -249,6 +286,7 @@ int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
 			dst_pt[e] = (dst_frame & FRAME_MASK) | (spte & 0xFFFu);
 		}
 	}
+	__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 	return 0;
 }
 
@@ -475,6 +513,12 @@ unsigned int *paging_create_user_pgdir(void)
 	unsigned int *pgdir = (unsigned int *)pmm_alloc();
 	if (!pgdir)
 		return 0;
+	/* See note in paging_copy_user_pgdir: swap to the kernel-only PSE
+	 * pgdir so identity-mapped writes don't accidentally walk the active
+	 * proc's USER PT and clobber its user pages. */
+	unsigned int saved_cr3;
+	__asm__ volatile ("mov %%cr3, %0" : "=r"(saved_cr3));
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)kernel_only_pgdir) : "memory");
 	/* Inherit the running kernel mapping (every PSE PDE plus whatever
 	 * is in the user-window slots right now) then wipe the user
 	 * window so the new process starts with no mappings of its own. */
@@ -484,6 +528,7 @@ unsigned int *paging_create_user_pgdir(void)
 	unsigned int user_last  = USER_END  / PAGE_4MB;
 	for (unsigned int i = user_first; i < user_last; i++)
 		pgdir[i] = 0;
+	__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 	return pgdir;
 }
 
@@ -518,6 +563,10 @@ void paging_destroy_user_pgdir(unsigned int *pgdir)
 {
 	if (!pgdir)
 		return;
+	/* See note in paging_copy_user_pgdir. */
+	unsigned int saved_cr3;
+	__asm__ volatile ("mov %%cr3, %0" : "=r"(saved_cr3));
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)kernel_only_pgdir) : "memory");
 	unsigned int user_first = USER_BASE / PAGE_4MB;
 	unsigned int user_last  = USER_END  / PAGE_4MB;
 	for (unsigned int i = user_first; i < user_last; i++) {
@@ -538,6 +587,7 @@ void paging_destroy_user_pgdir(unsigned int *pgdir)
 		pmm_free((unsigned int)pt);
 	}
 	pmm_free((unsigned int)pgdir);
+	__asm__ volatile ("mov %0, %%cr3" : : "r"(saved_cr3) : "memory");
 }
 
 /* Validate a userland buffer before the kernel dereferences it: the range must
