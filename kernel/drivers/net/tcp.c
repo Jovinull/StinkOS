@@ -309,6 +309,13 @@ static void tcp_arm_rto(struct tcb *t)
 	t->retries        = 0;
 }
 
+/* Forward declarations: tcp_retransmit calls these emit helpers, but the
+ * definitions sit further down the file (next to the encode/decode path).
+ * Without the prototypes, gcc 14 rejects the calls as implicit-decl errors. */
+static void tcp_emit(struct tcb *t, unsigned char flags,
+                     const void *data, unsigned int data_len);
+static void tcp_emit_syn(struct tcb *t, unsigned char flags);
+
 /* Re-emit the oldest unacked segment without advancing snd_nxt. Picks what to
  * resend based on the connection state: SYN in SYN_SENT, the in-flight data
  * chunk in ESTABLISHED/CLOSE_WAIT, FIN in FIN_WAIT_1 / LAST_ACK. */
