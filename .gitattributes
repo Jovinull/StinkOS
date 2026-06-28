@@ -1,3 +1,28 @@
+# Force LF line endings on every text source. Without this, a Windows
+# clone with `core.autocrlf=true` (the Git for Windows default) checks
+# out shell scripts and Makefiles as CRLF. WSL bash then trips on the
+# `\r` bytes ("set: pipefail: invalid option name") and the build/cross
+# toolchain script bombs in the first 20 lines. Linux/macOS users are
+# unaffected -- they were already getting LF.
+* text=auto eol=lf
+*.sh        text eol=lf
+*.s         text eol=lf
+*.S         text eol=lf
+*.c         text eol=lf
+*.h         text eol=lf
+*.py        text eol=lf
+*.ld        text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Makefile    text eol=lf
+# Binary blobs: never touched, never line-end-converted.
+*.png       binary
+*.wad       binary
+*.bin       binary
+*.iso       binary
+*.stinkpkg  binary
+
 # Vendored third-party code: the Doom engine port under apps/doom/ is
 # Chocolate-Doom-derived code (GPL-2.0) imported via doomgeneric. Marking
 # it `linguist-vendored` keeps GitHub from counting those ~60k lines toward
