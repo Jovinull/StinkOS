@@ -44,18 +44,18 @@ Yeah, the name is a joke. The code isn't.
 ## Screenshots
 
 <p align="center">
-  <img src="pages/img/doom_e1m1.png" width="80%" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01">
+  <img src="images/doom_e1m1.png" width="80%" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01">
   <br>
   <sub>Freedoom1 running as a userland app — ring 3, no GRUB, no Multiboot loader. Bootblock → ELF kernel → doomgeneric.</sub>
 </p>
 
 <p align="center">
-  <img src="pages/img/menu.png" width="48%" alt="StinkOS boot menu listing every userland app on the disk">
-  <img src="pages/img/doom_walking.png" width="48%" alt="Freedoom1 mid-combat with pistol drawn">
+  <img src="images/menu.png" width="48%" alt="StinkOS boot menu listing every userland app on the disk">
+  <img src="images/doom_walking.png" width="48%" alt="Freedoom1 mid-combat with pistol drawn">
 </p>
 <p align="center">
-  <img src="pages/img/shell_status.png" width="48%" alt="StinkOS shell running help, mem, ps and netinfo back to back">
-  <img src="pages/img/fbdemo.png" width="48%" alt="FBDEMO writing colour bars directly to the linear framebuffer via SYS_MAP_FB">
+  <img src="images/shell_status.png" width="48%" alt="StinkOS shell running help, mem, ps and netinfo back to back">
+  <img src="images/fbdemo.png" width="48%" alt="FBDEMO writing colour bars directly to the linear framebuffer via SYS_MAP_FB">
 </p>
 
 <sub>

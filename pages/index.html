@@ -27,7 +27,7 @@
 		<a class="cta" href="#getstarted">Get started &rarr;</a>
 		<a class="cta secondary" href="https://github.com/Jovinull/StinkOS">View on GitHub</a>
 		<div class="hero-shot">
-			<img src="img/doom_e1m1.png" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01" loading="eager">
+			<img src="images/doom_e1m1.png" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01" loading="eager">
 			<p class="caption">Freedoom1 running as a userland app -- ring 3, no GRUB, no Multiboot loader. Bootblock -> ELF kernel -> doomgeneric.</p>
 		</div>
 	</div>
@@ -142,19 +142,19 @@
 		<h2>Screenshots</h2>
 		<div class="shots">
 			<figure>
-				<img src="img/menu.png" alt="StinkOS boot menu listing 25 userland apps including Doom variants" loading="lazy">
+				<img src="images/menu.png" alt="StinkOS boot menu listing 25 userland apps including Doom variants" loading="lazy">
 				<figcaption>The boot menu lists every userland app on the disk -- 25 apps in this image, picked by ENTER on the highlighted entry.</figcaption>
 			</figure>
 			<figure>
-				<img src="img/doom_walking.png" alt="Freedoom1 mid-combat with pistol drawn, status bar showing 93% health" loading="lazy">
+				<img src="images/doom_walking.png" alt="Freedoom1 mid-combat with pistol drawn, status bar showing 93% health" loading="lazy">
 				<figcaption>Freedoom1 mid-combat. Status bar (health, ammo, armor, weapons grid) is the original Doom HUD running through doomgeneric.</figcaption>
 			</figure>
 			<figure>
-				<img src="img/shell_status.png" alt="StinkOS shell running help, mem, ps, and netinfo commands back to back" loading="lazy">
+				<img src="images/shell_status.png" alt="StinkOS shell running help, mem, ps, and netinfo commands back to back" loading="lazy">
 				<figcaption>The shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code>. DHCP bound, gateway and DNS picked up from QEMU's user-mode SLIRP, free-page count exposed via <code>SYS_MEMINFO</code>.</figcaption>
 			</figure>
 			<figure>
-				<img src="img/fbdemo.png" alt="FBDEMO app writing colour bars directly to the linear framebuffer" loading="lazy">
+				<img src="images/fbdemo.png" alt="FBDEMO app writing colour bars directly to the linear framebuffer" loading="lazy">
 				<figcaption><code>SYS_MAP_FB</code> in action -- the framebuffer is mapped read-write into the user address space, so each pixel write is one store instruction, zero syscalls.</figcaption>
 			</figure>
 		</div>

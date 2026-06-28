@@ -98,12 +98,13 @@ jobs:
 
       - name: Lay out Pages artifact
         run: |
-          mkdir -p _pages/pkg _pages/img
+          mkdir -p _pages/pkg _pages/images
           # Static landing + stylesheet (authored under pages/ in the repo).
           cp pages/index.html _pages/index.html
           cp pages/style.css  _pages/style.css
-          # Screenshots referenced from the landing and the README.
-          cp pages/img/*.png  _pages/img/ 2>/dev/null || true
+          # Screenshots live at images/ in the repo so README on GitHub and
+          # the Pages site share the same source. Both reference images/foo.png.
+          cp images/*.png     _pages/images/ 2>/dev/null || true
           # Package binaries + plain manifest the stink-pkg client consumes.
           cp repo/*.stinkpkg  _pages/pkg/
           cp repo/index.txt   _pages/index.txt
