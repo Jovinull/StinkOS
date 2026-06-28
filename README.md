@@ -159,7 +159,7 @@ every subsystem header so they need a single include instead of a long list.
 
 | Area | Files |
 |------|-------|
-| Boot, protected-mode entry           | `boot/boot.s`, `boot/linker.ld` |
+| Boot, protected-mode entry           | `boot/boot.s`, `boot/bootmain.c`, `boot/bootblock.ld`, `boot/kernel.ld`, `kernel/arch/kentry.s`, `kernel/arch/multiboot.s` |
 | Kernel entry                         | `kernel/main.c` (`kmain`) |
 | Interrupts (IDT, PIC, PIT)           | `kernel/sys/trap.c`, `boot/interrupts_asm.s` |
 | Syscall dispatch (`int 0x80`)        | `kernel/sys/syscall.c` |

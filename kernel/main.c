@@ -2,6 +2,11 @@
  * The bootloader sets a VBE linear-framebuffer mode and hands control here. */
 #include "defs.h"
 
+/* Linker-script symbols (boot/kernel.ld) that bound the kernel image in
+ * physical RAM. PMM must start handing out frames AFTER __bss_end so we
+ * never let userland or page tables stomp on the kernel's own .text/.bss. */
+extern char __bss_end[];
+
 void kmain(void)
 {
 	serial_init();
@@ -12,7 +17,7 @@ void kmain(void)
 	serial_write("gdt: kernel+user segments and tss loaded\n");
 	bootdiag_add("cpu: gdt+tss", BOOT_OK);
 
-	pmm_init(0x100000, 0x2000000);          /* manage 1 MiB .. 32 MiB */
+	pmm_init((unsigned int)__bss_end, 0x2000000);   /* kernel-end .. 32 MiB */
 	paging_init();
 	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");

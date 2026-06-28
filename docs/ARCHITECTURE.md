@@ -29,15 +29,23 @@ interface, so most kernel translation units write a single `#include "defs.h"`.
 The whole boot is one straight line, no fallbacks beyond timing-out missing
 hardware:
 
-1. **16-bit boot sector** (`boot/boot.s`): loaded by BIOS at `0x7C00`. Reads
-   N kernel chunks via INT 13h until the entire kernel image is in memory at
-   the linker-defined load address. The N-chunk loop replaces an earlier
-   fixed 2-stage scheme that could not survive a 64 KiB segment wrap.
-2. **GDT + protected-mode jump** (`boot/gdt_asm.s`): four flat segments
-   (kernel CS/DS, user CS/DS) plus a TSS placeholder. `pm_entry` lands at
-   `0x7E00` and jumps into `kmain`.
-3. **`kmain`** (`kernel/main.c`) wires every subsystem in a fixed order, each
-   followed by a one-line `bootdiag_add()` for the POST screen:
+1. **16-bit boot sector** (`boot/boot.s`): loaded by BIOS at `0x7C00`.
+   Sets up VBE, enables A20, reads the rest of the bootblock
+   (`BOOTBLOCK_SECTORS = 16`, i.e. ~8 KiB) into `0x7E00..`, loads a flat
+   GDT, and far-jumps into 32-bit mode.
+2. **`pm_entry`** (tail of `boot/boot.s`): zeroes the bootblock's `.bss`,
+   sets up segment registers + protected-mode stack (`STACK_TOP = 0x90000`),
+   and `call`s `bootmain` (in `boot/bootmain.c`).
+3. **`bootmain`** reads the kernel ELF off disk starting at
+   `KERNEL_LBA = 16` via ATA PIO, walks the PT_LOAD program headers,
+   copies each segment to its linked physical address (kernel is linked
+   at `0x100000` by `boot/kernel.ld`), zero-fills any `memsz > filesz`
+   tail (the kernel `.bss`), and jumps to the ELF entry. From that
+   moment, the bootblock memory (`0x7C00..0x9FFF`) is dead.
+4. **`_kernel_start`** (`kernel/arch/kentry.s`) resets the segment
+   registers + stack, zeroes the kernel `.bss`, and calls `kmain`.
+5. **`kmain`** (`kernel/main.c`) wires every subsystem in a fixed order,
+   each followed by a one-line `bootdiag_add()` for the POST screen:
    serial → GDT → PMM → paging → VBE/FB → IDT → PIT → `proc_init` → keyboard
    → mouse → audio (SB16) → PCI → ATA (incl. PIIX Bus-Master DMA) → e1000
    → DHCP → `sti` → POST panel → `menu_run`.

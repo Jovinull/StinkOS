@@ -14,10 +14,10 @@
 #include "ata.h"
 
 #define STINKFS_MAGIC 0x4B4E5453u  /* 'S','T','N','K' little-endian */
-#define FS_DIR_LBA    128          /* first directory sector            */
+#define FS_DIR_LBA    512          /* first directory sector            */
 #define FS_DIR_SECTORS 2           /* directory spans two 512-byte sectors */
-#define FS_DATA_LBA   130          /* first data sector                 */
-#define FS_DATA_END   200130       /* one past the last data sector (~100 MiB) */
+#define FS_DATA_LBA   514          /* first data sector                 */
+#define FS_DATA_END   200514       /* one past the last data sector (~100 MiB) */
 #define FS_MAX_FILES  40           /* fits in 2 sectors: 12 + 40*24 = 972 B  */
 
 struct fs_file {

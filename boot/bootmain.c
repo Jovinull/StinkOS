@@ -1,56 +1,35 @@
-/* StinkOS boot stage 2: ELF-aware kernel loader.
+/* StinkOS boot stage 2: ELF-aware kernel loader. WIRED.
  *
- *   ============================================================
- *   STATUS: NOT YET WIRED INTO THE BUILD (TODO §13, step 2 of 3)
- *   ============================================================
+ * boot/boot.s puts the CPU into 32-bit protected mode with a flat GDT
+ * and a stack at STACK_TOP (0x90000), then calls bootmain() here.
+ * bootmain reads the kernel ELF off the boot disk starting at
+ * KERNEL_LBA via ATA PIO (one sector at a time, no driver, no IRQs,
+ * no DMA), walks the PT_LOAD program headers, copies each segment to
+ * the physical address the linker chose (kernel.elf is linked at
+ * 0x100000), zero-fills the .bss tail of each PT_LOAD where
+ * memsz > filesz, and jumps to elf->e_entry (which lands in
+ * _kernel_start, see kernel/arch/kentry.s).
  *
- * What this file is:
- *   The C half of the bootloader. Once boot.s has us in 32-bit
- *   protected mode with a flat GDT, it will `call bootmain()` (this
- *   function). bootmain reads the kernel ELF image off the boot
- *   disk via ATA PIO (one sector at a time, no driver, no IRQs,
- *   no DMA), walks the PT_LOAD program headers, places each segment
- *   at the physical address the linker chose, zero-fills the .bss
- *   tail of each segment, and jumps to elf->e_entry.
+ * The bootblock lives at 0x7C00..0x9FFF. The kernel loads at 0x100000+.
+ * The two regions never overlap, so the bootblock's own code is safe
+ * to keep executing during the PT_LOAD copies; once we jump to the
+ * kernel entry, the bootblock memory is dead.
  *
- * What's missing before this runs:
- *   1. Makefile rules to compile boot/bootmain.c + boot/elf32.h
- *      into boot/bootmain.o and link it into the boot image.
- *   2. boot/boot.s must be modified so that after it jumps into
- *      protected mode, it `call`s bootmain instead of running its
- *      own bss-init + `call kmain` path. The current pm_entry
- *      stub becomes unnecessary.
- *   3. The kernel image must ship as ELF on disk (kernel.elf, the
- *      diagnostic artifact already produced by the Makefile after
- *      §13 step 1) and live at LBA KERNEL_LBA onward.
- *
- * Why the existing flat-binary loader is being replaced:
- *   The flat path requires the bootloader to know the kernel size
- *   ahead of time (`KSECTORS = 127` in boot.s), which caps the
- *   kernel at ~64 KiB and turns every kernel growth event into a
- *   bootloader edit + on-disk layout change. The ELF path reads
- *   exactly what the program headers describe -- the kernel can
- *   grow without touching the boot sector. xv6 has used this since
- *   ~2006; see osdev-refs/xv6-public/bootmain.c for the pattern.
- *
- * Things to verify when this gets wired (TODO §13 step 3):
- *   - Reading from primary IDE master via PIO works the same way
- *     the kernel's ata.c already does it (same ports, same status
- *     wait). Hardware that uses secondary bus or AHCI is out of
- *     scope -- StinkOS doesn't boot from those today either.
- *   - The kernel ELF must be loaded at a physical address that
- *     does NOT overlap this bootmain code area (we run at 0x7C00..
- *     somewhere below the kernel). xv6 puts the kernel at 0x100000
- *     (1 MiB), which is safe; we should do the same.
- *   - boot.s must zero the destination .bss range for ANY PT_LOAD
- *     where p_memsz > p_filesz. That's exactly what the stosb call
- *     below does.
+ * Pattern follows xv6's bootmain.c (osdev-refs/xv6-public). Differences:
+ *   - bootblock spans multiple sectors instead of fitting in 512 B
+ *     (we have VBE setup in boot.s that xv6 lacks); KERNEL_LBA is
+ *     therefore pushed past the bootblock area.
+ *   - struct elf32_ehdr layout follows the System V ABI strictly
+ *     (e_ident[16] then fields), not xv6's "uint magic + uchar elf[12]"
+ *     punning. Functionally identical; spec-faithful.
  */
 
 #include "elf32.h"
 
 #define SECTSIZE       512u
-#define KERNEL_LBA     1u           /* LBA where the kernel ELF starts on disk */
+#define KERNEL_LBA     16u          /* LBA where kernel.elf starts on disk.
+                                       Must match BOOTBLOCK_SECTORS in boot.s
+                                       and KERNEL_LBA in Makefile. */
 #define SCRATCH_ADDR   0x10000u     /* where we slurp the ELF header + phdrs */
 
 /* ATA primary-bus PIO ports. These match the constants in

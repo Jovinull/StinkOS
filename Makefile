@@ -103,21 +103,26 @@ DOOM_OBJS = $(addprefix $(BUILD)/doom/, $(DOOM_SRCS:.c=.o))
 # (DOOM_CORE_OBJS) is shared across all three variants.
 DOOM_CORE_OBJS = $(filter-out $(BUILD)/doom/doomgeneric_stink.o, $(DOOM_OBJS))
 
-# Image is padded so the bootloader's fixed LBA read never runs past EOF.
-# Must cover the boot sector + KSECTORS (see boot.s): (1 + 127) * 512 = 65536.
-IMG_MIN = 65536
-# Bytes the bootloader loads (boot sector + KSECTORS). The linked kernel image
-# (boot + code + data, up to __bss_start) must fit here or it boots truncated.
-KERNEL_LOAD_MAX = 65536
-
-# All userland apps are stored as named ELF files inside StinkFS (no fixed-LBA
-# slots). The StinkFS directory occupies LBA 128-129 (2 sectors); the data
-# region starts at LBA 130 and extends ~100 MiB. App ELFs are written in order
-# by make-stinkfs.py so that the menu's positional navigation matches the test.
-FS_DIR_LBA  = 128
-FS_DATA_LBA = 130
-FS_DATA_END = 200130      # must match FS_DATA_END in fs.c (~100 MiB)
-DISK_END    = 102466560   # FS_DATA_END * 512
+# TODO §13 disk layout (ELF-aware bootloader):
+#   LBA 0..15           bootblock     (boot.s + bootmain.o, flat binary,
+#                                      linked at 0x7C00 by boot/bootblock.ld)
+#   LBA 16..511         kernel.elf    (stripped, linked at 0x100000 by
+#                                      boot/kernel.ld; 496 sectors = 248 KiB
+#                                      headroom above the ~140 KiB kernel today)
+#   LBA 512..513        StinkFS dir
+#   LBA 514..200513     StinkFS data  (~100 MiB)
+#
+# Must stay in lock-step:
+#   - BOOTBLOCK_SECTORS in boot/boot.s
+#   - KERNEL_LBA       in boot/bootmain.c
+#   - FS_DIR_LBA/FS_DATA_LBA/FS_DATA_END in kernel/fs/fs.c
+BOOTBLOCK_SECTORS = 16
+KERNEL_LBA        = 16
+FS_DIR_LBA        = 512
+FS_DATA_LBA       = 514
+FS_DATA_END       = 200514
+IMG_MIN           = 262144      # FS_DIR_LBA * 512 -- floor before make-stinkfs
+DISK_END          = 102663168   # FS_DATA_END * 512
 
 # WAD bundling. Defaults look under wads/ for the three Freedoom releases the
 # fetch-wads.sh script downloads; override on the command line to point at a
@@ -128,8 +133,16 @@ FREEDM_WAD    ?= wads/freedm.wad
 
 C_SRCS  = main.c serial.c trap.c syscall.c proc.c pipe.c timer.c klog.c bootdiag.c keyboard.c vbe.c fb.c font.c pmm.c paging.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c audio.c dma.c pci.c e1000.c net.c ethernet.c arp.c ipv4.c icmp.c udp.c dhcp.c dns.c tcp.c mbr.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
-# boot.o must link first (its _start sits at 0x7c00, pm_entry at 0x7e00).
-LINK_OBJS = $(BUILD)/boot.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(BUILD)/context_asm.o $(C_OBJS)
+
+# Bootblock: boot.s + bootmain.o, linked at 0x7C00 as a flat binary.
+# Sector 0 (boot.s real-mode prologue) is BIOS-loaded by definition; the
+# follow-on sectors hold pm_entry + bootmain code.
+BOOTBLOCK_OBJS = $(BUILD)/boot.o $(BUILD)/bootmain.o
+
+# Kernel: multiboot header FIRST (so GRUB sees it within 8 KiB of file start),
+# then kentry (sets segments + stack + zeros .bss + calls kmain), then the
+# rest. Linked at 0x100000 as ELF; bootmain.c walks its PT_LOAD entries.
+KERNEL_OBJS = $(BUILD)/multiboot.o $(BUILD)/kentry.o $(BUILD)/interrupts_asm.o $(BUILD)/gdt_asm.o $(BUILD)/usermode_asm.o $(BUILD)/context_asm.o $(C_OBJS)
 
 all: os
 
@@ -314,31 +327,32 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-# boot/bootmain.c is the dormant ELF-aware stage-2 loader (TODO §13). It is
-# compiled on every build so the source stays warm and any regression surfaces
-# immediately, but it is NOT linked into os.bin yet -- boot.s still does the
-# flat-binary load path. A later commit will wire bootmain into the boot image
-# and modify boot.s to call it.
-BOOTMAIN_OBJ = $(BUILD)/bootmain.o
-
-os: $(LINK_OBJS) boot/linker.ld $(BOOTMAIN_OBJ) $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
+	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
+	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
+		if [ $$bb -gt $$max ]; then \
+			echo "ERROR: bootblock $$bb B > BOOTBLOCK_SECTORS * 512 = $$max B; raise BOOTBLOCK_SECTORS in boot/boot.s AND Makefile"; exit 1; fi
+	# --- 2. Link the kernel as a real ELF at 0x100000 ---
 	# The kernel deliberately does NOT link against libgcc -- every kernel
 	# source file is written to stay in 32-bit arithmetic so the gcc 14
-	# helpers (__udivdi3 etc.) are never referenced. libgcc would push the
-	# image past the 64 KiB bootloader load limit. See TODO §13 (ELF-aware
-	# bootloader) for the structural fix; this kernel is already close to
-	# the 64 KiB cap and `--gc-sections` drops the dead-code padding gcc
-	# emits for `--ffunction-sections` / `-fdata-sections`-compiled objects.
-	# Without --gc-sections we hit the limit; with it we have ~10 KiB headroom.
-	$(LD) -T boot/linker.ld --gc-sections --oformat binary -o os.bin $(LINK_OBJS)
-	# Also emit kernel.elf as an inspectable diagnostic artifact (same content,
-	# ELF wrapper instead of flat). TODO §13 (ELF-aware bootloader) will start
-	# consuming this file; until then it's just for `readelf -l kernel.elf`
-	# to verify our PT_LOAD program headers are well-formed.
-	$(LD) -T boot/linker.ld --gc-sections -o $(BUILD)/kernel.elf $(LINK_OBJS)
-	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
-		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
-		exit 1; fi
+	# helpers (__udivdi3 etc.) are never referenced. Keeps the kernel
+	# pure and the image smaller.
+	$(LD) -T boot/kernel.ld -o $(BUILD)/kernel.elf $(KERNEL_OBJS)
+	# --- 3. Strip section headers / symbols for on-disk image ---
+	# kernel.elf is ~120 KiB unstripped (debug info, section headers);
+	# stripped drops to ~75 KiB. bootmain only needs PT_LOAD program
+	# headers + segment payloads, both preserved by strip.
+	cp $(BUILD)/kernel.elf $(BUILD)/kernel.stripped.elf
+	$(BUILD_TOOL_PREFIX)strip --strip-all $(BUILD)/kernel.stripped.elf
+	@ksize=$$(stat -c%s $(BUILD)/kernel.stripped.elf); \
+		room=$$(($(FS_DIR_LBA) * 512 - $(KERNEL_LBA) * 512)); \
+		if [ $$ksize -gt $$room ]; then \
+			echo "ERROR: stripped kernel.elf $$ksize B > kernel slot $$room B (LBA $(KERNEL_LBA)..$$(($(FS_DIR_LBA) - 1))); raise FS_DIR_LBA"; exit 1; fi
+	# --- 4. Assemble os.bin: bootblock at LBA 0, kernel.elf at KERNEL_LBA ---
+	cp $(BUILD)/bootblock.bin os.bin
+	truncate -s $$(($(KERNEL_LBA) * 512)) os.bin
+	cat $(BUILD)/kernel.stripped.elf >> os.bin
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(IMG_MIN) ]; then truncate -s $(IMG_MIN) os.bin; fi
 	@size=$$(stat -c%s os.bin); if [ $$size -lt $(DISK_END) ]; then truncate -s $(DISK_END) os.bin; fi
 	@args="HELLO.ELF=$(BUILD)/hello.elf \

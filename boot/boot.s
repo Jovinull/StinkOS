@@ -1,103 +1,92 @@
-# StinkOS bootloader
-# Sector 1 (16-bit real mode): load kernel from disk via LBA, enable A20,
-# load GDT, enter 32-bit protected mode, far-jump into the 32-bit entry.
-# Sector 2+ holds the 32-bit entry stub and the kernel.
+# StinkOS bootblock (TODO §13: ELF-aware boot, see boot/bootmain.c).
+#
+# The bootblock is the BIOS-loaded sector 0 plus the post-510-byte tail
+# that lives in sectors 1..BOOTBLOCK_SECTORS-1. Everything is linked at
+# 0x7C00 by boot/bootblock.ld. The 16-bit prologue (this file's first
+# half) reads the rest of the bootblock off disk via INT 13h, enables
+# A20, loads a flat GDT, and jumps into 32-bit mode. pm_entry (this
+# file's second half) zeroes the bootblock's .bss, sets up segment
+# registers + stack, and calls bootmain() (in boot/bootmain.c).
+# bootmain reads the kernel ELF starting at KERNEL_LBA, walks its
+# PT_LOAD program headers, copies each segment to its linked physical
+# address (kernel is linked at 0x100000 by boot/kernel.ld), and jumps
+# to the kernel entry. From the moment bootmain returns control to
+# the kernel, the bootblock memory (0x7C00..0x9FFF) is dead.
 
-.equ KSECTORS, 127         # sectors to load from disk (kernel area, ~64 KiB);
-                           # must exceed the linked kernel image (boot+code+data,
-                           # up to __bss_start) and stay below APP1_LBA (128).
-.equ LOAD_ADDR, 0x7E00     # where the kernel area is loaded (right after boot)
-# A single INT 13h read to 0x0000:LOAD_ADDR would wrap at the 64 KiB segment
-# boundary (0xFFFF) once the kernel exceeds ~33 KiB, scribbling over low RAM.
-# So load in chunks that never cross a segment: the first fills LOAD_ADDR..0x10000
-# in segment 0, then each following chunk loads 64 KiB into the next segment
-# (0x1000, 0x2000, ...). The image stays contiguous in linear memory, so the
-# kernel's link address is unchanged and the kernel may grow past 64 KiB, up to
-# the low-memory stack. Loop state lives in memory because INT 13h is not
-# guaranteed to preserve registers across the call.
-# NB: '/' is a line-comment char in this assembler, so divide by 512 with '>>9'.
-.equ STAGE1, (0x10000 - LOAD_ADDR) >> 9    # 65 sectors: exactly fills up to 0x10000
-.equ CHUNK,  128                           # 64 KiB chunks after the first (seg += 0x1000)
-.equ STACK_TOP, 0x90000    # protected-mode stack (below 640 KiB)
-.equ VBE_INFO, 0x0500      # scratch VbeInfoBlock (real-mode, free low RAM)
-.equ MODE_INFO, 0x0700     # VBE ModeInfoBlock, read by the kernel after PM
+.equ BOOTBLOCK_SECTORS, 16   # bootblock = sector 0 + 15 follow-on sectors
+                             # (boot.s + compiled bootmain.o). Plenty of
+                             # headroom: bootmain.o is ~700 bytes and we
+                             # cap at 8 KiB total here.
+.equ LOAD_ADDR,  0x7E00      # where the post-sector-0 bootblock lands.
+                             # BIOS already put us at 0x7C00, so the tail
+                             # naturally extends from there.
+.equ STACK_TOP,  0x90000     # protected-mode stack: between bootblock
+                             # (0x7C00..) and kernel load area (0x100000).
+.equ VBE_INFO,   0x0500      # scratch VbeInfoBlock (real-mode low RAM)
+.equ MODE_INFO,  0x0700      # VBE ModeInfoBlock, read by the kernel
 
 .code16
 .global _start
 _start:
 	cli
-	# flat real-mode segments, stack just under the boot sector
 	xor %ax, %ax
 	mov %ax, %ds
 	mov %ax, %es
 	mov %ax, %ss
 	mov $0x7C00, %sp
-	mov %dl, boot_drive        # BIOS leaves the boot drive in DL
+	mov %dl, boot_drive        # BIOS left the boot drive in DL
 
 	# --- VBE: query controller + a 1024x768 LFB mode (no mode switch yet) ---
 	# Leaves the VBE ModeInfoBlock at MODE_INFO for the kernel to read.
 	cld
 	xor %ax, %ax
 	mov %ax, %es
-	mov $MODE_INFO, %di         # zero the ModeInfoBlock first
+	mov $MODE_INFO, %di
 	mov $256, %cx
 	xor %al, %al
 	rep stosb
-	mov $VBE_INFO, %di          # request VBE 2.0 controller info
-	movl $0x32454256, (%di)     # signature 'VBE2'
+	mov $VBE_INFO, %di
+	movl $0x32454256, (%di)    # 'VBE2'
 	mov $0x4F00, %ax
 	int $0x10
 	cmp $0x004F, %ax
 	jne vbe_done
-	xor %ax, %ax                # restore ES (BIOS may clobber it)
+	xor %ax, %ax
 	mov %ax, %es
-	mov $MODE_INFO, %di         # get info for mode 0x118 (1024x768, true colour)
+	mov $MODE_INFO, %di
 	mov $0x118, %cx
 	mov $0x4F01, %ax
 	int $0x10
 	cmp $0x004F, %ax
 	jne vbe_done
-	mov $0x4118, %bx            # set mode 0x118 | 0x4000 (linear framebuffer)
+	mov $0x4118, %bx           # mode 0x118 | LFB
 	mov $0x4F02, %ax
 	int $0x10
 vbe_done:
-	# boot_drive was saved before VBE; the disk read reloads DL from it
 
-	# --- load the kernel: first chunk to LOAD_ADDR, then 64 KiB chunks ---
-	movw $STAGE1, dap_count
+	# --- load the rest of the bootblock (sectors 1..BOOTBLOCK_SECTORS-1) ---
+	# Single INT 13h read into 0x0000:LOAD_ADDR. 8 KiB never wraps the
+	# 64 KiB real-mode segment boundary, so no chunked loop needed.
+	movw $(BOOTBLOCK_SECTORS - 1), dap_count
 	movw $LOAD_ADDR, dap_off
-	movw $0x0000, dap_seg
-	movl $1, dap_lba
+	movw $0x0000,    dap_seg
+	movl $1,         dap_lba
 	mov $dap, %si
 	call read_dap
-	movw $(KSECTORS - STAGE1), remaining
-	movw $0x1000, cur_seg
-	movl $(1 + STAGE1), cur_lba
-load_loop:
-	movw remaining, %ax
-	test %ax, %ax
-	jz load_ok
-	cmp $CHUNK, %ax
-	jbe 1f
-	mov $CHUNK, %ax
-1:
-	movw %ax, chunk_n
-	movw %ax, dap_count
-	movw $0x0000, dap_off
-	movw cur_seg, %bx
-	movw %bx, dap_seg
-	movl cur_lba, %ebx
-	movl %ebx, dap_lba
-	mov $dap, %si
-	call read_dap
-	movw chunk_n, %ax
-	movw remaining, %bx
-	sub %ax, %bx
-	movw %bx, remaining
-	movzwl %ax, %eax
-	addl %eax, cur_lba
-	addw $0x1000, cur_seg
-	jmp load_loop
+
+	# --- enable A20 (fast gate, port 0x92) ---
+	in $0x92, %al
+	or $0x02, %al
+	and $0xFE, %al
+	out %al, $0x92
+
+	# --- enter protected mode ---
+	cli
+	lgdt gdt_descriptor
+	mov %cr0, %eax
+	or $0x1, %eax
+	mov %eax, %cr0
+	ljmp $0x08, $pm_entry
 
 # Read the extended-read DAP at %si, retrying with a controller reset up to 3x.
 read_dap:
@@ -115,63 +104,41 @@ read_retry:
 	jmp disk_error
 read_ok:
 	ret
-load_ok:
-
-	# --- enable A20 (fast gate, port 0x92) ---
-	in $0x92, %al
-	or $0x02, %al
-	and $0xFE, %al             # keep bit0 (fast reset) clear
-	out %al, $0x92
-
-	# --- enter protected mode ---
-	cli
-	lgdt gdt_descriptor
-	mov %cr0, %eax
-	or $0x1, %eax
-	mov %eax, %cr0
-	ljmp $0x08, $pm_entry      # load CS = code selector, flush, go 32-bit
 
 disk_error:
-	mov $'E', %al              # print 'E' then halt (real mode only)
+	mov $'E', %al
 	mov $0x0E, %ah
 	int $0x10
 hang16:
 	hlt
 	jmp hang16
 
-# ---- data (sector 1) ----
+# ---- data (sector 0) ----
 boot_drive: .byte 0
 retries:    .byte 0
 
 .align 4
-# Disk Address Packet, rewritten in place for each chunk by the load loop.
 dap:
-dap_size:   .byte 0x10         # packet size
-            .byte 0x00         # reserved
-dap_count:  .word 0            # sectors to read this chunk
-dap_off:    .word 0            # destination offset
-dap_seg:    .word 0            # destination segment
-dap_lba:    .long 0            # starting LBA, low 32 bits
-dap_lba_hi: .long 0            # starting LBA, high 32 bits (kernel is low, =0)
-
-# Load-loop state (kept in memory; INT 13h may clobber registers).
-remaining:  .word 0            # sectors still to load after the first chunk
-cur_seg:    .word 0            # destination segment for the next chunk
-cur_lba:    .long 0            # starting LBA for the next chunk
-chunk_n:    .word 0            # sectors in the current chunk
+dap_size:   .byte 0x10
+            .byte 0x00
+dap_count:  .word 0
+dap_off:    .word 0
+dap_seg:    .word 0
+dap_lba:    .long 0
+dap_lba_hi: .long 0
 
 # ---- GDT: flat 32-bit model ----
 .align 8
 gdt_start:
-	.quad 0x0000000000000000   # null descriptor
-gdt_code:                      # selector 0x08: base 0, limit 4 GiB, exec/read
+	.quad 0x0000000000000000   # null
+gdt_code:                      # 0x08: base 0, limit 4 GiB, exec/read
 	.word 0xFFFF
 	.word 0x0000
 	.byte 0x00
 	.byte 0x9A
 	.byte 0xCF
 	.byte 0x00
-gdt_data:                      # selector 0x10: base 0, limit 4 GiB, read/write
+gdt_data:                      # 0x10: base 0, limit 4 GiB, read/write
 	.word 0xFFFF
 	.word 0x0000
 	.byte 0x00
@@ -190,7 +157,7 @@ gdt_descriptor:
 # ---- 32-bit protected-mode entry (loaded at LOAD_ADDR) ----
 .code32
 pm_entry:
-	mov $0x10, %ax             # data selector for all data segments
+	mov $0x10, %ax
 	mov %ax, %ds
 	mov %ax, %es
 	mov %ax, %fs
@@ -198,7 +165,7 @@ pm_entry:
 	mov %ax, %ss
 	mov $STACK_TOP, %esp
 
-	# zero the .bss section (uninitialized statics) -- not stored in the image
+	# zero the bootblock's .bss
 	cld
 	mov $__bss_start, %edi
 	mov $__bss_end, %ecx
@@ -206,7 +173,8 @@ pm_entry:
 	xor %eax, %eax
 	rep stosb
 
-	call kmain
+	call bootmain               # walks kernel ELF, copies PT_LOAD,
+	                            # jumps to entry. Should not return.
 hang32:
 	cli
 	hlt

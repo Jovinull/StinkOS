@@ -9,19 +9,27 @@ assets, savegames, the package database, and any persistent userland state.
 
 ```
 LBA 0           Boot sector (one 512-byte BIOS-loaded block, jumps to PM)
-LBA 1   .. 127  Kernel (up to 127 sectors = 63.5 KiB on-disk image)
-LBA 128 .. 129  StinkFS directory (2 sectors, see "Directory" below)
-LBA 130 .. END  StinkFS data region (~100 MiB by default)
+LBA 0           Bootblock sector 0 (boot.s real-mode prologue + GDT)
+LBA 1   .. 15   Bootblock tail (boot.s pm_entry + compiled bootmain.c)
+LBA 16  .. 511  Kernel ELF (stripped; 496 sectors = 248 KiB headroom)
+LBA 512 .. 513  StinkFS directory (2 sectors, see "Directory" below)
+LBA 514 .. END  StinkFS data region (~100 MiB by default)
 ```
 
-`END = FS_DATA_END` in `kernel/fs/fs.c` (`200130` today); the Makefile
+`END = FS_DATA_END` in `kernel/fs/fs.c` (`200514` today); the Makefile
 keeps this in lock-step via `DISK_END = FS_DATA_END * 512`. Resizing the
 filesystem is one constant in each place.
+
+The bootblock + kernel split (LBA 0..15 + 16..511) is the result of
+TODO §13 (ELF-aware bootloader): `boot/bootmain.c` walks the kernel
+ELF's PT_LOAD program headers, so kernel growth no longer requires
+re-laying-out the disk image. Bumping past 248 KiB just means
+raising `FS_DIR_LBA` in `Makefile` and `kernel/fs/fs.c`.
 
 Everything is little-endian and packed. There is no FAT, no superblock,
 no metadata outside the directory.
 
-## Directory (2 sectors @ LBA 128)
+## Directory (2 sectors @ LBA 512)
 
 ```c
 #define STINKFS_MAGIC 0x4B4E5453   /* "STNK" little-endian */
@@ -42,7 +50,7 @@ struct fs_dir {
 ```
 
 Magic mismatch on boot means "uninitialised disk" -- the kernel rewrites a
-fresh empty directory at `LBA 128` (count=0, next_free=`FS_DATA_LBA`).
+fresh empty directory at `LBA 512` (count=0, next_free=`FS_DATA_LBA`).
 That is the only place an uninitialised disk gets written without an
 explicit user action.
 
