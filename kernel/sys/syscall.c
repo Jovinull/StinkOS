@@ -187,18 +187,70 @@ static int find_app_elf(const char *name, char *elf_out)
 }
 
 /* Load the ELF named 'elf_name' from StinkFS and enter ring 3. Does not return
- * on success; returns -1 if the file is missing or the image is malformed. */
+ * on success; returns -1 if the file is missing or the image is malformed.
+ *
+ * TODO §1 step 3: each exec gets its own page directory now.
+ *   1. Allocate a fresh per-process pgdir (kernel mappings copied,
+ *      user window empty) via paging_create_user_pgdir.
+ *   2. Populate it with empty PTs + code/stack pages via
+ *      paging_init_user_pgdir.
+ *   3. Activate it (CR3 + global user_pts cache + heap watermark).
+ *   4. elf_load now writes into the NEW pgdir.
+ *   5. Free the OLD pgdir -- the previous app's code, stack and heap
+ *      frames are returned to the PMM in one shot. The "shared user
+ *      window" mode goes away.
+ *
+ * On first ever exec (when proc_current()->cr3 is still 0), the OLD
+ * pgdir is the boot pgdir returned by paging_boot_pgdir(); freeing it
+ * reclaims the ~1.25 MB of code + stack pages the boot setup mapped.
+ *
+ * Refs:
+ *   - PRIMARY xv6-public/exec.c:11 (exec): allocproc-style pgdir
+ *       lifecycle. xv6's exec stages a NEW pgdir, copies argv, ONLY
+ *       installs it on success (last action before returning) -- we
+ *       install earlier so elf_load can write directly through the
+ *       new CR3. Both are valid; ours saves an intermediate buffer.
+ *   - CONTRAST linux-0.01/fs/exec.c (do_execve): keeps the same task
+ *       struct (no LDT swap), zeroes pages in place. Worth contrasting
+ *       because it shows the failure mode we're avoiding: if
+ *       elf_load fails after we zero the old image, the user has no
+ *       process at all. By staging into a NEW pgdir we can revert.
+ */
 static int exec_run_by_elf(const char *elf_name)
 {
 	unsigned int lba, sectors;
 	if (fs_file_lba_sectors(elf_name, &lba, &sectors) != 0)
 		return -1;
 
-	unsigned int entry;
 	audio_mix_silence_all();
-	paging_reset_user_heap();
-	if (elf_load(lba, sectors, &entry) != 0)
+
+	struct proc   *cur        = proc_current();
+	unsigned int  *old_pgdir  = cur ? (unsigned int *)cur->cr3 : 0;
+	if (!old_pgdir)
+		old_pgdir = paging_boot_pgdir();
+
+	unsigned int *new_pgdir = paging_create_user_pgdir();
+	if (!new_pgdir)
 		return -1;
+	if (paging_init_user_pgdir(new_pgdir) != 0) {
+		paging_destroy_user_pgdir(new_pgdir);
+		return -1;
+	}
+	paging_activate(new_pgdir);
+
+	unsigned int entry;
+	if (elf_load(lba, sectors, &entry) != 0) {
+		/* Roll back: restore old CR3, drop the half-baked new pgdir. */
+		paging_activate(old_pgdir);
+		paging_destroy_user_pgdir(new_pgdir);
+		return -1;
+	}
+
+	if (old_pgdir != new_pgdir)
+		paging_destroy_user_pgdir(old_pgdir);
+	if (cur)
+		cur->cr3 = (unsigned int)new_pgdir;
+
 	enter_user_mode(entry, paging_user_stack_top());
 	return -1;                                 /* unreachable */
 }

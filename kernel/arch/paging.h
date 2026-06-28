@@ -72,4 +72,27 @@ void          paging_destroy_user_pgdir(unsigned int *pgdir);
  * bit-identical until step 3 starts handing out per-proc pgdirs. */
 void paging_switch(unsigned int *pgdir);
 
+/* TODO §1 multitasking, step 3: build a user address space into a fresh pgdir.
+ *
+ * paging_init_user_pgdir allocates one 4 KiB page table per user PDE,
+ * maps every code page and every stack page (same layout as the legacy
+ * paging_init_user), and resets the framebuffer PDE to its kernel
+ * identity mapping (each app must SYS_MAP_FB again). The pgdir argument
+ * must come from paging_create_user_pgdir. Returns 0 on success, -1 on
+ * PMM exhaustion -- partially-populated pgdirs should be cleaned up
+ * with paging_destroy_user_pgdir.
+ *
+ * paging_activate is the in-kernel half of paging_switch: it does the
+ * CR3 load AND refreshes the kernel's cache of "currently active user
+ * page tables + heap watermark + FB-mapped flag" so subsequent
+ * map_user_page / paging_user_alloc / paging_map_fb calls target the
+ * new pgdir. Use it from sys_exec after the new pgdir is populated. */
+int  paging_init_user_pgdir(unsigned int *pgdir);
+void paging_activate(unsigned int *pgdir);
+
+/* Returns the pgdir the kernel created at boot via paging_init. Used by
+ * sys_exec on the first call (when current->cr3 is still 0) so we know
+ * which pgdir to free as the "old image". */
+unsigned int *paging_boot_pgdir(void);
+
 #endif

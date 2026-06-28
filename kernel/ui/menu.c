@@ -8,6 +8,7 @@
 #include "serial.h"
 #include "ata.h"
 #include "paging.h"
+#include "proc.h"
 #include "elf.h"
 #include "fs.h"
 #include "rtc.h"
@@ -315,19 +316,44 @@ static void launch(int index)
 	if (ksetjmp(&exit_ctx) != 0)
 		return;                         /* app called SYS_EXIT: back to menu */
 
-	paging_reset_user_heap();
-
 	unsigned int lba, sectors;
 	if (fs_file_lba_sectors(app_names[index], &lba, &sectors) != 0) {
 		serial_write("loader: app not found in fs\n");
 		return;
 	}
 
+	/* TODO §1 step 3: per-process pgdir (same dance as exec_run_by_elf
+	 * in syscall.c -- duplicated for now, factor when fork lands). */
+	struct proc  *cur       = proc_current();
+	unsigned int *old_pgdir = cur ? (unsigned int *)cur->cr3 : 0;
+	if (!old_pgdir)
+		old_pgdir = paging_boot_pgdir();
+
+	unsigned int *new_pgdir = paging_create_user_pgdir();
+	if (!new_pgdir) {
+		serial_write("loader: out of memory (pgdir alloc)\n");
+		return;
+	}
+	if (paging_init_user_pgdir(new_pgdir) != 0) {
+		paging_destroy_user_pgdir(new_pgdir);
+		serial_write("loader: out of memory (user image)\n");
+		return;
+	}
+	paging_activate(new_pgdir);
+
 	unsigned int entry;
 	if (elf_load(lba, sectors, &entry) != 0) {
 		serial_write("loader: bad ELF image\n");
+		paging_activate(old_pgdir);
+		paging_destroy_user_pgdir(new_pgdir);
 		return;
 	}
+
+	if (old_pgdir != new_pgdir)
+		paging_destroy_user_pgdir(old_pgdir);
+	if (cur)
+		cur->cr3 = (unsigned int)new_pgdir;
+
 	serial_write("loader: app loaded from fs\n");
 	enter_user_mode(entry, paging_user_stack_top());
 }
