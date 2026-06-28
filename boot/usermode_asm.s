@@ -23,6 +23,26 @@ enter_user_mode:
 	push %ecx                  # EIP
 	iret
 
+# TODO §1 step 4: trap-return tail.
+#
+# Mirror of the tail in interrupts_asm.s isr_common (pop ds, pop GP regs via
+# popa, drop int_no+err_code, iret). Used by sys_fork: the child's kernel
+# stack is pre-built so the first context_switch's `ret` lands here with ESP
+# pointing at a struct regs that holds the parent's user-mode state. The
+# pop+iret sequence resumes the child in ring 3 at the same user EIP the
+# parent will return to, with the regs we chose to inject (eax=0 makes the
+# child's fork() return 0).
+.global trap_return
+trap_return:
+	pop %eax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %fs
+	mov %ax, %gs
+	popa
+	add $8, %esp           # drop int_no + err_code
+	iret
+
 # Minimal setjmp/longjmp so the kernel can resume the menu after an app exits.
 # struct kctx { esp, ebp, ebx, esi, edi, eip } at offsets 0,4,8,12,16,20.
 

@@ -95,4 +95,20 @@ void paging_activate(unsigned int *pgdir);
  * which pgdir to free as the "old image". */
 unsigned int *paging_boot_pgdir(void);
 
+/* TODO §1 multitasking, step 4: deep-copy a parent pgdir's user pages
+ * into a child pgdir for sys_fork.
+ *
+ * Walks every USER PDE of `src`; for each present PT entry, allocates a
+ * fresh physical frame, copies 4 KiB from the parent's frame into the
+ * child's, and installs an equivalently-flagged PTE in `dst`. The PDE
+ * flags (PG_PRESENT | PG_RW | PG_USER) are preserved. PSE entries (the
+ * FB) are not copied -- paging_create_user_pgdir already inherited
+ * those from the running kernel pgdir, which is correct (FB is shared
+ * physical MMIO).
+ *
+ * `dst` must come from paging_create_user_pgdir and be otherwise empty
+ * in its USER range. Returns 0 on success, -1 on PMM exhaustion (the
+ * caller should free `dst` via paging_destroy_user_pgdir). No COW. */
+int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src);
+
 #endif
