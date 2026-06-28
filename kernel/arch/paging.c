@@ -48,7 +48,9 @@
 #define USER_FB_PDES     4u
 
 static unsigned int *page_dir;
-static unsigned int *user_pts[USER_PDES];        /* one 4 KiB PT per user PDE */
+/* §1 step 5.5: user_pts[] cache removed; user_pte derives the PT pointer
+ * from page_dir on each call so multi-proc scheduling never sees a
+ * stale cache (see commit message + user_pte comment). */
 static unsigned int  user_heap_next;             /* next unmapped heap address */
 static int           fb_pde_mapped;              /* 1 while the user FB PDE is live */
 
@@ -77,13 +79,27 @@ void paging_init(void)
 	__asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
 }
 
-/* Locate the PTE backing 'vaddr' within the user range. Returns 0 outside it. */
+/* Locate the PTE backing 'vaddr' within the user range. Returns 0 outside it
+ * or when the user PDE is not present.
+ *
+ * §1 step 5.5: derive the PT pointer from the CURRENTLY ACTIVE page_dir
+ * (set on every paging_switch / paging_activate) instead of a separate
+ * user_pts[] cache. The cache used to drift between paging_switch
+ * (CR3-only) and paging_activate (CR3 + cache refresh) under multi-proc
+ * scheduling and led to stale-PT dereferences after fork. Pulling from
+ * page_dir on each call makes the PT pointer authoritative and tied to
+ * the same value the CPU itself uses.
+ */
 static unsigned int *user_pte(unsigned int vaddr)
 {
 	if (vaddr < USER_BASE || vaddr >= USER_END)
 		return 0;
-	unsigned int pde = (vaddr - USER_BASE) / PAGE_4MB;
-	return &user_pts[pde][(vaddr >> 12) & 0x3FF];
+	unsigned int idx = vaddr / PAGE_4MB;
+	unsigned int pde = page_dir[idx];
+	if (!(pde & PG_PRESENT) || (pde & PG_PS))
+		return 0;
+	unsigned int *pt = (unsigned int *)(pde & FRAME_MASK);
+	return &pt[(vaddr >> 12) & 0x3FF];
 }
 
 static void map_user_page(unsigned int vaddr, unsigned int frame)
@@ -172,12 +188,8 @@ void paging_activate(unsigned int *pgdir)
 	if (!pgdir)
 		return;
 	page_dir = pgdir;
-	for (unsigned int p = 0; p < USER_PDES; p++) {
-		unsigned int pde = pgdir[(USER_BASE / PAGE_4MB) + p];
-		user_pts[p] = (pde & PG_PRESENT) ? (unsigned int *)(pde & FRAME_MASK) : 0;
-	}
-	user_heap_next = USER_HEAP_LO;
-	fb_pde_mapped  = 0;
+	user_heap_next = USER_HEAP_LO;       /* new image starts with empty heap */
+	fb_pde_mapped  = 0;                  /* FB unmapped until next SYS_MAP_FB */
 	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)pgdir) : "memory");
 }
 
@@ -357,10 +369,12 @@ unsigned int paging_user_mmap(unsigned int size)
 unsigned int paging_user_mapped_pages(void)
 {
 	unsigned int n = 0;
+	unsigned int user_first = USER_BASE / PAGE_4MB;
 	for (unsigned int p = 0; p < USER_PDES; p++) {
-		unsigned int *pt = user_pts[p];
-		if (!pt)
+		unsigned int pde = page_dir[user_first + p];
+		if (!(pde & PG_PRESENT) || (pde & PG_PS))
 			continue;
+		unsigned int *pt = (unsigned int *)(pde & FRAME_MASK);
 		for (unsigned int e = 0; e < ENTRIES; e++)
 			if (pt[e] & PG_PRESENT)
 				n++;
@@ -492,6 +506,11 @@ void paging_switch(unsigned int *pgdir)
 {
 	if (!pgdir)
 		return;
+	/* §1 step 5.5: also update the active page_dir global so subsequent
+	 * user_pte() lookups (heap alloc, range_ok, map_user_page, etc)
+	 * walk THIS pgdir's PDEs, not the previous proc's. user_pts[] cache
+	 * is gone, so no separate refresh needed. */
+	page_dir = pgdir;
 	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)pgdir) : "memory");
 }
 
