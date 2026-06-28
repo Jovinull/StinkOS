@@ -313,14 +313,14 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
 os: $(LINK_OBJS) boot/linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
-	# Link libgcc so the 64-bit arithmetic helpers (__udivdi3, __divdi3 etc.)
-	# the compiler emits for `unsigned long long` divisions on a 32-bit target
-	# resolve. Older gcc inlined these for constant divisors; gcc 14 always
-	# emits the runtime call. Same library the userland apps already pull in.
-	# --gc-sections drops every unused libgcc helper (soft-float, _Unwind_*, etc.)
-	# so we only pay for the few div helpers that are actually referenced --
-	# without it libgcc balloons the kernel past KSECTORS.
-	$(LD) -T boot/linker.ld --gc-sections --oformat binary -o os.bin $(LINK_OBJS) $(LIBGCC)
+	# The kernel deliberately does NOT link against libgcc -- every kernel
+	# source file is written to stay in 32-bit arithmetic so the gcc 14
+	# helpers (__udivdi3 etc.) are never referenced. libgcc weighs ~10 KiB
+	# and would push the image past the 64 KiB bootloader load limit.
+	# If a future kernel change really needs 64-bit math, see TODO §13
+	# (ELF-aware bootloader) which lifts the load cap; THEN libgcc and the
+	# 64-bit divide in audio.c can come back.
+	$(LD) -T boot/linker.ld --oformat binary -o os.bin $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
 		exit 1; fi
