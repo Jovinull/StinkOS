@@ -322,6 +322,11 @@ os: $(LINK_OBJS) boot/linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fau
 	# emits for `--ffunction-sections` / `-fdata-sections`-compiled objects.
 	# Without --gc-sections we hit the limit; with it we have ~10 KiB headroom.
 	$(LD) -T boot/linker.ld --gc-sections --oformat binary -o os.bin $(LINK_OBJS)
+	# Also emit kernel.elf as an inspectable diagnostic artifact (same content,
+	# ELF wrapper instead of flat). TODO §13 (ELF-aware bootloader) will start
+	# consuming this file; until then it's just for `readelf -l kernel.elf`
+	# to verify our PT_LOAD program headers are well-formed.
+	$(LD) -T boot/linker.ld --gc-sections -o $(BUILD)/kernel.elf $(LINK_OBJS)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
 		exit 1; fi
