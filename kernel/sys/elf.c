@@ -47,6 +47,10 @@ struct elf32_phdr {
 	u32 p_align;
 } __attribute__((packed));
 
+/* Layout drift safety net (matches boot/elf32.h). */
+_Static_assert(sizeof(struct elf32_ehdr) == 52, "elf32_ehdr must be 52 bytes");
+_Static_assert(sizeof(struct elf32_phdr) == 32, "elf32_phdr must be 32 bytes");
+
 #define ET_EXEC      2
 #define EM_386       3
 #define PT_LOAD      1

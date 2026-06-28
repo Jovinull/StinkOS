@@ -48,4 +48,10 @@ struct elf32_phdr {
 	unsigned int p_align;
 } __attribute__((packed));
 
+/* Sizes mandated by the ELF v1 spec. A silent layout drift (gcc inserting
+ * padding, a struct field re-typed by mistake) would corrupt the boot path
+ * with no obvious symptom -- caught here instead. */
+_Static_assert(sizeof(struct elf32_ehdr) == 52, "elf32_ehdr must be 52 bytes");
+_Static_assert(sizeof(struct elf32_phdr) == 32, "elf32_phdr must be 32 bytes");
+
 #endif
