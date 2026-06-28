@@ -317,7 +317,10 @@ os: $(LINK_OBJS) boot/linker.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fau
 	# the compiler emits for `unsigned long long` divisions on a 32-bit target
 	# resolve. Older gcc inlined these for constant divisors; gcc 14 always
 	# emits the runtime call. Same library the userland apps already pull in.
-	$(LD) -T boot/linker.ld --oformat binary -o os.bin $(LINK_OBJS) $(LIBGCC)
+	# --gc-sections drops every unused libgcc helper (soft-float, _Unwind_*, etc.)
+	# so we only pay for the few div helpers that are actually referenced --
+	# without it libgcc balloons the kernel past KSECTORS.
+	$(LD) -T boot/linker.ld --gc-sections --oformat binary -o os.bin $(LINK_OBJS) $(LIBGCC)
 	@size=$$(stat -c%s os.bin); if [ $$size -gt $(KERNEL_LOAD_MAX) ]; then \
 		echo "ERROR: kernel image $$size B > bootloader load $(KERNEL_LOAD_MAX) B; raise KSECTORS in boot.s"; \
 		exit 1; fi
