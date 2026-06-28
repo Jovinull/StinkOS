@@ -309,17 +309,19 @@ void ip_handle(const void *payload, unsigned int len)
 	if (!reasm_complete(r))
 		return;
 
-	/* Snapshot before freeing the slot so the dispatch sees stable bytes. */
-	unsigned char  proto = r->protocol;
-	ipv4_t         src   = r->src_ip;
-	ipv4_t         dst   = r->dst_ip;
-	unsigned int   len   = r->total_len;
+	/* Snapshot before freeing the slot so the dispatch sees stable bytes.
+	 * `dgram_len` is the reassembled datagram size, distinct from the
+	 * ip_handle param `len` (size of the single incoming fragment). */
+	unsigned char  proto     = r->protocol;
+	ipv4_t         src       = r->src_ip;
+	ipv4_t         dst       = r->dst_ip;
+	unsigned int   dgram_len = r->total_len;
 	const unsigned char *full = r->buf;
 
 	switch (proto) {
-	case IP_PROTO_ICMP: icmp_handle(full, len, src, dst); break;
-	case IP_PROTO_UDP:  udp_handle(full, len, src);  break;
-	case IP_PROTO_TCP:  tcp_handle(full, len, src);  break;
+	case IP_PROTO_ICMP: icmp_handle(full, dgram_len, src, dst); break;
+	case IP_PROTO_UDP:  udp_handle(full, dgram_len, src);  break;
+	case IP_PROTO_TCP:  tcp_handle(full, dgram_len, src);  break;
 	default: break;
 	}
 	reasm_clear(r);
