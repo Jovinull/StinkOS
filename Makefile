@@ -22,15 +22,22 @@ AS = i386-elf-as
 LD = i386-elf-ld
 # Used by diagnostic targets (readelf-kernel) that invoke other binutils tools.
 BUILD_TOOL_PREFIX = i386-elf-
-CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
+CFLAGS = -Os -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
          -ffunction-sections -fdata-sections \
          -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables \
+         -fno-strict-aliasing \
          -Ilib
 # -fmerge-all-constants: dedup string literals across translation units.
 # -fno-asynchronous-unwind-tables -fno-unwind-tables: drop the C++ exception
 #   tables (.eh_frame, .eh_frame_hdr) we never use -- the kernel is pure C.
-# Combined with --build-id=none on the kernel link these are the "free"
-# size-trim flags from TODO §14: ~500 bytes saved, no codegen change.
+# -flto: link-time optimisation. Compile passes emit LLVM-style bytecode
+#   instead of (or in addition to) machine code; the link step (driven by
+#   gcc so lto-plugin runs) re-runs optimisation across translation units
+#   so it can inline helpers, drop dead branches and reuse common tails
+#   that per-file builds leave on the table.
+# -fno-strict-aliasing: belt-and-suspenders for cross-file inlining --
+#   the kernel net code type-puns through `struct *` casts that the
+#   strict-aliasing analysis would otherwise miscompile under -flto.
 
 # -Ilib above puts the userland C library (lib/libstink.h) on the include path
 # so apps keep using bare `#include "libstink.h"` after the move out of apps/.
