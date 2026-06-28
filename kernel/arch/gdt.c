@@ -55,6 +55,11 @@ void tss_set_kernel_stack(unsigned int esp0)
 	tss.esp0 = esp0;
 }
 
+unsigned int gdt_boot_kstack_top(void)
+{
+	return (unsigned int)(kernel_stack + sizeof(kernel_stack));
+}
+
 void gdt_init(void)
 {
 	set_gate(0, 0, 0, 0, 0);                       /* null */
