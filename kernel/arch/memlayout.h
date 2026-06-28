@@ -17,6 +17,15 @@
  *   │                        .data, .bss (linked by boot/kernel.ld)│
  *   │ 0x400000 .. 0x13FFFFF  User region (USER_PDES=4, 16 MiB)     │
  *   │ 0x10000000 ..          USER_FB_BASE (mapped on demand)       │
+ *   │ 0x80000000 ..          KERNBASE: high-half direct map of     │
+ *   │                        physical RAM [0, KERNEL_DIRECT_MAP).  │
+ *   │                        Kernel dereferences phys frames via   │
+ *   │                        P2V(phys) = phys + KERNBASE, which is │
+ *   │                        ALWAYS kernel-only territory (user    │
+ *   │                        page tables never reach above         │
+ *   │                        USER_END = 0x1400000). xv6 pattern --  │
+ *   │                        see osdev-refs/xv6-public/memlayout.h │
+ *   │                        and vm.c for the canonical version.   │
  *   └──────────────────────────────────────────────────────────────┘
  */
 
@@ -41,5 +50,29 @@
 #define USER_STACK_TOP   0x00540000u   /* user stack (grows down)   */
 #define USER_HEAP_BASE   0x00540000u   /* sbrk/mmap start           */
 #define USER_FB_BASE     0x10000000u   /* SYS_MAP_FB target         */
+
+/* Higher-half kernel direct map (xv6-style).
+ *
+ * The kernel pgdir maps virt [KERNBASE, KERNBASE+KERNEL_DIRECT_MAP) ->
+ * phys [0, KERNEL_DIRECT_MAP) via 4 MiB PSE PDEs. Every per-process
+ * pgdir inherits these high-half PDEs, so the kernel can deref any
+ * physical frame as `P2V(phys)` regardless of which proc is running
+ * -- the high-half virt range sits ABOVE every per-proc user PT
+ * window (USER_END = 0x1400000 << KERNBASE), so a user PT can never
+ * shadow a kernel deref.
+ *
+ * KERNEL_DIRECT_MAP must cover all of pmm's physical range (today
+ * PHYSTOP = 0x02000000 / 32 MiB; we reserve 256 MiB headroom).
+ *
+ * MMIO above DEVSPACE keeps the boot identity mapping (virt = phys)
+ * for legacy drivers (fb LFB, e1000 BAR) -- xv6 does the same. */
+#define KERNBASE            0x80000000u
+#define KERNEL_DIRECT_MAP   0x10000000u   /* 256 MiB direct map      */
+#define KERNEL_DEVSPACE     0xFE000000u   /* identity-mapped MMIO    */
+
+#ifndef __ASSEMBLER__
+#define P2V(phys) ((unsigned int)(phys) + KERNBASE)
+#define V2P(virt) ((unsigned int)(virt) - KERNBASE)
+#endif
 
 #endif
