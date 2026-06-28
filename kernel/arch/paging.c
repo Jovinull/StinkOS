@@ -7,6 +7,7 @@
  * allocated on demand (an app that never touches the heap costs no frames). */
 #include "paging.h"
 #include "pmm.h"
+#include "memlayout.h"
 
 #define PG_PRESENT 0x001
 #define PG_RW      0x002
@@ -66,17 +67,44 @@ static void load_cr3(void)
 	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)page_dir) : "memory");
 }
 
+/* Build the canonical kernel pgdir layout into `pgdir`:
+ *   - identity [0, 4 MiB)          : kernel image + low BSS (transition)
+ *   - identity [4 MiB, USER_END)   : carved per-process (cleared here,
+ *                                    user PT installed by paging_init_user_pgdir)
+ *   - identity [USER_END, KERNBASE): legacy identity, retired in commit 4
+ *   - high-half [KERNBASE, KERNBASE+KERNEL_DIRECT_MAP):
+ *                                    direct map of phys RAM via PSE 4 MiB
+ *                                    -- xv6-public/vm.c:107 (kmap[]).
+ *   - identity [KERNEL_DEVSPACE, 4 GiB): MMIO (LFB, e1000 BAR) keeps
+ *                                    virt = phys; xv6 DEVSPACE pattern.
+ */
+static void build_kernel_pgdir(unsigned int *pgdir)
+{
+	/* Default: identity-map everything below KERNBASE via PSE. Per-process
+	 * code overwrites the USER window later; that's fine because the
+	 * higher-half mirror provides the kernel-safe alias regardless. */
+	for (unsigned int i = 0; i < ENTRIES; i++)
+		pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+
+	/* Higher-half direct map: virt [KERNBASE, KERNBASE+KERNEL_DIRECT_MAP)
+	 * -> phys [0, KERNEL_DIRECT_MAP). Overwrites the legacy PSE entries
+	 * that previously identity-mapped this virt range to itself; those
+	 * entries pointed at phys addresses above PHYSTOP and were never
+	 * used. */
+	unsigned int kern_first = KERNBASE / PAGE_4MB;
+	unsigned int kern_count = KERNEL_DIRECT_MAP / PAGE_4MB;
+	for (unsigned int p = 0; p < kern_count; p++)
+		pgdir[kern_first + p] = (p * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+}
+
 void paging_init(void)
 {
 	page_dir = (unsigned int *)pmm_alloc();
-
-	for (unsigned int i = 0; i < ENTRIES; i++)
-		page_dir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+	build_kernel_pgdir(page_dir);
 
 	/* Reserve a permanent pure-PSE pgdir for kernel-only operations. */
 	kernel_only_pgdir = (unsigned int *)pmm_alloc();
-	for (unsigned int i = 0; i < ENTRIES; i++)
-		kernel_only_pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+	build_kernel_pgdir(kernel_only_pgdir);
 
 	unsigned int cr4;
 	__asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
