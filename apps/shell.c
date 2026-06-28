@@ -408,7 +408,7 @@ void main(void)
 		} else if (strcmp(line, "help") == 0) {
 			term_print("ls  cat  head  tail  wc  hexdump  write  append", TERM_FG);
 			term_print("cp  mv  rm  touch  grep  echo  uptime  sound", TERM_FG);
-			term_print("hostname [name]  run <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
+			term_print("hostname [name]  run <appname>  bg <appname>  netinfo  netstat  ping <ip>  mem  dmesg  ps  history  exit", TERM_FG);
 			term_print("kill <pid>  suspend <pid>  resume <pid>", TERM_FG);
 			term_print("clock  alarm [hh mm ss|off]  shutdown  reboot  arp [-d]  dns <host>", TERM_FG);
 			term_print("audio [u8|s16|stereo]  vol [0..256]  keymap us|br  version", TERM_FG);
@@ -871,6 +871,36 @@ void main(void)
 				tprintf("launching %s...", rest);
 				if (sys_exec(rest) < 0)
 					tprintf("not found: %s", rest);
+			}
+		} else if (strcmp(line, "bg") == 0) {
+			/* TODO §1 step 5: spawn an app in background.
+			 *   fork() splits the shell into two procs sharing user pages
+			 *   until exec(). Child immediately exec()s the requested app,
+			 *   the kernel destroys the cloned shell pgdir and replaces it
+			 *   with the new app's. Parent (shell) sees fork()>0, prints
+			 *   the child PID, and goes back to the prompt -- both procs
+			 *   run concurrently under the round-robin scheduler.
+			 *
+			 *   Refs: xv6-public/sh.c uses fork+exec the same way; the
+			 *   trailing & in xv6 shell does this. linux-0.01/init/main.c
+			 *   fork()s init the same way (no exec, init clones itself).
+			 */
+			if (*rest == '\0') {
+				term_print("usage: bg <appname>", TERM_ERR);
+			} else {
+				int pid = sys_fork();
+				if (pid < 0) {
+					term_print("bg: fork failed (PCB table full?)", TERM_ERR);
+				} else if (pid == 0) {
+					/* Child path: replace cloned shell with the requested
+					 * app. exec() never returns on success; on failure the
+					 * child becomes a dangling shell clone -- exit so it
+					 * doesn't sit there as a duplicate prompt. */
+					if (sys_exec(rest) < 0)
+						sys_exit();
+				} else {
+					tprintf("bg: launched %s as pid %d", rest, pid);
+				}
 			}
 		} else if (strcmp(line, "netinfo") == 0 || strcmp(line, "ifconfig") == 0) {
 			struct sys_net_info ni;
