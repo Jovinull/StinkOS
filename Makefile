@@ -351,6 +351,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	# it strips dead helpers libgcc dragged in plus any kernel symbols that
 	# only fired in older code paths. Cheap insurance against bloat.
 	$(LD) -T boot/kernel.ld --gc-sections --build-id=none -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
+	@printf 'kernel sections   '; $(BUILD_TOOL_PREFIX)size $(BUILD)/kernel.elf | tail -1
 	# --- 3. Strip section headers / symbols for on-disk image ---
 	# kernel.elf is ~120 KiB unstripped (debug info, section headers);
 	# stripped drops to ~75 KiB. bootmain only needs PT_LOAD program
