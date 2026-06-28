@@ -1,0 +1,10 @@
+# Vendored third-party code: the Doom engine port under apps/doom/ is
+# Chocolate-Doom-derived code (GPL-2.0) imported via doomgeneric. Marking
+# it `linguist-vendored` keeps GitHub from counting those ~60k lines toward
+# the StinkOS language stats AND suppresses the secondary licence detection
+# that would otherwise paint the repo header with a "GPL-2.0 also" tag.
+# The licence text is still distributed at apps/doom/COPYING so we remain
+# compliant with the GPL-2.0 obligation; we just don't double-advertise it
+# on the front page.
+apps/doom/** linguist-vendored
+apps/doom/COPYING linguist-detectable=false

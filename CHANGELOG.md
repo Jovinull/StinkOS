@@ -73,7 +73,7 @@ untracked) for the full pending list.
 - Doom: better SFX upsampling (linear interpolation), demo recording /
   playback via `DOOMARGS.CFG`, save-game via `rename()` copy-and-delete
 - `docs/ARCHITECTURE.md` / `SYSCALLS.md` / `NETWORK.md` / `STINKFS.md` /
-  `PACKAGING.md` / `MEMORY.md` / `TUTORIAL.md`, plus `COPYING.GPL`
+  `PACKAGING.md` / `MEMORY.md` / `TUTORIAL.md`, plus `apps/doom/COPYING`
   for the bundled Doom engine
 - TCP fast retransmit (3 dup-ACK threshold), SACK sender-side scoreboard
   + retransmit clamp, zero-window persist probe, TIME_WAIT 2*MSL slot
