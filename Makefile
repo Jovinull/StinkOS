@@ -482,7 +482,7 @@ sample-packages: all tools/make-stinkpkg.py
 # helpers, ...) against the host gcc so we get a fast signal that does not
 # need QEMU or the cross-toolchain. Lives under tests/.
 HOST_CC  ?= gcc
-HOST_CFLAGS = -O2 -Wall -Wno-unused-function \
+HOST_CFLAGS = -O2 -Wall -Werror -Wno-unused-function \
               -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
 TEST_DIR  = tests
 TEST_BIN  = $(BUILD)/tests
