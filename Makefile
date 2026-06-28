@@ -338,7 +338,12 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	# that audio_mix_play_rate's Q16.16 step computation needs. Pre-§13 we
 	# avoided libgcc to stay under a 64 KiB bootloader cap; with ELF-aware
 	# boot we have headroom and can use the natural 64-bit form.
-	$(LD) -T boot/kernel.ld -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
+	#
+	# --gc-sections drops every function/data section the entry point can't
+	# reach. Paired with -ffunction-sections / -fdata-sections (in CFLAGS)
+	# it strips dead helpers libgcc dragged in plus any kernel symbols that
+	# only fired in older code paths. Cheap insurance against bloat.
+	$(LD) -T boot/kernel.ld --gc-sections -o $(BUILD)/kernel.elf $(KERNEL_OBJS) $(LIBGCC)
 	# --- 3. Strip section headers / symbols for on-disk image ---
 	# kernel.elf is ~120 KiB unstripped (debug info, section headers);
 	# stripped drops to ~75 KiB. bootmain only needs PT_LOAD program
