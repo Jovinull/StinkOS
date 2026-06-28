@@ -186,6 +186,60 @@ unsigned int *paging_boot_pgdir(void)
 	return page_dir;
 }
 
+/* Deep-copy USER PDEs from src into dst. dst must come from
+ * paging_create_user_pgdir (kernel mapping pre-filled, user range
+ * empty). Returns 0 ok, -1 on PMM exhaustion (caller should run
+ * paging_destroy_user_pgdir on dst).
+ *
+ * Refs:
+ *   - PRIMARY xv6-public/vm.c:316 (copyuvm): same loop -- walk source
+ *       PDE -> PTE, alloc, memmove(P2V(mem), (char*)P2V(pa), PGSIZE),
+ *       install. We diverge on the page table allocation: xv6 calls
+ *       walkpgdir which allocates the dest PT lazily per-PTE; we
+ *       pre-allocate the PT up front so the inner loop stays trivial.
+ *   - CONTRAST linux-0.01/mm/memory.c:124 (copy_page_tables): same
+ *       walk but DOES copy-on-write -- clears PG_RW on both src and
+ *       dst PTEs and bumps mem_map[pa]. We intentionally do the
+ *       expensive eager copy instead because we have no PMM refcount
+ *       infrastructure; revisit when COW lands (post-§1).
+ */
+int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
+{
+	unsigned int user_first = USER_BASE / PAGE_4MB;
+	unsigned int user_last  = USER_END  / PAGE_4MB;
+	for (unsigned int p = user_first; p < user_last; p++) {
+		unsigned int spde = src[p];
+		if (!(spde & PG_PRESENT))
+			continue;
+		if (spde & PG_PS)
+			continue;          /* shared MMIO PSE (FB) already inherited */
+		unsigned int *src_pt = (unsigned int *)(spde & FRAME_MASK);
+		unsigned int *dst_pt = (unsigned int *)pmm_alloc();
+		if (!dst_pt)
+			return -1;
+		for (unsigned int e = 0; e < ENTRIES; e++)
+			dst_pt[e] = 0;
+		dst[p] = ((unsigned int)dst_pt) | (spde & 0xFFFu);
+		for (unsigned int e = 0; e < ENTRIES; e++) {
+			unsigned int spte = src_pt[e];
+			if (!(spte & PG_PRESENT))
+				continue;
+			unsigned int src_frame = spte & FRAME_MASK;
+			unsigned int dst_frame = pmm_alloc();
+			if (!dst_frame)
+				return -1;
+			/* identity-mapped kernel view: src_frame / dst_frame are
+			 * both addressable as plain pointers. */
+			unsigned int *sp = (unsigned int *)src_frame;
+			unsigned int *dp = (unsigned int *)dst_frame;
+			for (unsigned int w = 0; w < PAGE_4KB / 4; w++)
+				dp[w] = sp[w];
+			dst_pt[e] = (dst_frame & FRAME_MASK) | (spte & 0xFFFu);
+		}
+	}
+	return 0;
+}
+
 /* Build the userland address space at boot. Wraps paging_init_user_pgdir
  * around the live page_dir so legacy callers stay unchanged. */
 void paging_init_user(void)

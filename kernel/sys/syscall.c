@@ -1073,6 +1073,99 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 83: {                                 /* SYS_FORK -> child PID, 0 in child, -1 on err */
+		/* TODO §1 step 4: cooperative fork.
+		 *
+		 * 1. allocate child PCB + 4 KiB kernel stack
+		 * 2. allocate child pgdir (kernel mappings inherited, user empty)
+		 * 3. deep-copy parent's user pages into child pgdir (no COW v1)
+		 * 4. clone struct regs onto child kstack, force child->eax = 0
+		 * 5. pre-build a context_switch frame on child kstack so the
+		 *    scheduler's first switch into child ret's into trap_return,
+		 *    which pops the clone of struct regs and iret's to user
+		 *    at the parent's user EIP (matching ESP/eflags/etc).
+		 * 6. parent's eax = child PID; child's eax = 0.
+		 *
+		 * Refs:
+		 *   - PRIMARY xv6-public/proc.c:181 (fork): allocproc + copyuvm +
+		 *       clone tf + np->tf->eax = 0. Same five-step shape. xv6
+		 *       splits forkret/trapret; we collapse into one
+		 *       trap_return tail because StinkOS has no kernel-thread
+		 *       initialiser to run before the user resumes.
+		 *   - CONTRAST toaruos/kernel/sys/process.c:1392 (fork): uses
+		 *       arch_resume_user as the child's IP and clones via
+		 *       arch_save_context. Equivalent semantics; their PAL
+		 *       (process abstraction layer) makes the asm-coupled
+		 *       parts hide behind helpers. We keep it visible because
+		 *       it's only ~30 lines and one read-through explains the
+		 *       whole control-flow.
+		 */
+		struct proc *parent = proc_current();
+		if (!parent) { r->eax = (unsigned int)-1; break; }
+
+		struct proc *child = proc_alloc(parent->name);
+		if (!child)  { r->eax = (unsigned int)-1; break; }
+
+		unsigned int kpage = pmm_alloc();
+		if (!kpage) {
+			proc_free(child);
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		child->kstack_top = kpage + 4096u;
+
+		unsigned int *parent_pgdir = (unsigned int *)parent->cr3;
+		if (!parent_pgdir) parent_pgdir = paging_boot_pgdir();
+		unsigned int *child_pgdir = paging_create_user_pgdir();
+		if (!child_pgdir) {
+			pmm_free(kpage); proc_free(child);
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		if (paging_copy_user_pgdir(child_pgdir, parent_pgdir) != 0) {
+			paging_destroy_user_pgdir(child_pgdir);
+			pmm_free(kpage); proc_free(child);
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		child->cr3 = (unsigned int)child_pgdir;
+
+		/* Lay out child's kernel stack. Top-down:
+		 *   [HIGH] struct regs (clone of *r, eax=0)
+		 *   [    ] return-addr = trap_return
+		 *   [    ] eflags
+		 *   [    ] ebp, ebx, esi, edi  (popped by context_switch in that order:
+		 *                              edi first, hence sits at the LOW end)
+		 *   [LOW]  <- child->esp
+		 */
+		extern void trap_return(void);
+		unsigned char *byte_sp = (unsigned char *)child->kstack_top;
+		byte_sp -= sizeof(struct regs);
+		struct regs *child_regs = (struct regs *)byte_sp;
+		*child_regs      = *r;
+		child_regs->eax  = 0;                  /* child sees fork() == 0 */
+		unsigned int *sp = (unsigned int *)byte_sp;
+		*(--sp) = (unsigned int)trap_return;   /* ret -> trap_return */
+		*(--sp) = r->eflags;                   /* eflags (popf) */
+		*(--sp) = 0;                           /* ebp */
+		*(--sp) = 0;                           /* ebx */
+		*(--sp) = 0;                           /* esi */
+		*(--sp) = 0;                           /* edi */
+		child->esp = (unsigned int)sp;
+
+		/* Inherit fd table + signal handlers; clear pending signals so
+		 * the child doesn't immediately re-handle them. */
+		for (int i = 0; i < VFS_FD_MAX; i++)
+			child->fd_table[i] = parent->fd_table[i];
+		for (int i = 0; i < PROC_NSIG; i++)
+			child->sig_handlers[i] = parent->sig_handlers[i];
+		child->pending_signals = 0;
+		child->priority        = parent->priority;
+
+		child->state = PROC_READY;
+		r->eax = (unsigned int)child->pid;     /* parent return */
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;
