@@ -105,10 +105,24 @@ untracked) for the full pending list.
 - Host-side regression tests: Ethernet MTU, ARP storm + ARP TTL +
   ARP request rate limit, StinkFS dir, TCP dup-ACK / SACK use /
   persist / TIME_WAIT / checksum / RST gate / rx wnd / SYN gate /
-  TCB lifecycle / close PID, ICMP rate limit + echo reply, IPv4
-  unicast filter + source route, DNS retry + DHCP retry + DHCP
-  DNS2, RTC alarm, audio mode, MBR write, UTF-8 collapse, blit
-  overflow
+  TCB lifecycle / close PID / wscale parser / OOO park-drain /
+  cwnd + slow-start + RTO collapse / RTO doubling + cap +
+  retry-limit / keepalive idle+interval, ICMP rate limit + echo
+  reply, IPv4 unicast filter + source route + martian source +
+  Teardrop overlap + 2-slot reasm pool alloc, DNS retry + DNS
+  cache TTL+round-robin / DHCP retry + DHCP DNS2, RTC alarm,
+  audio mode, MBR write, UTF-8 collapse, blit overflow +
+  fb_blit_scaled nearest-neighbour + fb_rect pre-loop clip,
+  PMM + paging_user_mmap/munmap overflow + paging_user_set_brk
+  align/grow/shrink + range_ok span gates, anon pipe ring/EOF/
+  EPIPE, klog ring pre/post-wrap, one-shot timer round-up + cb
+  re-arm + tick wrap, fs_grow noop/inplace/relocate +
+  fs_file_delete compaction, ELF32 loader 12-gate validation
+  chain, BR ABNT2 keymap diffs vs US fallback, VFS fd table
+  alloc/cursor/seek, proc_reap state gates +
+  ZOMBIE-is-not-living invariant, PS/2 mouse packet decoder
+- `docs/TESTING.md` describing the host-mirror unit test contract,
+  how to add a new test, and what's covered today
 
 ### Changed
 
