@@ -2,13 +2,13 @@ name: repo-pages
 
 # Publishes the sample stink-pkg repository (built by `make sample-packages`)
 # to GitHub Pages so a fresh StinkOS install can install packages out of the
-# box. Fires on every push to master and on v* tag pushes. To make the
-# deployed URL usable, the repo owner must enable Pages in repository
-# settings with source = "GitHub Actions".
+# box. Fires only on master pushes -- tag pushes are skipped because the
+# `github-pages` deployment environment is protected to master only, and a
+# tag push would just fail with "tag X is not allowed to deploy". Release
+# tags still get their ISO via release.yml.
 on:
   push:
     branches: [master]
-    tags:     ['v*']
   workflow_dispatch:
 
 # Pages deploy needs `pages: write` + `id-token: write` so the official
