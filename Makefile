@@ -20,6 +20,8 @@ help:
 CC = i386-elf-gcc
 AS = i386-elf-as
 LD = i386-elf-ld
+# Used by diagnostic targets (readelf-kernel) that invoke other binutils tools.
+BUILD_TOOL_PREFIX = i386-elf-
 CFLAGS = -O0 -m32 -ffreestanding -fno-pie -fno-stack-protector -Wall -Wextra \
          -ffunction-sections -fdata-sections -Ilib
 
@@ -374,6 +376,18 @@ hex:
 
 dall:
 	objdump -m i386 -b binary --adjust-vma=0x7c00 -D os.bin
+
+# Inspect the kernel ELF's PT_LOAD program headers. Used to verify the
+# ELF-aware bootloader prep (TODO §13): the kernel.elf MUST carry
+# well-formed phdrs that boot/bootmain.c will walk. Fails fast if
+# build/kernel.elf is missing.
+readelf-kernel:
+	@test -f $(BUILD)/kernel.elf || { echo "ERROR: $(BUILD)/kernel.elf missing; run \`make\` first"; exit 1; }
+	@$(BUILD_TOOL_PREFIX)readelf -l $(BUILD)/kernel.elf
+	@printf '\nELF total file size: '
+	@stat -c%s $(BUILD)/kernel.elf
+	@printf 'PT_LOAD bytes on disk (sum of filesz, what bootmain reads): '
+	@$(BUILD_TOOL_PREFIX)readelf -lW $(BUILD)/kernel.elf | awk '/^  LOAD/ {s+=strtonum($$5)} END {print s}'
 
 # QEMU audio backend for the Sound Blaster 16 device:
 #   none  -- driver initialises, no sound reaches the host (default; quiet)
@@ -782,4 +796,4 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso
 
-.PHONY: all hex dall run run-install run-installed run-iso test-headless audit sample-packages unittest clean
+.PHONY: all hex dall readelf-kernel run run-install run-installed run-iso test-headless audit sample-packages unittest clean
