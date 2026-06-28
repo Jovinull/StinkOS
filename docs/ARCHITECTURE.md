@@ -56,23 +56,40 @@ the rest of the system runs unchanged.
 
 ## Address space
 
-Single page directory, identity-mapped 4 GiB with `PG_PS` 4 MiB pages, plus
-4 KiB page tables carved out for the userland window.
+Higher-half kernel (xv6-public pattern). Kernel image is **linked** at
+virt `0x80100000` and **loaded** at phys `0x100000` via per-section
+`AT(ADDR - 0x80000000)` in `boot/kernel.ld`. Bootmain runs with paging
+off, copies each PT_LOAD to `p_paddr`, and calls `e_entry` (resolved by
+`kentry.s` to the *physical* address of the asm entry trampoline). The
+trampoline installs a bootstrap pgdir (identity-low + high-half mirror),
+enables paging, then far-jumps into the high-half C kernel.
+
+Each process owns a private page directory. Kernel PDEs are identical
+across every pgdir; only the user window differs.
 
 ```
-0x00000000 .. 0x003FFFFF   BIOS / kernel image (identity, supervisor)
-0x00400000 .. 0x013FFFFF   user region (16 MiB, USER_PDES=4)
-                           ├─ 0x00400000 .. 0x004FFFFF  code+data+bss
-                           ├─ 0x00500000 .. 0x0053FFFF  user stack
-                           └─ 0x00540000 .. 0x013FFFFF  user heap (sbrk/mmap)
-0x10000000 .. 0x103FFFFF   USER_FB_BASE (mapped on demand via SYS_MAP_FB)
-remaining 4 GiB            kernel identity map, supervisor-only
+virt                                       phys
+0x00000000 .. 0x013FFFFF   USER region    per-process 4 KiB pages
+                           ├─ 0x00400000  code+data+bss   (USER_PDES=4)
+                           ├─ 0x00500000  user stack
+                           └─ 0x00540000  user heap (sbrk/mmap)
+0x10000000 .. 0x103FFFFF   USER_FB_BASE   physical LFB (SYS_MAP_FB)
+0x80000000 .. 0x8FFFFFFF   KERNEL direct  phys [0, 256MB) via 4 MiB PSE
+0xFD000000 .. 0xFFFFFFFF   DEVSPACE       MMIO identity (LFB, e1000 BAR)
 ```
 
-Heap pages are allocated lazily (`paging_user_alloc` bumps a pointer); mmap
-allocations use the same arena, and the bump pointer never rewinds inside a
-single app run. `paging_reset_user_heap` releases every user frame at app
-exit.
+Kernel reads/writes every physical frame as `*KVA(phys)` where
+`KVA(p) = (T*)(p + KERNBASE)`. The high-half mirror sits above
+`KERNBASE = 0x80000000`, which is **above the highest user virt**
+(`USER_END = 0x1400000`) — so no user PT can ever shadow a kernel
+deref. This eliminates the entire class of "kernel writes phys frame
+N, frame N happens to be aliased by some proc's user PT" bugs that bit
+us during the §1 fork landing (see commit `5b00964`).
+
+Heap pages are allocated lazily (`paging_user_alloc` bumps a pointer);
+mmap allocations use the same arena, and the bump pointer never rewinds
+inside a single app run. `paging_reset_user_heap` releases every user
+frame at app exit.
 
 ## Process model
 
@@ -81,9 +98,9 @@ the PIT IRQ tick (100 Hz) so any thread that doesn't disable interrupts gets
 preempted. The data plane lives in `kernel/sys/proc.{c,h}`.
 
 * **PCB** (`struct proc`): PID, parent PID, state, exit code, kernel stack
-  top + saved ESP, optional CR3 (currently 0 = share the kernel page dir),
-  pending-signal bitmap, signal-handler table, per-process VFS descriptor
-  table, name.
+  top + saved ESP, CR3 (KVA pointer to per-process pgdir; `paging_switch`
+  applies `V2P` before the actual CR3 load), pending-signal bitmap,
+  signal-handler table, per-process VFS descriptor table, name.
 * **Process table**: fixed `PROC_MAX = 16` slots. PID = slot index + 1; PID 1
   (`kinit`) is the boot process and is non-killable.
 * **States**: UNUSED → EMBRYO → READY ↔ RUNNING → ZOMBIE (reaped by parent).

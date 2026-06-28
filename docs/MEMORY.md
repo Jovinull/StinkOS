@@ -68,3 +68,41 @@ test-headless harness, parse the serial log for the reclaimed counts, and
 fail if the post-cycle free total dips below the pre-cycle baseline by
 more than tolerance (a small constant drift is expected because the heap
 high-water mark inside an app may not match across runs).
+
+## Higher-half kernel: why every phys deref goes through P2V
+
+Pre-v0.4 the kernel identity-mapped 4 GiB of physical RAM and each
+process pgdir replaced PDEs `[1..4]` (virt `0x400000..0x1400000`) with
+4 KiB user page tables. The kernel routinely dereferenced raw physical
+frames as `(T *)phys` -- safe under the assumption "identity-map means
+virt == phys". The assumption was wrong: when the active CR3 belongs to
+a user proc, any kernel write to a phys address that happens to fall in
+`[USER_BASE, USER_END)` walks through that proc's user PT instead of
+the 4 MiB PSE identity. If `pmm_alloc` returned (say) phys `0x402000`
+to `copy_user_pgdir` while the parent's pgdir was active, the kernel
+zeroed parent's user `.rodata` and the next user-mode `strcmp` faulted
+at a null-deref deep inside the shell.
+
+The fix (commit `a506709`, branch `feat/higher-half-kernel`) follows
+the xv6 pattern:
+
+- Kernel image links at virt `0x80100000` (LMA `0x100000`).
+- Each pgdir maps `[KERNBASE, KERNBASE + 256 MiB)` as a high-half
+  direct map of phys `[0, 256 MiB)` via 4 MiB PSE PDEs.
+- The runtime kernel pgdir has **no** entries below `KERNBASE` except
+  the per-process user PTs at PDE`[1..4]`. There is no identity-low
+  to alias.
+- Every kernel deref of a physical frame goes through `KVA(p) =
+  (T *)(p + KERNBASE)`, landing in the high-half mirror. Above
+  `KERNBASE` the kernel pgdir is exclusive territory -- user PTs
+  cannot reach there because `USER_END = 0x1400000` < `KERNBASE`.
+- Drivers that hand physical addresses to hardware (audio DMA, e1000
+  RX/TX rings + descriptor base registers, ata Bus Master PRDT)
+  apply `V2P()` to convert their BSS-resident virt buffers back to
+  phys. MMIO BARs (LFB at `0xFD000000`, e1000 BAR at `~0xFEB80000`)
+  stay in the DEVSPACE identity range and need no conversion.
+
+The bug class is now impossible by construction: no kernel deref ever
+touches the `[0, KERNBASE)` virt range, and no user PT ever reaches
+above `KERNBASE`. Refs: `osdev-refs/xv6-public/memlayout.h` (P2V/V2P
+macros), `vm.c:316` (copyuvm using P2V).
