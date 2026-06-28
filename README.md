@@ -44,13 +44,26 @@ Yeah, the name is a joke. The code isn't.
 ## Screenshots
 
 <p align="center">
-  <img src="images/menu.png" width="48%" alt="StinkOS Main Menu with RTC and Mouse">
-  <img src="images/shell.png" width="48%" alt="StinkOS Graphical Shell">
+  <img src="pages/img/doom_e1m1.png" width="80%" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01">
+  <br>
+  <sub>Freedoom1 running as a userland app — ring 3, no GRUB, no Multiboot loader. Bootblock → ELF kernel → doomgeneric.</sub>
+</p>
+
+<p align="center">
+  <img src="pages/img/menu.png" width="48%" alt="StinkOS boot menu listing every userland app on the disk">
+  <img src="pages/img/doom_walking.png" width="48%" alt="Freedoom1 mid-combat with pistol drawn">
 </p>
 <p align="center">
-  <img src="images/pong.png" width="48%" alt="Pong Game (AI vs Player)">
-  <img src="images/snake.png" width="48%" alt="Snake Game">
+  <img src="pages/img/shell_status.png" width="48%" alt="StinkOS shell running help, mem, ps and netinfo back to back">
+  <img src="pages/img/fbdemo.png" width="48%" alt="FBDEMO writing colour bars directly to the linear framebuffer via SYS_MAP_FB">
 </p>
+
+<sub>
+Top-left: the boot menu, every userland app on the disk picked by ENTER.
+Top-right: Freedoom1 mid-combat — original Doom HUD, status bar, status face, weapon grid, all running through doomgeneric.
+Bottom-left: the shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code> — DHCP bound from QEMU's user-mode SLIRP, free-page count via <code>SYS_MEMINFO</code>.
+Bottom-right: <code>SYS_MAP_FB</code> in action — the framebuffer mapped read-write into the user address space, so every pixel write is one store, zero syscalls.
+</sub>
 
 ## What it does today
 

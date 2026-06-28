@@ -240,6 +240,55 @@ footer {
 }
 footer a { color: var(--fg-dim); }
 
+/* hero shot under the header */
+.hero-shot {
+	margin-top: 48px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	overflow: hidden;
+	background: #000;
+}
+.hero-shot img {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+.hero-shot .caption {
+	margin: 0;
+	padding: 12px 18px;
+	background: var(--bg-card);
+	border-top: 1px solid var(--border);
+	color: var(--fg-dim);
+	font-size: 0.88rem;
+	font-family: var(--mono);
+}
+
+/* screenshots gallery */
+.shots {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+	gap: 24px;
+}
+.shots figure {
+	margin: 0;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	overflow: hidden;
+}
+.shots img {
+	display: block;
+	width: 100%;
+	height: auto;
+	background: #000;
+}
+.shots figcaption {
+	padding: 12px 16px;
+	color: var(--fg-dim);
+	font-size: 0.88rem;
+	border-top: 1px solid var(--border);
+}
+
 /* package index page */
 table.pkg {
 	width: 100%;
