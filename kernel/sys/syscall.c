@@ -265,11 +265,20 @@ void app_return(void)
 	 * dead app queued would keep playing into the next one's audio.
 	 * Same idea for any TCP socket the app forgot to close: drive an
 	 * orderly FIN so the 8-slot connection table doesn't leak. */
-	{
-		struct proc *cur = proc_current();
-		int pid = cur ? cur->pid : 0;
-		audio_mix_silence_pid(pid);
-		tcp_close_pid(pid);
+	struct proc *cur = proc_current();
+	int pid = cur ? cur->pid : 0;
+	audio_mix_silence_pid(pid);
+	tcp_close_pid(pid);
+
+	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
+	 * process menu launched. menu_exit's klongjmp would crash the
+	 * scheduler -- it switches to the menu kernel stack but the child's
+	 * CR3 stays loaded. Mark ZOMBIE and yield instead; the parent's
+	 * sys_wait reaps. */
+	if (cur && cur->pid > 1) {
+		cur->state = PROC_ZOMBIE;
+		proc_yield();
+		for (;;) __asm__ volatile ("hlt");   /* unreachable */
 	}
 	if (exec_active) {
 		exec_active = 0;
