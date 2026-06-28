@@ -43,4 +43,24 @@ int paging_user_range_ok(unsigned int addr, unsigned int len);
 void         paging_map_fb(unsigned int phys_base);
 unsigned int paging_user_fb_base(void);
 
+/* TODO §1 multitasking, step 1: per-process page directories.
+ *
+ * paging_create_user_pgdir allocates a fresh 4 KiB page directory, copies
+ * the running kernel's PDEs into it (so a trap that lands here finds the
+ * same kernel code/data at the same addresses), and leaves the user
+ * window (USER_BASE..USER_END) empty. Returns the pgdir's physical
+ * address (also valid as a virtual pointer because we identity-map all
+ * of physical RAM), or NULL on PMM exhaustion.
+ *
+ * paging_destroy_user_pgdir walks the user PDEs of the given pgdir,
+ * frees every present 4 KiB user frame, frees the per-PDE page table,
+ * then frees the pgdir page itself. Kernel PDEs are left alone -- they
+ * are shared across every pgdir and freeing them would crash the
+ * remaining processes.
+ *
+ * Step 1 deliberately wires no call sites; step 2 will use them via
+ * paging_switch from the scheduler. */
+unsigned int *paging_create_user_pgdir(void);
+void          paging_destroy_user_pgdir(unsigned int *pgdir);
+
 #endif
