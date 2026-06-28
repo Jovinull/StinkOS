@@ -888,17 +888,19 @@ void main(void)
 			if (*rest == '\0') {
 				term_print("usage: bg <appname>", TERM_ERR);
 			} else {
+				sys_log("bg: pre-fork");
 				int pid = sys_fork();
 				if (pid < 0) {
+					sys_log("bg: fork failed");
 					term_print("bg: fork failed (PCB table full?)", TERM_ERR);
 				} else if (pid == 0) {
-					/* Child path: replace cloned shell with the requested
-					 * app. exec() never returns on success; on failure the
-					 * child becomes a dangling shell clone -- exit so it
-					 * doesn't sit there as a duplicate prompt. */
+					sys_log("bg: child reached exec");
 					if (sys_exec(rest) < 0)
 						sys_exit();
 				} else {
+					char log[48];
+					snprintf(log, sizeof log, "bg: parent saw child pid=%d", pid);
+					sys_log(log);
 					tprintf("bg: launched %s as pid %d", rest, pid);
 				}
 			}
