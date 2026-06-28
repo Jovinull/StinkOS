@@ -105,26 +105,92 @@ static void unmap_user_page(unsigned int vaddr)
 	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
-/* Build the userland address space: allocate one 4 KiB page table per user PDE,
- * point each PDE at it (clearing PG_PS so it is read as a page table, not a
- * 4 MiB page), and map the code + stack pages. The heap is left unmapped --
- * paging_user_alloc grows it on demand the first time an app touches a page. */
-void paging_init_user(void)
+/* Lay out the user address space into the given pgdir: one 4 KiB page
+ * table per user PDE plus code+stack pages mapped at their fixed VAs.
+ * The heap stays empty (paging_user_alloc grows it on demand). Returns
+ * 0 on success, -1 on PMM exhaustion -- caller should clean up via
+ * paging_destroy_user_pgdir.
+ *
+ * Refs:
+ *   - PRIMARY xv6-public/vm.c:182 (inituvm) + vm.c:204 (loaduvm): split
+ *       between "set up the empty pages" and "copy the ELF in". We
+ *       fold them together because our caller (sys_exec) always does
+ *       both -- inituvm-only is xv6's exec preamble, not a separate
+ *       use case for us.
+ *   - CONTRAST linux-0.01/mm/memory.c get_free_page: same pattern of
+ *       "alloc-and-zero-PT, hook into PD with present+rw+user", just
+ *       wrapped in their per-task LDT model.
+ */
+int paging_init_user_pgdir(unsigned int *pgdir)
 {
 	for (unsigned int p = 0; p < USER_PDES; p++) {
 		unsigned int *pt = (unsigned int *)pmm_alloc();
+		if (!pt)
+			return -1;
 		for (unsigned int i = 0; i < ENTRIES; i++)
 			pt[i] = 0;
-		user_pts[p] = pt;
-		page_dir[(USER_BASE / PAGE_4MB) + p] =
+		pgdir[(USER_BASE / PAGE_4MB) + p] =
 			(unsigned int)pt | PG_PRESENT | PG_RW | PG_USER;
 	}
+	for (unsigned int i = 0; i < USER_CODE_PAGES; i++) {
+		unsigned int frame = pmm_alloc();
+		if (!frame) return -1;
+		unsigned int va = USER_CODE + i * PAGE_4KB;
+		unsigned int *pt = (unsigned int *)(pgdir[va / PAGE_4MB] & FRAME_MASK);
+		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
+	}
+	for (unsigned int i = 0; i < USER_STACK_PAGES; i++) {
+		unsigned int frame = pmm_alloc();
+		if (!frame) return -1;
+		unsigned int va = USER_STACK_LO + i * PAGE_4KB;
+		unsigned int *pt = (unsigned int *)(pgdir[va / PAGE_4MB] & FRAME_MASK);
+		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
+	}
+	/* FB PDE: reset to kernel identity (PSE, no PG_USER). Each app must
+	 * call SYS_MAP_FB explicitly to gain ring-3 access to the LFB. */
+	unsigned int fb_idx = USER_FB_BASE / PAGE_4MB;
+	pgdir[fb_idx] = (fb_idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+	return 0;
+}
 
-	for (unsigned int i = 0; i < USER_CODE_PAGES; i++)
-		map_user_page(USER_CODE + i * PAGE_4KB, pmm_alloc());
-	for (unsigned int i = 0; i < USER_STACK_PAGES; i++)
-		map_user_page(USER_STACK_LO + i * PAGE_4KB, pmm_alloc());
+/* Swap CR3 to pgdir and refresh the kernel's caches of "currently
+ * active user PTs + heap watermark + FB-mapped flag" so every
+ * map_user_page / paging_user_alloc / paging_map_fb call that follows
+ * targets the new pgdir. The heap rewinds to USER_HEAP_LO and FB is
+ * marked unmapped -- the new image owns its own heap and FB state.
+ *
+ * Refs:
+ *   - PRIMARY xv6-public/vm.c:157 (switchuvm) is the canonical "lcr3
+ *       to a per-proc pgdir" entry point; xv6 also retargets the TSS
+ *       here, which we do separately in trap.c.
+ *   - CONTRAST toaruos/kernel/sys/process.c uses arch_load_page_directory
+ *       behind a clone+swap wrapper; semantically identical, more
+ *       abstraction layers.
+ */
+void paging_activate(unsigned int *pgdir)
+{
+	if (!pgdir)
+		return;
+	page_dir = pgdir;
+	for (unsigned int p = 0; p < USER_PDES; p++) {
+		unsigned int pde = pgdir[(USER_BASE / PAGE_4MB) + p];
+		user_pts[p] = (pde & PG_PRESENT) ? (unsigned int *)(pde & FRAME_MASK) : 0;
+	}
+	user_heap_next = USER_HEAP_LO;
+	fb_pde_mapped  = 0;
+	__asm__ volatile ("mov %0, %%cr3" : : "r"((unsigned int)pgdir) : "memory");
+}
 
+unsigned int *paging_boot_pgdir(void)
+{
+	return page_dir;
+}
+
+/* Build the userland address space at boot. Wraps paging_init_user_pgdir
+ * around the live page_dir so legacy callers stay unchanged. */
+void paging_init_user(void)
+{
+	paging_init_user_pgdir(page_dir);
 	user_heap_next = USER_HEAP_LO;
 	load_cr3();
 }
