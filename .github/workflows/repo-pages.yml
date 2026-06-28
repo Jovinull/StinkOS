@@ -112,7 +112,11 @@ jobs:
           See docs/PACKAGING.md for details.
           EOF
 
+      # enablement: true auto-creates the Pages site on first run so the
+      # repo owner doesn't have to flip Settings -> Pages -> Source by hand.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
