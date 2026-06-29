@@ -178,6 +178,10 @@ enum de_mapflags_t
 };
 
 /* keys and moves should line up. */
+#undef KEY_UP
+#undef KEY_DOWN
+#undef KEY_LEFT
+#undef KEY_RIGHT
 enum de_keys_t
 {
 	KEY_LEFT = 0,
