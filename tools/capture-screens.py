@@ -139,6 +139,18 @@ keys("mem");  key("ret", pause=0.4)
 keys("ps");   key("ret", pause=0.4)
 keys("netinfo"); key("ret", pause=0.4)
 shot("shell_status", pause_before=0.5)
+
+# --- 3b. SHELL bg demo: fork + exec ANIM in the background, parent
+# shell stays at the prompt and runs `ps` to prove it's still alive.
+# Captures the moment after `ps` so the listing shows TWO procs:
+# the shell (parent) and ANIM (forked child). This is the visible
+# proof of §1 multitasking proper (per-process pgdir + sys_fork +
+# sys_exec). Same scenario the smoke-multiproc target exercises.
+print(">>> SHELL bg anim (multi-proc demo)")
+keys("bg anim"); key("ret", pause=0.6)
+time.sleep(2.5)                                   # ANIM reaches ring3, prints lines
+keys("ps");      key("ret", pause=0.6)
+shot("shell_bg_demo", pause_before=0.5)
 keys("exit"); key("ret"); time.sleep(1.5)
 
 # --- 4. Doom (idx 21 -> +7 from SHELL 14) ---------------------------

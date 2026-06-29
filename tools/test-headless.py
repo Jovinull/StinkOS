@@ -209,6 +209,36 @@ time.sleep(0.5)                                   # open/write/seek/read/close
 sock.sendall(b"sendkey z\n")                      # exit fd -> menu
 time.sleep(0.4)
 
+# Back at menu (cursor on FD): move to "15 SHELL", launch the graphical
+# shell, type `bg anim` to fork+exec ANIM in the background, then `ps`
+# to prove the parent shell is still serving the prompt. Asserts the
+# multi-proc path (per-process pgdir + sys_fork + sys_exec upgrade) is
+# wired end-to-end -- this is the §1 multitasking proper acceptance
+# check, equivalent to `make smoke-multiproc` but folded into the main
+# test target so CI catches regressions on every push.
+for key in ("s", "ret"):
+    sock.sendall(("sendkey %s\n" % key).encode())
+    time.sleep(0.2)
+time.sleep(2.0)                                   # shell paints prompt + loads history
+
+def shellkey(name, pause=0.16):
+    sock.sendall(("sendkey %s\n" % name).encode())
+    time.sleep(pause)
+
+def shellkeys(text, pause=0.10):
+    for ch in text:
+        shellkey("spc" if ch == " " else ch.lower(), pause)
+
+shellkeys("bg anim")
+shellkey("ret", pause=0.6)
+time.sleep(4.0)                                   # child reaches ring3 + logs a few lines
+shellkeys("ps")
+shellkey("ret", pause=0.6)
+time.sleep(1.5)
+shellkeys("exit")
+shellkey("ret", pause=0.6)
+time.sleep(0.5)
+
 out = serial()
 w, h, px = read_ppm(FB)
 drawn = nonblack_count(px)
@@ -256,6 +286,11 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
+    "multi-proc fork+exec":
+                       "exec: anim" in out and
+                       ("ring3: anim app running" in out or
+                        "ring3: anim: time flows" in out) and
+                       out.count("fs: wrote SHELL.HIS") >= 2,
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -264,4 +299,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; shell fork+exec runs an app in the background; back to menu")
