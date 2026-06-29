@@ -6,6 +6,61 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+## [0.7.0] -- COW fork
+
+`paging_copy_user_pgdir` no longer eagerly duplicates every user frame.
+At fork time, parent and child share frames; writable pages are tagged
+PG_COW (PTE software bit 9) and have their RW bit cleared on BOTH
+sides. The first writer takes a #PF which a new
+`paging_handle_cow_fault` resolves by either restoring RW (last owner)
+or allocating + copying into a fresh frame (the writer's PTE then
+points at the private copy while the original sticks with the other
+owner). Read-only pages (.text / .rodata under v0.5 W^X) stay shared
+without PG_COW -- writes to those remain real W^X violations and the
+trap path kills the offender as before.
+
+Cuts fork cost from "memcpy every present user frame" to "flip RW +
+ref_inc". Typical apps that fork then exec touch only a handful of
+pages before the exec replaces everything, so most copies that today's
+eager path performs never have to happen at all.
+
+PMM gains a per-frame u8 refcount (`pmm_ref_inc`, `pmm_free` now
+ref-aware, `pmm_ref` for diagnostics). Single-CPU only -- when SMP
+lands, refcount + COW need atomic ops + per-CPU lock.
+
+### Added
+
+- `pmm_ref_inc(frame)` / `pmm_ref(frame)` and ref-aware `pmm_free` in
+  `kernel/arch/pmm.{c,h}`; PMM tracks 8192-frame refcount array (8 KiB
+  static; covers the full 32 MiB PMM range)
+- `PG_COW` (PTE bit 9, OS-available per Intel SDM Vol 3A §4.4) macro
+  in `kernel/arch/memlayout.h`
+- `paging_handle_cow_fault(va)` in `kernel/arch/paging.{c,h}` --
+  refcount-aware fault resolver: refcount==1 shortcut (just lift RW)
+  vs refcount>1 (alloc + memcpy via direct map + install RW at writer's
+  PTE + ref_dec old frame)
+- `paging_copy_user_pgdir` rewritten: shares frames, marks PG_COW on
+  writable pages, calls `pmm_ref_inc` per shared frame, no contents
+  memcpy
+- `trap.c` #PF handler routes write+user+protection faults to
+  `paging_handle_cow_fault` first; falls through to existing
+  app-killer when the page lacks PG_COW (real W^X violation or
+  non-COW fault)
+- Boot serial line `cow: fault va=0x... ref=N` per COW fault
+- `apps/cowtest.c` end-to-end validator: mmap a page, write
+  PRE_MARKER, fork, parent + child write distinct markers, assert
+  divergence
+- `tools/smoke-cow.py` + `make smoke-cow` target
+- `tests/test_pmm.c` extended with 8 refcount assertions (fresh alloc
+  = 1, ref_inc bumps, multi-owner free drops to 0, double-free no-op,
+  oob inputs ignored)
+
+### Changed
+
+- `pmm_alloc` now sets refcount=1 on every handout (was: no tracking).
+  Behavior unchanged for callers that don't use `pmm_ref_inc` -- the
+  alloc / free cycle still matches the v0.6 invariants.
+
 ## [0.6.0] -- ACPI static-table parsing
 
 Section 7 ACPI lands: kernel locates the RSDP via the IA-PC scan
