@@ -70,7 +70,8 @@ APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
 LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_stdio.o $(BUILD)/libstink_posix.o \
                 $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
-                $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o
+                $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o \
+                $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -196,6 +197,12 @@ $(BUILD)/libstink_sha256.o: lib/libstink_sha256.c | $(BUILD)
 $(BUILD)/libstink_socket.o: lib/libstink_socket.c lib/libstink.h lib/libstink_socket.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_socket.c -o $(BUILD)/libstink_socket.o
 
+$(BUILD)/libstink_math.o: lib/libstink_math.c lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_math.c -o $(BUILD)/libstink_math.o
+
+$(BUILD)/libstink_gfx.o: lib/libstink_gfx.c lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_gfx.c -o $(BUILD)/libstink_gfx.o
+
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
 $(BUILD)/hello.elf: apps/hello.s apps/app.ld | $(BUILD)
@@ -286,6 +293,11 @@ $(BUILD)/pong.elf: apps/crt0.s apps/pong.c lib/libstink.h apps/app.ld $(LIBSTINK
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/asteroids.elf: apps/crt0.s apps/asteroids.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/asteroids.c -o $(BUILD)/asteroids_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/asteroids.elf $(BUILD)/crt0.o $(BUILD)/asteroids_app.o $(LIBSTINK_OBJS)
+
 $(BUILD)/installer.elf: apps/crt0.s apps/installer.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/installer.c -o $(BUILD)/installer_app.o
@@ -341,7 +353,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -393,6 +405,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  ARROWS.ELF=$(BUILD)/arrows.elf \
 	  SNAKE.ELF=$(BUILD)/snake.elf \
 	  PONG.ELF=$(BUILD)/pong.elf \
+	  ASTEROIDS.ELF=$(BUILD)/asteroids.elf \
 	  INSTALLER.ELF=$(BUILD)/installer.elf \
 	  EDIT.ELF=$(BUILD)/edit.elf \
 	  STINKPKG.ELF=$(BUILD)/stinkpkg.elf \
@@ -547,6 +560,9 @@ sample-packages: all tools/make-stinkpkg.py
 	python3 tools/make-stinkpkg.py \
 	    --name pong  --version 1.0.0 --desc "Pong game" \
 	    --out $(SAMPLE_REPO)/pong.stinkpkg  $(BUILD)/pong.elf
+	python3 tools/make-stinkpkg.py \
+	    --name asteroids --version 1.0.0 --desc "Asteroids game" \
+	    --out $(SAMPLE_REPO)/asteroids.stinkpkg $(BUILD)/asteroids.elf
 	python3 tools/make-stinkpkg.py \
 	    --name hello --version 1.0.0 --desc "Minimal hello-world" \
 	    --out $(SAMPLE_REPO)/hello.stinkpkg $(BUILD)/hi.elf
