@@ -18,7 +18,12 @@ for f in (SER, MON, FB, FB2):
         pass
 
 qemu = subprocess.Popen(
-    ["qemu-system-i386", "-drive", "format=raw,file=os.bin", "-display", "none",
+    # `-cpu Penryn` so QEMU's TCG advertises NX (CPUID extended leaf 1
+    # EDX bit 20); without this the kernel skips IA32_EFER.NXE under its
+    # CPUID guard and the wxattack check would false-pass because the
+    # shellcode in .data runs instead of #PF'ing.
+    ["qemu-system-i386", "-cpu", "Penryn",
+     "-drive", "format=raw,file=os.bin", "-display", "none",
      "-serial", "file:" + SER, "-monitor", "unix:%s,server,nowait" % MON,
      "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -235,6 +240,16 @@ time.sleep(4.0)                                   # child reaches ring3 + logs a
 shellkeys("ps")
 shellkey("ret", pause=0.6)
 time.sleep(1.5)
+# v0.5 W^X adversarial: launch the wxattack ELF, which writes a one-byte
+# shellcode into a .data global and tries to call it via a function pointer.
+# Pre-W^X this would succeed (the kernel mapped user data RW + executable);
+# under v0.5 W^X the .data page is NX so the CPU page-faults at the first
+# instruction fetch from .data and the kernel kills the process. We assert
+# both the "about to jump" line (proves the app ran to the attack point) and
+# the resulting fault (proves W^X enforcement fired).
+shellkeys("run wxattack")
+shellkey("ret", pause=0.6)
+time.sleep(1.5)
 shellkeys("exit")
 shellkey("ret", pause=0.6)
 time.sleep(0.5)
@@ -286,6 +301,10 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
+    "wx attack blocked":
+                       "wxattack: about to jump" in out and
+                       "wxattack: REACHED" not in out and
+                       "app: fault, killed" in out,
     "multi-proc fork+exec":
                        "exec: anim" in out and
                        ("ring3: anim app running" in out or
