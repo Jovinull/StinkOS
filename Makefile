@@ -266,7 +266,7 @@ RUST_TARGET_JSON = apps/rust/i686-stinkos.json
 CARGO ?= cargo
 CARGO_FLAGS = +nightly build --release \
               --target $(RUST_TARGET_JSON) \
-              -Z build-std=core \
+              -Z build-std=core,alloc \
               -Z unstable-options \
               -Z json-target-spec \
               --target-dir $(BUILD)/rust
@@ -278,6 +278,16 @@ $(BUILD)/rs-hello.elf: apps/crt0.s apps/rust/rs-hello/Cargo.toml \
 	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-hello/Cargo.toml
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-hello.elf $(BUILD)/crt0.o \
 	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_hello.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-alloc.elf: apps/crt0.s apps/rust/rs-alloc/Cargo.toml \
+                          apps/rust/rs-alloc/src/lib.rs $(RUST_TARGET_JSON) \
+                          apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-alloc/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-alloc.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_alloc.a \
 	      --no-whole-archive \
 	      $(LIBSTINK_OBJS) $(LIBGCC)
 
@@ -406,7 +416,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -469,7 +479,8 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  WXATTACK.ELF=$(BUILD)/wxattack.elf \
 	  COWTEST.ELF=$(BUILD)/cowtest.elf \
 	  MOUNTTEST.ELF=$(BUILD)/mounttest.elf \
-	  RS-HELLO.ELF=$(BUILD)/rs-hello.elf"; \
+	  RS-HELLO.ELF=$(BUILD)/rs-hello.elf \
+	  RS-ALLOC.ELF=$(BUILD)/rs-alloc.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
 	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
@@ -569,6 +580,13 @@ smoke-vfs-mounts: all
 # i686-stinkos target + libstink_syms linkage). Tier 1.1 milestone.
 smoke-rs-hello: all
 	@python3 tools/smoke-rs-hello.py
+
+# Rust alloc crate smoke: drives the shell to launch `rs-alloc`,
+# which exercises Box<T>, Vec<T> growth, and free-then-realloc reuse
+# through libstink K&R malloc behind a #[global_allocator] shim. Tier
+# 1.3 milestone.
+smoke-rs-alloc: all
+	@python3 tools/smoke-rs-alloc.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so

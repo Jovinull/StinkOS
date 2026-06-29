@@ -224,7 +224,7 @@ time.sleep(0.4)
 for key in ("s", "ret"):
     sock.sendall(("sendkey %s\n" % key).encode())
     time.sleep(0.2)
-time.sleep(2.0)                                   # shell paints prompt + loads history
+time.sleep(3.5)                                   # shell paints prompt + loads history (bumped for the now-34-file stinkfs)
 
 def shellkey(name, pause=0.16):
     sock.sendall(("sendkey %s\n" % name).encode())
@@ -249,7 +249,7 @@ time.sleep(1.5)
 # the resulting fault (proves W^X enforcement fired).
 shellkeys("run wxattack")
 shellkey("ret", pause=0.6)
-time.sleep(1.5)
+time.sleep(2.5)                                   # extra slack for wxattack load + fault
 shellkeys("exit")
 shellkey("ret", pause=0.6)
 time.sleep(0.5)
