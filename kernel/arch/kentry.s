@@ -28,6 +28,8 @@
 .equ KERNBASE,        0x80000000
 .equ STACK_TOP_PHYS,  0x00090000
 .equ STACK_TOP_VIRT,  STACK_TOP_PHYS + KERNBASE
+.equ MSR_EFER,        0xC0000080
+.equ EFER_NXE,        0x800
 
 .code32
 
@@ -40,6 +42,37 @@
 .section .text
 
 _phys_entry:
+	# Enable IA32_EFER.NXE so the PAE walker honours PTE bit 63 (NX)
+	# once the v0.5 switch lands. Guarded by CPUID extended-leaf NX
+	# bit (EAX=0x80000001 EDX bit 20): on a CPU that doesn't advertise
+	# NX, writing EFER.NXE would either #GP (MSR reserved) or be silently
+	# ignored. Skipping the WRMSR keeps boot working on legacy CPUs +
+	# QEMU TCG defaults without `-cpu` flag; with NX, the bit goes live
+	# immediately so paging.c's PAE rewrite can stamp PTE bit 63 from
+	# its very first PTE.
+	#
+	# Refs:
+	#   serenity/Kernel/Arch/x86_64/Boot/ap_setup.S:62-74 -- same
+	#       MSR/bit pattern in asm, copy-paste semantics across
+	#       PAE i386 and long mode (their CPUID guard lives in C
+	#       at Processor.cpp:537-541; we keep it asm-side for boot).
+	#   Intel SDM Vol 2A "CPUID" (extended leaf 0x80000001 EDX bit 20)
+	#       + Vol 3A §4.6.2 (IA32_EFER.NXE) + Vol 4 §2.2.1
+	#       (MSR_IA32_EFER = 0xC0000080).
+	mov $0x80000000, %eax
+	cpuid
+	cmp $0x80000001, %eax
+	jb  .Lnxe_skip
+	mov $0x80000001, %eax
+	cpuid
+	test $(1 << 20), %edx
+	jz  .Lnxe_skip
+	mov $MSR_EFER, %ecx
+	rdmsr
+	or  $EFER_NXE, %eax
+	wrmsr
+.Lnxe_skip:
+
 	# CR4.PSE so the bootstrap pgdir's 4 MiB PDEs are honored.
 	mov %cr4, %eax
 	or  $0x10, %eax
