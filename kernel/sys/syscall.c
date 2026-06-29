@@ -4,6 +4,7 @@
 #include "defs.h"
 #include "memlayout.h"
 #include "acpi.h"
+#include "fs.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -1087,6 +1088,12 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
+	case 84:                                   /* SYS_MOUNT: ebx=(slot<<8)|drive ecx=dir_lba edx=data_lba esi=data_end -> 0/-1 */
+		r->eax = (unsigned int)fs_mount_register(
+		    (int)((r->ebx >> 8) & 0xFFu),
+		    (int)(r->ebx & 0xFFu),
+		    r->ecx, r->edx, r->esi);
+		break;
 	case 83: {                                 /* SYS_FORK -> child PID, 0 in child, -1 on err */
 		/* TODO §1 step 4: cooperative fork.
 		 *
