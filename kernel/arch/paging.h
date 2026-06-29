@@ -44,6 +44,15 @@ int paging_user_range_ok(unsigned int addr, unsigned int len);
 void paging_user_set_segment_perms(unsigned int va, unsigned int len,
                                    int exec, int write);
 
+/* COW fault resolution. Called by the #PF handler on a ring-3 write to a
+ * page whose PTE has PG_COW set. Returns 1 when the fault was handled
+ * (page either privatized via alloc+copy or just had its RW bit restored
+ * if the caller was the last owner) -- caller should re-iret to retry the
+ * faulting instruction. Returns 0 when va has no PG_COW PTE -- caller
+ * should fall through to the normal kill-the-process path (real W^X
+ * violation, stack-overflow into unmapped, etc). */
+int paging_handle_cow_fault(unsigned int va);
+
 /* Map the physical LFB at the fixed user virtual address USER_FB_BASE using a
  * 4 MiB PSE PDE with PG_USER. Returns the virtual address the app should use.
  * The mapping is torn down in paging_reset_user_heap so each new app must call

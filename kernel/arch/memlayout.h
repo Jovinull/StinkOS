@@ -108,6 +108,11 @@
 #define PG_DIRTY    0x040u   /* set by CPU on first write               */
 #define PG_PS       0x080u   /* page size: 1 = 4 MiB (legacy) / 2 MiB (PAE) */
 #define PG_GLOBAL   0x100u   /* survives CR3 reload if CR4.PGE=1        */
+#define PG_COW      0x200u   /* software bit 9 (Intel SDM reserves 9..11
+                              * for OS use): marks a shared post-fork
+                              * page whose first writer must be handled
+                              * by the COW fault path. Independent of
+                              * PG_NX -- W^X stays orthogonal. */
 
 /* PG_NX is the high 32 bits' bit 31 of an 8-byte PAE PTE. As a
  * uint64_t literal it sits at bit 63 of the whole entry; the

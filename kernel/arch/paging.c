@@ -319,6 +319,49 @@ static void map_user_page(unsigned int vaddr, unsigned int frame)
 	*pte = (pae_entry_t)(frame & 0xFFFFF000u) | user_pte_flags(0, 1);
 }
 
+/* COW fault resolution. The #PF handler routes a write to a PG_COW
+ * page here. Returns 1 when handled, 0 when the PTE has no PG_COW
+ * (caller should fall through to the kill path).
+ *
+ * Two branches:
+ *   refcount == 1 -- we're the only owner left; just flip PG_RW back
+ *                    on, clear PG_COW. No alloc, no copy.
+ *   refcount  > 1 -- alloc a fresh frame, copy the shared one via the
+ *                    kernel direct map, install the new frame at this
+ *                    PTE with RW set + PG_COW cleared, decrement the
+ *                    shared frame's refcount. The other owners keep
+ *                    the original frame (RO + PG_COW) until they too
+ *                    take the fault.
+ *
+ * Pattern from toaruos `mmu_copy_on_write` (arch/x86_64/mmu.c:1313). */
+int paging_handle_cow_fault(unsigned int va)
+{
+	pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+	if (!pte) return 0;
+	pae_entry_t entry = *pte;
+	if (!(entry & PG_PRESENT)) return 0;
+	if (!(entry & PG_COW)) return 0;
+
+	unsigned int old_frame = (unsigned int)(entry & FRAME_MASK_4KB);
+	pae_entry_t  perms_kept = entry & ~((pae_entry_t)PG_COW | FRAME_MASK_4KB);
+
+	if (pmm_ref(old_frame) <= 1u) {
+		/* Last owner: just lift the RO + COW marker. The frame
+		 * stays the same, refcount stays 1. */
+		*pte = (pae_entry_t)old_frame | perms_kept | PG_RW;
+	} else {
+		unsigned int new_frame = pmm_alloc();
+		if (!new_frame) return 0;       /* OOM: let caller kill us */
+		unsigned int *sp = KVA32(old_frame);
+		unsigned int *dp = KVA32(new_frame);
+		for (unsigned int w = 0; w < PAGE_4KB / 4; w++) dp[w] = sp[w];
+		*pte = (pae_entry_t)new_frame | perms_kept | PG_RW;
+		pmm_free(old_frame);            /* drops shared frame's refcount */
+	}
+	__asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+	return 1;
+}
+
 /* Re-stamp the user PTEs covering [va, va+len) with the W^X bits implied
  * by an ELF segment's p_flags (PF_X = exec, PF_W = write). The frame
  * mapping is preserved; only the permission bits change. Called from the
@@ -423,18 +466,23 @@ unsigned int *paging_boot_pgdir(void)
 	return (unsigned int *)page_pdpt;
 }
 
-/* Deep-copy USER pages from src PDPT into dst PDPT. dst must come from
- * paging_create_user_pgdir (own PD0, empty user PTs). Mirrors xv6-public
- * copyuvm but threaded through PAE's 3-level walk. */
+/* Copy USER pages from src PDPT into dst PDPT under copy-on-write. No
+ * frame contents are duplicated here: every present user PTE has its
+ * frame shared with the child via pmm_ref_inc, and writable pages are
+ * downgraded RO + tagged PG_COW on BOTH parent and child so the first
+ * writer takes a #PF that the COW handler resolves.
+ *
+ * Read-only pages (PG_RW already clear -- v0.5 W^X .text / .rodata)
+ * stay shared without PG_COW; writes to them are real W^X violations
+ * and the existing trap path kills the offender.
+ *
+ * Matches toaruos `copy_page_maybe` (arch/x86_64/mmu.c:442) -- same
+ * refcount + per-PTE COW bit design. */
 int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 {
 	pae_entry_t *dst = (pae_entry_t *)dst_raw;
 	pae_entry_t *src = (pae_entry_t *)src_raw;
 
-	/* paging_create_user_pgdir leaves PDPT[0] zero so sys_fork's caller
-	 * can pick the population strategy (alloc PD0 + copy here, vs alloc
-	 * PD0 + populate via init_user_pgdir in sys_exec). Wire a fresh PD0
-	 * if dst doesn't already have one. */
 	if (!(dst[0] & 1ULL)) {
 		unsigned int pd0_phys = pmm_alloc();
 		if (!pd0_phys)
@@ -453,7 +501,7 @@ int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 		if (!(spde & 1ULL))
 			continue;
 		if (spde & 0x80ULL)
-			continue;                            /* 2 MiB huge -- skip (no user huge today) */
+			continue;                            /* 2 MiB huge -- skip (FB MMIO) */
 
 		pae_entry_t *src_pt = KVA((unsigned int)(spde & FRAME_MASK_4KB));
 		unsigned int dst_pt_phys = pmm_alloc();
@@ -467,18 +515,25 @@ int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 			pae_entry_t spte = src_pt[e];
 			if (!(spte & 1ULL))
 				continue;
-			unsigned int src_frame = (unsigned int)(spte & FRAME_MASK_4KB);
-			unsigned int dst_frame = pmm_alloc();
-			if (!dst_frame)
-				return -1;
-			/* Page contents copy via the higher-half mirror so no
-			 * user PT can intercept the write. */
-			unsigned int *sp = KVA32(src_frame);
-			unsigned int *dp = KVA32(dst_frame);
-			for (unsigned int w = 0; w < PAGE_4KB / 4; w++)
-				dp[w] = sp[w];
-			dst_pt[e] = (pae_entry_t)(dst_frame & 0xFFFFF000u) |
-			            (spte & 0xFFFULL);
+			unsigned int src_frame =
+			    (unsigned int)(spte & FRAME_MASK_4KB);
+			unsigned int va =
+			    (p << 21) | (e << 12);
+			pae_entry_t shared = spte;
+			if (spte & PG_RW) {
+				/* Writable: strip RW, tag COW on BOTH so a write
+				 * from either side faults to the COW handler. */
+				shared &= ~((pae_entry_t)PG_RW);
+				shared |= PG_COW;
+				src_pt[e] = shared;
+				__asm__ volatile ("invlpg (%0)"
+				                  : : "r"(va) : "memory");
+			}
+			/* Read-only pages (text/rodata under v0.5 W^X) get
+			 * shared as-is: same frame, same perms, no PG_COW.
+			 * Any future write traps as a real W^X violation. */
+			dst_pt[e] = shared;
+			pmm_ref_inc(src_frame);
 		}
 	}
 	return 0;
