@@ -1,0 +1,12 @@
+[package]
+name = "libstink"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+path = "src/lib.rs"
+
+# Shared Rust shim over the libstink C surface. Per-app crates pull
+# this in via path = "../libstink" and get println! / eprintln! /
+# read_line / panic_handler for free.
