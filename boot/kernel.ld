@@ -28,6 +28,7 @@ SECTIONS
 {
 	. = 0x80100000;
 
+	__kernel_text_start = .;
 	.multiboot : AT(ADDR(.multiboot) - 0x80000000) {
 		KEEP(*(.multiboot))
 	} :text
@@ -36,12 +37,18 @@ SECTIONS
 		*(.text)
 		*(.text.*)
 	} :text
+	. = ALIGN(4096);
+	__kernel_text_end = .;
 
+	__kernel_rodata_start = .;
 	.rodata : AT(ADDR(.rodata) - 0x80000000) {
 		*(.rodata)
 		*(.rodata.*)
 	} :text
+	. = ALIGN(4096);
+	__kernel_rodata_end = .;
 
+	__kernel_data_start = .;
 	.data : AT(ADDR(.data) - 0x80000000) {
 		*(.data)
 		*(.data.*)
@@ -56,6 +63,7 @@ SECTIONS
 	} :data
 	. = ALIGN(4);
 	__bss_end = .;
+	__kernel_data_end = .;
 
 	/DISCARD/ : {
 		*(.comment)

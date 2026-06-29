@@ -28,6 +28,19 @@
 #include "paging.h"
 #include "pmm.h"
 #include "memlayout.h"
+#include "cpuid.h"
+
+/* NX bit lives at bit 63 of an 8-byte PTE/PDE (Intel SDM Vol 3A §4.6.2).
+ * On 32-bit literals: split as two halves so the constant is well-formed
+ * in C without 64-bit suffixes -- we shift into place below. */
+#define PG_NX_HI 0x80000000u
+#define PG_NX    (((pae_entry_t)PG_NX_HI) << 32)
+
+/* Set once at paging_init from CPUID + EFER state. When 0, setting bit 63
+ * in a PTE while IA32_EFER.NXE=0 triggers a reserved-bit page fault on
+ * access -- so we must skip stamping NX on CPUs that don't advertise it
+ * (or where kentry.s skipped the WRMSR). */
+static int g_nx_enabled;
 
 #define PAGE_4KB    0x1000u
 #define PAGE_2MB    0x200000u
@@ -116,13 +129,14 @@ static void zero_frame(unsigned int phys)
  */
 static void build_kernel_pd(unsigned int pd_phys,
                             unsigned int phys_base,
-                            unsigned int present_count)
+                            unsigned int present_count,
+                            pae_entry_t extra_flags)
 {
 	zero_frame(pd_phys);
 	pae_entry_t *pd = KVA(pd_phys);
 	for (unsigned int i = 0; i < present_count; i++) {
 		unsigned int phys = phys_base + i * PAGE_2MB;
-		pd[i] = (pae_entry_t)phys | 0x83ULL;       /* PG_PRESENT | PG_RW | PG_PS */
+		pd[i] = (pae_entry_t)phys | 0x83ULL | extra_flags;
 	}
 }
 
@@ -131,20 +145,90 @@ static void build_kernel_pds(void)
 	kernel_pd1_phys = pmm_alloc();
 	kernel_pd2_phys = pmm_alloc();
 	kernel_pd3_phys = pmm_alloc();
+	pae_entry_t nx = g_nx_enabled ? PG_NX : 0;
 	/* PD1: virt [1 GiB, 2 GiB) -- nothing kernel-side here, leave empty. */
-	build_kernel_pd(kernel_pd1_phys, 0, 0);
-	/* PD2: virt [KERNBASE, KERNBASE+1 GiB) -> phys [0, KERNEL_DIRECT_MAP). */
-	build_kernel_pd(kernel_pd2_phys, 0, KERNEL_DIRECT_MAP / PAGE_2MB);
-	/* PD3: virt [3 GiB, 4 GiB) identity from KERNEL_DEVSPACE up. */
+	build_kernel_pd(kernel_pd1_phys, 0, 0, 0);
+	/* PD2: virt [KERNBASE, KERNBASE+1 GiB) -> phys [0, KERNEL_DIRECT_MAP).
+	 * Mark the whole direct map NX so the kernel cannot accidentally
+	 * jump into ordinary data frames -- only the first 2 MiB PSE PDE
+	 * (which kernel_wx_install_pt later splits into a 4 KiB PT) carries
+	 * any executable virt for the kernel image. */
+	build_kernel_pd(kernel_pd2_phys, 0, KERNEL_DIRECT_MAP / PAGE_2MB, nx);
+	/* PD3: virt [3 GiB, 4 GiB) identity from KERNEL_DEVSPACE up. NX on
+	 * MMIO BARs is fine -- no driver executes from device memory. */
 	{
 		zero_frame(kernel_pd3_phys);
 		pae_entry_t *pd = KVA(kernel_pd3_phys);
 		unsigned int dev_first_idx = (KERNEL_DEVSPACE - 3 * PAGE_1GB) / PAGE_2MB;
 		for (unsigned int i = dev_first_idx; i < PD_ENTRIES; i++) {
 			unsigned int phys = 3 * PAGE_1GB + i * PAGE_2MB;
-			pd[i] = (pae_entry_t)phys | 0x83ULL;
+			pd[i] = (pae_entry_t)phys | 0x83ULL | nx;
 		}
 	}
+}
+
+/* Linker-script symbols bracketing each kernel section. Page-aligned so
+ * the per-page permission walk below never has to special-case partial
+ * pages. Resolved at link time -- they are pure virt addresses, no
+ * runtime storage. */
+extern char __kernel_text_start[];
+extern char __kernel_text_end[];
+extern char __kernel_rodata_start[];
+extern char __kernel_rodata_end[];
+extern char __kernel_data_start[];
+extern char __kernel_data_end[];
+
+/* Replace PD2[0] (the 2 MiB PSE huge mapping covering virt [KERNBASE,
+ * KERNBASE+2 MiB) -> phys [0, 2 MiB)) with a 4 KiB-granularity PT so we
+ * can stamp per-page W^X permissions across the kernel image:
+ *   .text/.multiboot  R-X       (no W, no NX)
+ *   .rodata           R-NX      (no W, NX set)
+ *   .data/.bss/stack  RW-NX     (RW, NX set)
+ *
+ * Every kernel section currently sits inside the first 2 MiB phys window
+ * because the image is ~120 KiB and the early PM stack lives at phys
+ * [0x80000, 0x90000). One PT (4 KiB) covers the whole window with 512
+ * 4 KiB PTEs -- cheap and surgical. Anything outside the kernel image
+ * (BIOS data area, unused low phys) gets the conservative RW-NX default
+ * so a write-where bug cannot land executable bytes there.
+ *
+ * Pattern mirrors xv6-public's vm.c per-section R/W setup (it predates
+ * NX so it only enforces R vs RW), threaded through PAE for NX support.
+ * Refs: Intel SDM Vol 3A §4.6 (page-level protections) + serenity
+ *       Kernel/Arch/x86_64/PageDirectory.cpp (kernel image NX split). */
+static void kernel_wx_install_pt(void)
+{
+	unsigned int pt_phys = pmm_alloc();
+	zero_frame(pt_phys);
+	pae_entry_t *pt = KVA(pt_phys);
+
+	unsigned int text_lo   = (unsigned int)__kernel_text_start;
+	unsigned int text_hi   = (unsigned int)__kernel_text_end;
+	unsigned int rodata_lo = (unsigned int)__kernel_rodata_start;
+	unsigned int rodata_hi = (unsigned int)__kernel_rodata_end;
+
+	pae_entry_t nx = g_nx_enabled ? PG_NX : 0;
+
+	for (unsigned int i = 0; i < PT_ENTRIES; i++) {
+		unsigned int virt = KERNBASE + i * PAGE_4KB;
+		unsigned int phys = i * PAGE_4KB;
+		pae_entry_t  pte  = (pae_entry_t)phys | 1ULL;     /* P */
+
+		if (virt >= text_lo && virt < text_hi) {
+			/* R-X: clear RW, clear NX. */
+		} else if (virt >= rodata_lo && virt < rodata_hi) {
+			/* R-NX: clear RW, set NX. */
+			pte |= nx;
+		} else {
+			/* RW-NX: everything else (data, bss, stack, BIOS scratch). */
+			pte |= 2ULL;
+			pte |= nx;
+		}
+		pt[i] = pte;
+	}
+
+	pae_entry_t *pd2 = KVA(kernel_pd2_phys);
+	pd2[0] = (pae_entry_t)pt_phys | 3ULL;     /* P|RW, no PS -> 4 KiB PT */
 }
 
 static void wire_kernel_pdpt(pae_entry_t *pdpt)
@@ -161,9 +245,15 @@ void paging_init(void)
 	 * PDPT that:
 	 *   - DROPS identity-low (PDPT[0] = 0 until a user proc populates it)
 	 *   - SHARES kernel PDs (PD1/PD2/PD3) across every per-proc PDPT.
-	 * Same xv6 pattern that the v0.4 higher-half work introduced, just
-	 * lifted to PAE format. */
+	 *   - SPLITS PD2[0] into a 4 KiB PT so per-section W^X permissions
+	 *     can be stamped on the kernel image (.text RX, .rodata R-NX,
+	 *     .data/.bss RW-NX).
+	 *
+	 * Same xv6 pattern the v0.4 higher-half work introduced, lifted to
+	 * PAE with kernel W^X on top. */
+	g_nx_enabled = cpuid_has_nx();
 	build_kernel_pds();
+	kernel_wx_install_pt();
 
 	unsigned int pdpt_phys = pmm_alloc();
 	zero_frame(pdpt_phys);
@@ -173,7 +263,8 @@ void paging_init(void)
 
 	page_pdpt = pdpt;
 	/* PAE was already enabled by kentry; just swap CR3 to the runtime
-	 * PDPT. Subsequent paging_init_user_pgdir installs PD0 entries. */
+	 * PDPT. CR3 reload also flushes the TLB so the kernel image PT
+	 * supersedes the bootstrap PSE PDE in time for the next fetch. */
 	load_cr3_active();
 }
 
