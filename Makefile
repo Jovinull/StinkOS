@@ -296,6 +296,17 @@ $(BUILD)/rs-alloc.elf: apps/crt0.s apps/rust/rs-alloc/Cargo.toml \
 	      --no-whole-archive \
 	      $(LIBSTINK_OBJS) $(LIBGCC)
 
+$(BUILD)/rs-stdio.elf: apps/crt0.s apps/rust/rs-stdio/Cargo.toml \
+                      apps/rust/rs-stdio/src/lib.rs \
+                      apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                      $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-stdio/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-stdio.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_stdio.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
 $(BUILD)/anim.elf: apps/crt0.s apps/anim.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
@@ -421,7 +432,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/exitcode.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/exitcode.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -486,6 +497,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  MOUNTTEST.ELF=$(BUILD)/mounttest.elf \
 	  RS-HELLO.ELF=$(BUILD)/rs-hello.elf \
 	  RS-ALLOC.ELF=$(BUILD)/rs-alloc.elf \
+	  RS-STDIO.ELF=$(BUILD)/rs-stdio.elf \
 	  EXITCODE.ELF=$(BUILD)/exitcode.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
@@ -598,6 +610,11 @@ smoke-rs-alloc: all
 # parent's sys_wait() return value.
 smoke-exitcode: all
 	@python3 tools/smoke-exitcode.py
+
+# Rust stdio shim smoke (Tier 2.2): exercises println!/eprintln!/
+# alloc::format! through the shared `libstink` Rust crate.
+smoke-rs-stdio: all
+	@python3 tools/smoke-rs-stdio.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
