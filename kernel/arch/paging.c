@@ -29,6 +29,7 @@
 #include "pmm.h"
 #include "memlayout.h"
 #include "cpuid.h"
+#include "serial.h"
 
 /* NX bit lives at bit 63 of an 8-byte PTE/PDE (Intel SDM Vol 3A §4.6.2).
  * On 32-bit literals: split as two halves so the constant is well-formed
@@ -341,6 +342,11 @@ int paging_handle_cow_fault(unsigned int va)
 	pae_entry_t entry = *pte;
 	if (!(entry & PG_PRESENT)) return 0;
 	if (!(entry & PG_COW)) return 0;
+	serial_write("cow: fault va=0x");
+	serial_write_hex(va);
+	serial_write(" ref=");
+	serial_write_dec(pmm_ref((unsigned int)(entry & FRAME_MASK_4KB)));
+	serial_putc('\n');
 
 	unsigned int old_frame = (unsigned int)(entry & FRAME_MASK_4KB);
 	pae_entry_t  perms_kept = entry & ~((pae_entry_t)PG_COW | FRAME_MASK_4KB);
