@@ -75,6 +75,9 @@ db_col:
 	jl db_row
 	ret
 
+# Writable globals go in .data so user W^X (PT NX on data, R-X on text)
+# does not turn the `subl $STEP, cur_y` style writes into #PF.
+.section .data
 cur_x:       .long 100
 cur_y:       .long 100
 block_color: .long 0x00FF00

@@ -56,6 +56,9 @@ _Static_assert(sizeof(struct elf32_phdr) == 32, "elf32_phdr must be 32 bytes");
 #define PT_LOAD      1
 #define ELFCLASS32   1
 #define ELFDATA2LSB  1
+#define PF_X         1
+#define PF_W         2
+#define PF_R         4
 
 #define SECTOR_SIZE  512u
 #define MAX_PHDRS_BYTES 4096u            /* generous: a typical app has 2-3 phdrs */
@@ -182,6 +185,14 @@ int elf_load(unsigned int lba, unsigned int sectors, unsigned int *entry)
 				return 1;
 		for (u32 k = ph->p_filesz; k < ph->p_memsz; k++)
 			dst[k] = 0;
+
+		/* Now that the segment bytes are in place, downgrade its PTEs
+		 * to the W^X permissions declared by p_flags. Done last so the
+		 * loader's own writes above always succeed against the default
+		 * RW mapping established by paging_init_user_pgdir. */
+		paging_user_set_segment_perms(ph->p_vaddr, ph->p_memsz,
+		                              (ph->p_flags & PF_X) != 0,
+		                              (ph->p_flags & PF_W) != 0);
 	}
 
 	if (!entry_loaded)
