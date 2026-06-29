@@ -71,7 +71,8 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_stdio.o $(BUILD)/libstink_posix.o \
                 $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
                 $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o \
-                $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o
+                $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o \
+                $(BUILD)/libstink_syms.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -174,6 +175,13 @@ $(BUILD)/%.o: %.s | $(BUILD)
 $(BUILD)/libstink_alloc.o: lib/libstink_alloc.c lib/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_alloc.c -o $(BUILD)/libstink_alloc.o
 
+# Non-inline shims for every libstink syscall wrapper. Existing C apps
+# inline through libstink.h and never reference these symbols (so
+# --gc-sections drops them); Rust apps import them via `extern "C"`
+# because Rust cannot reach into a C inline header.
+$(BUILD)/libstink_syms.o: lib/libstink_syms.c | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_syms.c -o $(BUILD)/libstink_syms.o
+
 $(BUILD)/libstink_printf.o: lib/libstink_printf.c lib/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_printf.c -o $(BUILD)/libstink_printf.o
 
@@ -242,6 +250,36 @@ $(BUILD)/mounttest.elf: apps/crt0.s apps/mounttest.c lib/libstink.h apps/app.ld 
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/mounttest.c -o $(BUILD)/mounttest_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/mounttest.elf $(BUILD)/crt0.o $(BUILD)/mounttest_app.o $(LIBSTINK_OBJS)
+
+# Rust userland (v0.9+). Cargo is invoked through the user's standard
+# rustup install (~/.cargo/bin); add it to PATH if your shell hasn't.
+# Custom target spec apps/rust/i686-stinkos.json + -Z build-std=core
+# means rustc compiles `core` from source for our bare-metal target;
+# requires nightly toolchain + rust-src component (install with
+# `rustup toolchain install nightly --component rust-src`).
+#
+# The Rust crate is a `staticlib` (.a) that exports `main` as extern
+# "C"; the same C crt0.s used for every other app calls into it. All
+# syscalls come from $(BUILD)/libstink_syms.o (non-inline shims so
+# Rust's extern "C" can resolve them).
+RUST_TARGET_JSON = apps/rust/i686-stinkos.json
+CARGO ?= cargo
+CARGO_FLAGS = +nightly build --release \
+              --target $(RUST_TARGET_JSON) \
+              -Z build-std=core \
+              -Z unstable-options \
+              -Z json-target-spec \
+              --target-dir $(BUILD)/rust
+
+$(BUILD)/rs-hello.elf: apps/crt0.s apps/rust/rs-hello/Cargo.toml \
+                      apps/rust/rs-hello/src/lib.rs $(RUST_TARGET_JSON) \
+                      apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-hello/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-hello.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_hello.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
 
 $(BUILD)/anim.elf: apps/crt0.s apps/anim.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
@@ -368,7 +406,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -430,7 +468,8 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  FBDEMO.ELF=$(BUILD)/fbdemo.elf \
 	  WXATTACK.ELF=$(BUILD)/wxattack.elf \
 	  COWTEST.ELF=$(BUILD)/cowtest.elf \
-	  MOUNTTEST.ELF=$(BUILD)/mounttest.elf"; \
+	  MOUNTTEST.ELF=$(BUILD)/mounttest.elf \
+	  RS-HELLO.ELF=$(BUILD)/rs-hello.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
 	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
@@ -523,6 +562,13 @@ smoke-cow: all
 # prefix-routed fs API matches the bytes written.
 smoke-vfs-mounts: all
 	@python3 tools/smoke-vfs-mounts.py
+
+# Rust toolchain smoke: boots, opens the shell, runs `rs-hello`, asserts
+# the Rust extern "C" main() called sys_log through the libstink_syms
+# shims (proves the full toolchain pipeline: cargo + build-std + custom
+# i686-stinkos target + libstink_syms linkage). Tier 1.1 milestone.
+smoke-rs-hello: all
+	@python3 tools/smoke-rs-hello.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
