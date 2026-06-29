@@ -100,8 +100,10 @@ jobs:
         run: |
           mkdir -p _pages/pkg _pages/images
           # Static landing + stylesheet (authored under pages/ in the repo).
-          cp pages/index.html _pages/index.html
-          cp pages/style.css  _pages/style.css
+          cp pages/index.html  _pages/index.html
+          cp pages/style.css   _pages/style.css
+          cp pages/robots.txt  _pages/robots.txt
+          cp pages/sitemap.xml _pages/sitemap.xml
           # Screenshots live at images/ in the repo so README on GitHub and
           # the Pages site share the same source. Both reference images/foo.png.
           cp images/*.png     _pages/images/ 2>/dev/null || true
