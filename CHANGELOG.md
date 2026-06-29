@@ -6,6 +6,56 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+## [0.5.0] -- PAE + W^X
+
+Section 7 of the roadmap: paging upgrades from 32-bit 2-level (4 MiB
+PSE) to PAE 3-level (PDPT -> PD -> PT, 8-byte entries, NX at bit 63),
+and W^X lands across kernel image + every user process. The kernel
+image now refuses execution from its own .data / .bss and refuses
+writes to .text / .rodata. Userland apps are linked with three program
+headers so each segment's PTE permissions match the ELF p_flags:
+.text R-X, .rodata R-NX, .data + .bss RW-NX. A new `wxattack` ELF
+proves the gate fires: it stamps a one-byte shellcode into a global
+and calls it via a function pointer; the CPU page-faults at the first
+instruction fetch and the kernel kills the process.
+
+### Added
+
+- CPUID feature detect for PAE + NX (`kernel/arch/cpuid.{c,h}`) plus a
+  boot-time serial feature summary
+- `IA32_EFER.NXE` enabled in `kentry.s` under a CPUID guard (skipped on
+  CPUs that don't advertise NX so the WRMSR can't fault)
+- Bootstrap PAE paging in `kentry.s`: PDPT (4 entries) + 4 PDs of
+  2 MiB PSE PDEs covering identity-low, identity-mid, the high-half
+  KERNBASE mirror and the DEVSPACE MMIO window
+- `PG_NX` + PAE flag macros in `memlayout.h`
+- Per-proc PDPT in `paging.c`: PDPT[0] = own PD0 (user space), slots
+  [1..3] = three shared kernel PDs across every proc
+- `walk_user_pte` (xv6-riscv-style 3-level walk) underpins
+  `paging_init_user_pgdir`, `paging_copy_user_pgdir`,
+  `paging_destroy_user_pgdir`, and the new per-segment perm API
+- Kernel W^X: PD2[0] split into a 4 KiB PT so .text gets R-X, .rodata
+  gets R-NX and .data / .bss / stack get RW-NX. The rest of the
+  direct map and DEVSPACE PSE PDEs carry NX so the kernel cannot jump
+  into ordinary data frames
+- Kernel section symbols (`__kernel_text_start/end`,
+  `__kernel_rodata_start/end`, `__kernel_data_start/end`) in
+  `boot/kernel.ld`
+- User W^X via `paging_user_set_segment_perms(va, len, exec, write)`,
+  called by `elf_load` after each PT_LOAD's bytes are in place
+- Three-PHDR `apps/app.ld` (text R+X, rodata R-only, data R+W) so the
+  loader has real `p_flags` to act on
+- `apps/wxattack.c` adversarial ELF + `test-headless` assertion
+  `wx attack blocked`
+- `test-headless` now boots QEMU with `-cpu Penryn` so TCG advertises
+  NX (without it the kernel skips `EFER.NXE` under its CPUID guard and
+  W^X cannot be exercised)
+
+### Changed
+
+- `apps/game.s` writable globals moved from `.text` into `.section .data`
+  so they don't trip the user W^X gate on the first write
+
 ## [0.4.0] -- multitasking proper + higher-half kernel
 
 §1 of the roadmap closes: per-process page directory, `sys_fork`,
