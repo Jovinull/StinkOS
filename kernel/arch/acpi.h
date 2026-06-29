@@ -38,4 +38,12 @@ const void *acpi_find_table(const char *sig4);
  * should fall back to the legacy port-0x604 / 0xB004 / VBox path. */
 int acpi_shutdown(void);
 
+/* MADT-derived topology. All return 0 when MADT is absent or did not
+ * advertise the relevant entry. No SMP wiring today; these are the
+ * inputs the future SMP bring-up will need (LAPIC base for IPI/timer,
+ * IOAPIC base for real IRQ routing, CPU count for per-core stacks). */
+unsigned int acpi_cpu_count(void);
+unsigned int acpi_lapic_base(void);
+unsigned int acpi_ioapic_base(void);
+
 #endif
