@@ -46,6 +46,14 @@ jobs:
           i386-elf-as --version | head -1
           i386-elf-ld --version | head -1
 
+      # Rust nightly + rust-src for the v0.9 userland (cargo build-std
+      # needs core/alloc compiled from source for the i686-stinkos
+      # bare-metal target).
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
       - name: Build OS image
         run: make
 
