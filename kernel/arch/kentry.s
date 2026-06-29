@@ -73,13 +73,19 @@ _phys_entry:
 	wrmsr
 .Lnxe_skip:
 
-	# CR4.PSE so the bootstrap pgdir's 4 MiB PDEs are honored.
+	# CR4 = PSE (bit 4) | PAE (bit 5). PAE switches the page-walker to
+	# 3-level (PDPT -> PD -> PT) with 8-byte entries; PSE under PAE
+	# means PD entries with PS=1 map 2 MiB instead of 4 MiB. Both bits
+	# must be set BEFORE CR0.PG goes on so the CPU reads CR3 as a
+	# PDPT pointer when paging flips live.
 	mov %cr4, %eax
-	or  $0x10, %eax
+	or  $0x30, %eax
 	mov %eax, %cr4
 
-	# CR3 = phys of bootstrap pgdir.
-	mov $(bootstrap_pgdir - KERNBASE), %eax
+	# CR3 = phys of bootstrap PDPT (32-byte structure, 4 KiB-aligned
+	# here for convenience even though PAE only requires 32-byte
+	# alignment).
+	mov $(bootstrap_pdpt - KERNBASE), %eax
 	mov %eax, %cr3
 
 	# CR0.PG -- paging on.
@@ -117,33 +123,82 @@ hang:
 	hlt
 	jmp hang
 
-# Bootstrap page directory. 1024 PDEs of 4 MiB PSE entries.
-# Layout chosen so the CPU can keep fetching from both LOW phys (during
-# the moment between CR0.PG = 1 and the indirect jump to high virt) AND
-# from the HIGH-half virt after the jump:
-#   PDE[0..511]      identity-map [0, 2 GiB)        (PG | RW | PS)
-#   PDE[512..575]    high-half mirror of phys [0, 256 MB) -> virt [KERNBASE, +256MB)
-#   PDE[576..1023]   identity-map [2.25 GiB, 4 GiB) (so MMIO above
-#                    DEVSPACE keeps virt = phys)
+# Bootstrap PAE paging structures.
+#
+# Layout:
+#   CR3 -> bootstrap_pdpt (4 entries x 8 bytes)
+#     PDPT[0] -> bootstrap_pd0 -> identity [0, 1 GiB)        (PSE 2 MiB)
+#     PDPT[1] -> bootstrap_pd1 -> identity [1, 2 GiB)        (PSE 2 MiB)
+#     PDPT[2] -> bootstrap_pd2 -> high-half mirror [KERNBASE,
+#                                  KERNBASE+1 GiB) -> phys [0, 1 GiB)
+#     PDPT[3] -> bootstrap_pd3 -> identity [3, 4 GiB)        (PSE 2 MiB)
+#
+# Identity-low (PD0) keeps EIP valid between CR0.PG=1 and the indirect
+# jump to high virt. High-half mirror (PD2) is what the C kernel lives
+# in. DEVSPACE identity (PD3) covers MMIO above 0xC0000000 (LFB at
+# 0xFD000000, e1000 BAR ~0xFEB80000). paging.c rebuilds a runtime
+# pgdir in paging_init and drops PD0 entirely once paging is live.
+#
+# PDPT entries (Intel SDM Vol 3A Table 4-8) have NO RW/US bits -- the
+# protection lives in PD/PT entries; PDPT carries only P (bit 0).
+#
+# PSE PAE PDE format (Intel SDM Vol 3A Table 4-9): bits 0-2 P|RW|US,
+# bit 7 PS=1 to mark the 2 MiB huge mapping, bits 21+ are the 2 MiB-
+# aligned phys frame, bit 63 is NX.
 .section .data
-.align 4096
-.global bootstrap_pgdir
-bootstrap_pgdir:
-	# PDE[0..511] identity [0, 2 GiB)
+.balign 4096
+.global bootstrap_pdpt
+bootstrap_pdpt:
+	# `+ 1` instead of `| 1` because GAS rejects bitwise ops on
+	# relocatable symbol differences. The PD frames are 4 KiB-aligned
+	# so the low 12 bits are zero -- `+` and `|` produce identical
+	# bytes for the present-bit set.
+	.long (bootstrap_pd0 - KERNBASE) + 1
+	.long 0
+	.long (bootstrap_pd1 - KERNBASE) + 1
+	.long 0
+	.long (bootstrap_pd2 - KERNBASE) + 1
+	.long 0
+	.long (bootstrap_pd3 - KERNBASE) + 1
+	.long 0
+
+.balign 4096
+bootstrap_pd0:
+	# 512 x 2 MiB PSE entries identity-mapping phys [0, 1 GiB).
 	.set i, 0
 	.rept 512
-		.long (i * 0x400000) | 0x83
+		.long (i * 0x200000) | 0x83
+		.long 0
 		.set i, i + 1
 	.endr
-	# PDE[512..575] high-half mirror [0, 256 MB) at virt KERNBASE
+
+.balign 4096
+bootstrap_pd1:
+	# identity [1 GiB, 2 GiB)
 	.set i, 0
-	.rept 64
-		.long (i * 0x400000) | 0x83
+	.rept 512
+		.long ((i + 512) * 0x200000) | 0x83
+		.long 0
 		.set i, i + 1
 	.endr
-	# PDE[576..1023] identity continues at [576*4MB, 4GB)
-	.set i, 576
-	.rept 1024 - 576
-		.long (i * 0x400000) | 0x83
+
+.balign 4096
+bootstrap_pd2:
+	# high-half mirror: virt [KERNBASE, KERNBASE+1 GiB) -> phys [0, 1 GiB)
+	.set i, 0
+	.rept 512
+		.long (i * 0x200000) | 0x83
+		.long 0
+		.set i, i + 1
+	.endr
+
+.balign 4096
+bootstrap_pd3:
+	# identity [3 GiB, 4 GiB) -- covers DEVSPACE MMIO at 0xFD000000+
+	# (LFB, e1000 BAR, etc).
+	.set i, 0
+	.rept 512
+		.long ((i + 1536) * 0x200000) | 0x83
+		.long 0
 		.set i, i + 1
 	.endr
