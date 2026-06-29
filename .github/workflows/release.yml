@@ -69,15 +69,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF##*/}"
-          # Pull title + body straight from the annotated git tag so the
-          # GitHub release mirrors what `git show <tag>` already prints.
-          # Per-feature tags (v0.5.0..) are annotated with the relevant
-          # CHANGELOG section; their first line is the title.
-          BODY=$(git tag -l --format='%(contents)' "$TAG")
+          # Extract annotation body via `git cat-file tag` -- skips the
+          # tag header (object/type/tag/tagger lines + blank separator)
+          # and returns the actual message. More reliable than the
+          # `git tag -l --format='%(contents)'` path which has bitten
+          # us on older fetched-but-shallow checkouts.
+          RAW=$(git cat-file tag "$TAG")
+          BODY=$(echo "$RAW" | sed '1,/^$/d')
           TITLE=$(echo "$BODY" | head -n 1)
           NOTES_FILE=$(mktemp)
-          # Strip the title line + blank line that follows it, keep the rest.
           echo "$BODY" | tail -n +3 > "$NOTES_FILE"
+
+          # Debug: log what we extracted so a future regression is easy
+          # to spot from the workflow output without re-running locally.
+          echo "::group::extracted tag annotation"
+          echo "TAG=$TAG"
+          echo "TITLE='$TITLE'"
+          echo "BODY length=$(echo "$BODY" | wc -c)"
+          echo "--- notes-file ---"
+          cat "$NOTES_FILE"
+          echo "::endgroup::"
+
           if [ ! -s "$NOTES_FILE" ]; then
             echo "StinkOS $TAG -- see CHANGELOG / commits for details." > "$NOTES_FILE"
           fi
