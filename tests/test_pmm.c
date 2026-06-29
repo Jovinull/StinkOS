@@ -10,17 +10,31 @@
  *   - bounds reject: pmm_free of an out-of-range or NULL address is a no-op
  *   - total / free accounting: pmm_total_pages / pmm_free_pages stay in
  *     sync after every operation
+ *   - refcount (v0.7 COW): alloc sets refcount=1, ref_inc bumps, free
+ *     decrements + only returns to pool at 0
  */
 #include <stdio.h>
 
 #define FRAME_SIZE 4096u
 #define FREE_MAX   1024
+#define MAX_FRAMES 8192
 
 static unsigned int start_frame;
 static unsigned int next_frame;
 static unsigned int end_frame;
 static unsigned int free_list[FREE_MAX];
 static int free_count;
+static unsigned char refcount[MAX_FRAMES];
+
+static int in_range(unsigned int frame)
+{
+	return frame >= start_frame && frame < end_frame;
+}
+
+static unsigned int frame_idx(unsigned int frame)
+{
+	return (frame - start_frame) / FRAME_SIZE;
+}
 
 static void pmm_init(unsigned int start, unsigned int end)
 {
@@ -28,17 +42,19 @@ static void pmm_init(unsigned int start, unsigned int end)
 	next_frame  = start_frame;
 	end_frame   = end & ~(FRAME_SIZE - 1);
 	free_count  = 0;
+	for (unsigned int i = 0; i < MAX_FRAMES; i++) refcount[i] = 0;
 }
 
 static unsigned int pmm_alloc(void)
 {
-	if (free_count > 0) return free_list[--free_count];
-	if (next_frame + FRAME_SIZE <= end_frame) {
-		unsigned int f = next_frame;
+	unsigned int frame = 0;
+	if (free_count > 0) frame = free_list[--free_count];
+	else if (next_frame + FRAME_SIZE <= end_frame) {
+		frame = next_frame;
 		next_frame += FRAME_SIZE;
-		return f;
-	}
-	return 0;
+	} else return 0;
+	refcount[frame_idx(frame)] = 1;
+	return frame;
 }
 
 static unsigned int pmm_total_pages(void)
@@ -55,8 +71,26 @@ static unsigned int pmm_free_pages(void)
 static void pmm_free(unsigned int frame)
 {
 	frame &= ~(FRAME_SIZE - 1);
-	if (frame < start_frame || frame >= end_frame) return;
+	if (!in_range(frame)) return;
+	unsigned int idx = frame_idx(frame);
+	if (refcount[idx] == 0) return;
+	if (--refcount[idx] > 0) return;
 	if (free_count < FREE_MAX) free_list[free_count++] = frame;
+}
+
+static void pmm_ref_inc(unsigned int frame)
+{
+	frame &= ~(FRAME_SIZE - 1);
+	if (!in_range(frame)) return;
+	unsigned int idx = frame_idx(frame);
+	if (refcount[idx] < 255u) refcount[idx]++;
+}
+
+static unsigned int pmm_ref(unsigned int frame)
+{
+	frame &= ~(FRAME_SIZE - 1);
+	if (!in_range(frame)) return 0;
+	return refcount[frame_idx(frame)];
 }
 
 static int expect_uint(const char *label, unsigned int got, unsigned int want)
@@ -124,6 +158,37 @@ int main(void)
 	failures += expect_uint("LIFO 1st re-alloc = cc",      pmm_alloc(), cc);
 	failures += expect_uint("LIFO 2nd re-alloc = bb",      pmm_alloc(), bb);
 	failures += expect_uint("LIFO 3rd re-alloc = aa",      pmm_alloc(), aa);
+
+	/* Refcount (v0.7 COW prerequisite): fresh alloc = ref 1, ref_inc bumps,
+	 * free decrements + only returns to pool at 0. */
+	pmm_init(0x100000, 0x110000);
+	unsigned int r = pmm_alloc();
+	failures += expect_uint("refcount: fresh alloc = 1",   pmm_ref(r),        1);
+	pmm_ref_inc(r);
+	failures += expect_uint("refcount: after ref_inc = 2", pmm_ref(r),        2);
+	pmm_ref_inc(r);
+	failures += expect_uint("refcount: 3rd ref = 3",       pmm_ref(r),        3);
+	pmm_free(r);
+	failures += expect_uint("refcount: free still held = 2", pmm_ref(r),      2);
+	failures += expect_uint("refcount: not yet pooled",    pmm_free_pages(),  15);
+	pmm_free(r);
+	failures += expect_uint("refcount: 2nd drop = 1",      pmm_ref(r),        1);
+	pmm_free(r);
+	failures += expect_uint("refcount: dropped to 0",      pmm_ref(r),        0);
+	failures += expect_uint("refcount: now in pool",       pmm_free_pages(),  16);
+	failures += expect_uint("refcount: re-alloc returns it", pmm_alloc(),     r);
+	failures += expect_uint("refcount: re-alloc resets to 1", pmm_ref(r),     1);
+
+	/* Refcount: extra free past zero is a no-op (poison guard). */
+	pmm_init(0x100000, 0x110000);
+	unsigned int p = pmm_alloc();
+	pmm_free(p);
+	pmm_free(p);  /* double-free: must NOT corrupt the pool */
+	failures += expect_uint("refcount: double free no-op", pmm_free_pages(),  16);
+
+	/* Refcount: ref_inc/ref on out-of-range = no-op / 0. */
+	failures += expect_uint("refcount: oob ref = 0",       pmm_ref(0),        0);
+	pmm_ref_inc(0);  /* must not crash */
 
 	printf("\n%d failure(s)\n", failures);
 	return failures == 0 ? 0 : 1;
