@@ -343,9 +343,13 @@ void syscall_dispatch(struct regs *r)
 	case 4:                                    /* SYS_ALLOC: -> user page or 0 */
 		r->eax = paging_user_alloc();
 		break;
-	case 5:                                    /* SYS_EXIT: back to the shell or menu */
+	case 5: {                                  /* SYS_EXIT: ebx = exit code */
+		struct proc *cur = proc_current();
+		if (cur)
+			cur->exit_code = (int)r->ebx;
 		app_return();                      /* does not return */
 		break;
+	}
 	case 41: {                                 /* SYS_EXEC: ebx=name -> -1 if no such app */
 		char kname[16];
 		if (copy_user_name(r->ebx, kname) != 0) {

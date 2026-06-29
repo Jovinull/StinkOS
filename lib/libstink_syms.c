@@ -47,6 +47,12 @@ void sys_exit(void)
 	__builtin_unreachable();
 }
 
+void sys_exit_code(int code)
+{
+	__syscall(5, code, 0, 0);
+	__builtin_unreachable();
+}
+
 unsigned int sys_ticks(void)
 {
 	return (unsigned int)__syscall(6, 0, 0, 0);
