@@ -72,6 +72,33 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
                 $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o
 
+
+# OpenTyrian port build configuration
+TYRIAN_DIR   = apps/tyrian/src
+TYRIAN_SHIMS = apps/opentyrian-shims
+TYRIAN_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
+                -ffunction-sections -fdata-sections \
+                -fno-builtin -fno-strict-aliasing \
+                -I $(TYRIAN_SHIMS) -I apps/doom-shims -I lib -I apps \
+                -w
+
+TYRIAN_SRCS = $(notdir $(wildcard $(TYRIAN_DIR)/*.c))
+TYRIAN_OBJS = $(addprefix build/tyrian/, $(TYRIAN_SRCS:.c=.o))
+build/tyrian/stink_sdl.o: apps/opentyrian-shims/stink_sdl.c | build/tyrian
+	$(CC) $(TYRIAN_CFLAGS) -c $< -o $@
+TYRIAN_ALL_OBJS = $(TYRIAN_OBJS) build/tyrian/stink_sdl.o
+
+build/tyrian:
+	mkdir -p build/tyrian
+
+build/tyrian/%.o: $(TYRIAN_DIR)/%.c | build/tyrian
+	$(CC) $(TYRIAN_CFLAGS) -c $< -o $@
+
+build/tyrian.elf: apps/crt0.s apps/app.ld $(TYRIAN_ALL_OBJS) $(LIBSTINK_OBJS) | build
+	$(AS) -O0 apps/crt0.s -o build/crt0.o
+	$(LD) $(APP_LDFLAGS) -o build/tyrian.elf build/crt0.o $(TYRIAN_ALL_OBJS) $(LIBSTINK_OBJS) $(LIBGCC)
+
+
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
 # Doom code path closest to a generic 32-bit Unix. -O2 is necessary -- without
@@ -399,6 +426,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  DOOM1.ELF=$(BUILD)/doom1.elf \
 	  DOOM2.ELF=$(BUILD)/doom2.elf \
 	  FREEDM.ELF=$(BUILD)/freedm.elf \
+	  TYRIAN.ELF=$(BUILD)/tyrian.elf \
 	  FBDEMO.ELF=$(BUILD)/fbdemo.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
