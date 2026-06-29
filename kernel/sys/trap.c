@@ -2,6 +2,7 @@
  * C-side trap/IRQ handlers the assembly stubs call into. The syscall layer
  * (int 0x80) lives in syscall.c; this file just routes there. */
 #include "defs.h"
+#include "paging.h"
 
 /* ---- assembly stubs ---- */
 extern void idt_load(unsigned int idt_ptr_addr);
@@ -148,9 +149,20 @@ void isr_handler(struct regs *r)
 		return;
 	}
 
-	if ((r->cs & 3) == 3) {                    /* fault from ring 3: kill the app */
+	if ((r->cs & 3) == 3) {                    /* fault from ring 3 */
 		unsigned int cr2 = 0;
 		__asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+		/* COW resolution: #PF (vector 14) with err_code bit 0 set
+		 * (protection violation, not page-missing) + bit 1 set (write)
+		 * + bit 2 set (user) is the signature of a write to a shared
+		 * post-fork page. paging_handle_cow_fault returns 1 when the
+		 * page has PG_COW and was privatized / unlocked; we simply
+		 * iret back and the instruction retries. Returns 0 for real
+		 * W^X violations or non-COW protection faults -- those fall
+		 * through to the kill path below. */
+		if (r->int_no == 14 && (r->err_code & 0x7u) == 0x7u &&
+		    paging_handle_cow_fault(cr2))
+			return;
 		serial_write("app: fault, killed (exception ");
 		serial_write_dec(r->int_no);
 		serial_write(", eip=0x");
