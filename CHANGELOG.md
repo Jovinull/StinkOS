@@ -6,6 +6,47 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+## [0.8.0] -- VFS multi-mount
+
+`kernel/fs/fs.c` is now routed through a 2-slot mount table behind an
+`fs_ops` dispatch. Filenames may carry an optional DOS-style 2-char
+prefix (`A:foo` / `B:foo`) that picks the mount slot; no prefix
+defaults to slot 0 (the boot mount). A new `SYS_MOUNT` syscall lets
+userland register an additional StinkFS region at runtime, so a second
+disk image can be wired up and accessed under `B:` without touching
+the primary mount.
+
+The bundled backend stays StinkFS; the ops indirection is zero-overhead
+today (single static dispatch) and lets a future DevFS / FATFS / ProcFS
+plug in with a new ops table + one mount call -- no plumbing rewrite.
+
+### Added
+
+- `struct fs_mount` + `struct fs_ops` in `kernel/fs/fs.c`; per-slot dir
+  buffer, IO bounce, LBA bounds, ATA drive index, ops table
+- `stinkfs_ops` registers all existing fs.c logic behind the ops table;
+  slot 0 (`A:`) auto-registers at `fs_init` with the Makefile-pinned
+  primary location on ATA drive 0
+- `fs_mount_register(slot, drive, dir_lba, data_lba, data_end)` API in
+  `kernel/fs/fs.h`
+- DOS-style prefix resolver inside the fs public API: `A:..`/`B:..`
+  (case-insensitive) routes to the slot; missing prefix = slot 0
+- `SYS_MOUNT` syscall (84): `ebx=(slot<<8)|drive`, `ecx=dir_lba`,
+  `edx=data_lba`, `esi=data_end` -> 0 / -1
+- `sys_mount(slot, drive, dir_lba, data_lba, data_end)` libstink wrapper
+- `apps/mounttest.c` end-to-end validator: registers slot 1 at unused
+  disk LBAs, writes `B:hello` with a marker, reads back, asserts
+  byte-equal, deletes, asserts read-after-delete fails
+- `tools/smoke-vfs-mounts.py` + `make smoke-vfs-mounts` target
+
+### Notes
+
+- `:` is now a reserved character in filenames (interpreted as the
+  prefix separator). No existing apps use it.
+- Slot 0 (`A:`) is the boot mount and cannot be re-mounted at runtime.
+- Mount table is volatile -- mounts evaporate on reboot. A future
+  release can persist `MOUNT.CFG` to slot 0.
+
 ## [0.7.0] -- COW fork
 
 `paging_copy_user_pgdir` no longer eagerly duplicates every user frame.
