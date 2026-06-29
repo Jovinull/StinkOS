@@ -36,6 +36,14 @@ unsigned int paging_user_mapped_pages(void);
 /* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
 int paging_user_range_ok(unsigned int addr, unsigned int len);
 
+/* W^X: re-stamp user PTEs in [va, va+len) with the bits implied by an
+ * ELF PT_LOAD's p_flags (PF_X = exec, PF_W = write). Called by the ELF
+ * loader after each segment's bytes are in place so .text becomes R-X,
+ * .rodata becomes R-NX and .data stays RW-NX. The frame mapping is
+ * preserved -- only permission bits change. */
+void paging_user_set_segment_perms(unsigned int va, unsigned int len,
+                                   int exec, int write);
+
 /* Map the physical LFB at the fixed user virtual address USER_FB_BASE using a
  * 4 MiB PSE PDE with PG_USER. Returns the virtual address the app should use.
  * The mapping is torn down in paging_reset_user_heap so each new app must call

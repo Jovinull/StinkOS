@@ -299,12 +299,46 @@ static pae_entry_t *walk_user_pte(pae_entry_t *pdpt, unsigned int va, int alloc)
 	return &pt[PT_IDX(va)];
 }
 
+/* Default user PTE: present, RW, user, NX (when CPU supports it). Anything
+ * the kernel maps into user space starts non-executable; only an explicit
+ * paging_user_set_segment_perms with exec=1 (from the ELF loader on a
+ * PF_X segment) clears NX so .text becomes runnable. */
+static pae_entry_t user_pte_flags(int exec, int write)
+{
+	pae_entry_t f = 0x5ULL;                     /* P|U */
+	if (write) f |= 0x2ULL;                     /* RW */
+	if (!exec && g_nx_enabled) f |= PG_NX;
+	return f;
+}
+
 static void map_user_page(unsigned int vaddr, unsigned int frame)
 {
 	pae_entry_t *pte = walk_user_pte(page_pdpt, vaddr, 1);
 	if (!pte)
 		return;
-	*pte = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL; /* P|RW|U */
+	*pte = (pae_entry_t)(frame & 0xFFFFF000u) | user_pte_flags(0, 1);
+}
+
+/* Re-stamp the user PTEs covering [va, va+len) with the W^X bits implied
+ * by an ELF segment's p_flags (PF_X = exec, PF_W = write). The frame
+ * mapping is preserved; only the permission bits change. Called from the
+ * ELF loader once per PT_LOAD after the segment bytes are in place. */
+void paging_user_set_segment_perms(unsigned int va, unsigned int len,
+                                   int exec, int write)
+{
+	unsigned int aligned_lo = va & ~(PAGE_4KB - 1u);
+	unsigned int end        = va + len;
+	unsigned int aligned_hi = (end + PAGE_4KB - 1u) & ~(PAGE_4KB - 1u);
+	pae_entry_t  perm       = user_pte_flags(exec, write);
+
+	for (unsigned int v = aligned_lo; v < aligned_hi; v += PAGE_4KB) {
+		pae_entry_t *pte = walk_user_pte(page_pdpt, v, 0);
+		if (!pte || !(*pte & 1ULL))
+			continue;
+		unsigned int frame = (unsigned int)(*pte & FRAME_MASK_4KB);
+		*pte = (pae_entry_t)frame | perm;
+		__asm__ volatile ("invlpg (%0)" : : "r"(v) : "memory");
+	}
 }
 
 static void unmap_user_page(unsigned int vaddr)
@@ -337,16 +371,21 @@ int paging_init_user_pgdir(unsigned int *pdpt_raw)
 	pdpt[0] = (pae_entry_t)pd0_phys | 1ULL;
 	pae_entry_t *pd0 = KVA(pd0_phys);
 
-	/* One 4 KiB PT per USER 2 MiB PDE. */
+	/* One 4 KiB PT per USER 2 MiB PDE. PDE itself stays RW+U so the
+	 * walker can reach the PT; per-page W^X lives on the PTEs. */
 	for (unsigned int p = 0; p < USER_PDES_2MB; p++) {
 		unsigned int pt_phys = pmm_alloc();
 		if (!pt_phys)
 			return -1;
 		zero_frame(pt_phys);
 		unsigned int pd_idx = PD_IDX(USER_BASE) + p;
-		pd0[pd_idx] = (pae_entry_t)pt_phys | 0x7ULL;    /* P|RW|U */
+		pd0[pd_idx] = (pae_entry_t)pt_phys | 0x7ULL;
 	}
 
+	/* Code + stack pages default to RW+U+NX. The ELF loader downgrades
+	 * the .text range to R-X via paging_user_set_segment_perms after
+	 * writing the segment bytes; stack stays RW+NX forever. */
+	pae_entry_t initial = user_pte_flags(0, 1);
 	for (unsigned int i = 0; i < USER_CODE_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
 		if (!frame)
@@ -354,7 +393,7 @@ int paging_init_user_pgdir(unsigned int *pdpt_raw)
 		unsigned int va = USER_CODE + i * PAGE_4KB;
 		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
 		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
-		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL;
+		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | initial;
 	}
 	for (unsigned int i = 0; i < USER_STACK_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
@@ -363,7 +402,7 @@ int paging_init_user_pgdir(unsigned int *pdpt_raw)
 		unsigned int va = USER_STACK_LO + i * PAGE_4KB;
 		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
 		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
-		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL;
+		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | initial;
 	}
 	return 0;
 }
