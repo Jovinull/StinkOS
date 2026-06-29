@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "count": 42,
+  "ratio": 3.14,
+  "tag": "hello\nworld\ttab",
+  "users": [
+    { "id": 1, "name": "alice" },
+    { "id": 2, "name": "bob", "admin": true }
+  ],
+  "empty_obj": {},
+  "empty_arr": [],
+  "deeply": [[[1, 2], [3, 4]], null]
+}
