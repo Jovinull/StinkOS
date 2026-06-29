@@ -990,4 +990,11 @@ int isatty(int fd);
  * callers expect. */
 int fflush(FILE *fp);
 
+/* --- libstink_math --- */
+double sin(double x);
+double cos(double x);
+
+/* --- libstink_gfx --- */
+void sys_drawline(int x0, int y0, int x1, int y1, unsigned int rgb);
+
 #endif
