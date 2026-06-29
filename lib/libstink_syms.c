@@ -66,3 +66,48 @@ int sys_fread(const char *name, void *buf, unsigned int max)
 {
 	return __syscall(9, (int)name, (int)buf, (int)max);
 }
+
+/* Rust's core / alloc emits direct calls to `memcpy` / `memset` /
+ * `memmove` / `memcmp` for slice ops + Vec growth + Drop. libstink.h
+ * declares these `static inline`, which gives every C TU its own copy
+ * but no linkable symbol -- emit non-inline ones here so Rust's
+ * `extern "C"` import resolves. */
+void *memset(void *dst, int v, unsigned int n)
+{
+	unsigned char *p = dst;
+	for (unsigned int i = 0; i < n; i++)
+		p[i] = (unsigned char)v;
+	return dst;
+}
+
+void *memcpy(void *dst, const void *src, unsigned int n)
+{
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+	for (unsigned int i = 0; i < n; i++)
+		d[i] = s[i];
+	return dst;
+}
+
+void *memmove(void *dst, const void *src, unsigned int n)
+{
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+	if (d == s || n == 0)
+		return dst;
+	if (d < s) {
+		for (unsigned int i = 0; i < n; i++) d[i] = s[i];
+	} else {
+		for (unsigned int i = n; i > 0; i--) d[i - 1] = s[i - 1];
+	}
+	return dst;
+}
+
+int memcmp(const void *a, const void *b, unsigned int n)
+{
+	const unsigned char *x = a, *y = b;
+	for (unsigned int i = 0; i < n; i++) {
+		if (x[i] != y[i]) return (int)x[i] - (int)y[i];
+	}
+	return 0;
+}
