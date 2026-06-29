@@ -9,6 +9,9 @@
 /* Math constants */
 #define M_PI 3.14159265358979323846
 
+#define SCREEN_W 1024
+#define SCREEN_H  768
+
 #define MAX_BULLETS 10
 #define MAX_ASTEROIDS 20
 
@@ -153,7 +156,13 @@ static void draw_asteroid(struct Asteroid *a)
 static void draw_bullet(struct Bullet *b)
 {
     if (!b->active) return;
-    sys_fillrect((int)b->x, (int)b->y, 2, 2, FG);
+    int bx = (int)b->x;
+    int by = (int)b->y;
+    if (bx < 0) bx = 0;
+    if (bx > SCREEN_W - 2) bx = SCREEN_W - 2;
+    if (by < 0) by = 0;
+    if (by > SCREEN_H - 2) by = SCREEN_H - 2;
+    sys_fillrect(bx, by, 2, 2, FG);
 }
 
 static void wrap(double *x, double *y)
@@ -281,7 +290,13 @@ void main(void)
         clear_screen();
         if (game_over) {
             /* Simple visual indicator: ship disappears, maybe a red square */
-            sys_fillrect((int)ship.x-10, (int)ship.y-10, 20, 20, 0xFF0000);
+            int ex = (int)ship.x - 10;
+            int ey = (int)ship.y - 10;
+            if (ex < 0) ex = 0;
+            if (ey < 0) ey = 0;
+            if (ex > SCREEN_W - 20) ex = SCREEN_W - 20;
+            if (ey > SCREEN_H - 20) ey = SCREEN_H - 20;
+            sys_fillrect(ex, ey, 20, 20, 0xFF0000);
         } else {
             draw_ship();
         }
