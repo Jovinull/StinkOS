@@ -235,7 +235,7 @@ header h1 .cursor {
 footer {
 	padding: 36px 0;
 	border-top: 1px solid var(--border);
-	color: var(--fg-muted);
+	color: var(--fg-dim);
 	font-size: 0.88rem;
 }
 footer a { color: var(--fg-dim); }

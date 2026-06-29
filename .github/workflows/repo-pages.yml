@@ -106,7 +106,8 @@ jobs:
           cp pages/sitemap.xml _pages/sitemap.xml
           # Screenshots live at images/ in the repo so README on GitHub and
           # the Pages site share the same source. Both reference images/foo.png.
-          cp images/*.png     _pages/images/ 2>/dev/null || true
+          cp images/*.png      _pages/images/ 2>/dev/null || true
+          cp images/*.webp     _pages/images/ 2>/dev/null || true
           # Package binaries + plain manifest the stink-pkg client consumes.
           cp repo/*.stinkpkg  _pages/pkg/
           cp repo/index.txt   _pages/index.txt

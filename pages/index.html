@@ -17,7 +17,7 @@
 <meta name="twitter:description" content="A 32-bit x86 hobby OS with ELF-aware boot, multitasking, TCP/IP, a package manager, and a Doom port. Built from scratch.">
 <meta name="twitter:image" content="https://jovinull.github.io/StinkOS/images/doom_e1m1.png">
 <link rel="canonical" href="https://jovinull.github.io/StinkOS/">
-<link rel="preload" as="image" href="images/doom_e1m1.png">
+<link rel="preload" as="image" href="images/doom_e1m1.webp" type="image/webp" fetchpriority="high">
 <meta name="google-site-verification" content="utWnEPNpnWjf8I1sPLtGmOxQdwQw-526jhRBepi9gjk">
 <script type="application/ld+json">
 {
@@ -56,7 +56,10 @@
 		<a class="cta" href="#getstarted">Get started &rarr;</a>
 		<a class="cta secondary" href="https://github.com/Jovinull/StinkOS">View on GitHub</a>
 		<div class="hero-shot">
-			<img src="images/doom_e1m1.png" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01" loading="eager" fetchpriority="high" width="1024" height="768">
+			<picture>
+				<source srcset="images/doom_e1m1.webp" type="image/webp">
+				<img src="images/doom_e1m1.png" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01" loading="eager" fetchpriority="high" width="1024" height="768">
+			</picture>
 			<p class="caption">Freedoom1 running as a userland app -- ring 3, no GRUB, no Multiboot loader. Bootblock -> ELF kernel -> doomgeneric.</p>
 		</div>
 	</div>
@@ -172,19 +175,31 @@
 		<h2>Screenshots</h2>
 		<div class="shots">
 			<figure>
+				<picture>
+				<source srcset="images/menu.webp" type="image/webp">
 				<img src="images/menu.png" alt="StinkOS boot menu listing 25 userland apps including Doom variants" loading="lazy" width="1024" height="768">
+			</picture>
 				<figcaption>The boot menu lists every userland app on the disk -- 25 apps in this image, picked by ENTER on the highlighted entry.</figcaption>
 			</figure>
 			<figure>
+				<picture>
+				<source srcset="images/doom_walking.webp" type="image/webp">
 				<img src="images/doom_walking.png" alt="Freedoom1 mid-combat with pistol drawn, status bar showing 93% health" loading="lazy" width="1024" height="768">
+			</picture>
 				<figcaption>Freedoom1 mid-combat. Status bar (health, ammo, armor, weapons grid) is the original Doom HUD running through doomgeneric.</figcaption>
 			</figure>
 			<figure>
+				<picture>
+				<source srcset="images/shell_status.webp" type="image/webp">
 				<img src="images/shell_status.png" alt="StinkOS shell running help, mem, ps, and netinfo commands back to back" loading="lazy" width="1024" height="768">
+			</picture>
 				<figcaption>The shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code>. DHCP bound, gateway and DNS picked up from QEMU's user-mode SLIRP, free-page count exposed via <code>SYS_MEMINFO</code>.</figcaption>
 			</figure>
 			<figure>
+				<picture>
+				<source srcset="images/fbdemo.webp" type="image/webp">
 				<img src="images/fbdemo.png" alt="FBDEMO app writing colour bars directly to the linear framebuffer" loading="lazy" width="1024" height="768">
+			</picture>
 				<figcaption><code>SYS_MAP_FB</code> in action -- the framebuffer is mapped read-write into the user address space, so each pixel write is one store instruction, zero syscalls.</figcaption>
 			</figure>
 		</div>
