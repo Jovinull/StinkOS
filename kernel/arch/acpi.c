@@ -85,10 +85,43 @@ struct fadt {
 #define S5_SLP_TYPa  5u                  /* per AML \_S5_ on essentially every PC */
 #define S5_SLP_EN    (1u << 13)          /* PM1_CNT bit 13: arm the sleep transition */
 
+/* MADT (signature "APIC") header + entry types (ACPI 6.5 §5.2.12). */
+struct madt_hdr {
+	struct sdt_hdr h;
+	unsigned int   lapic_phys;
+	unsigned int   flags;                /* bit 0: PCAT_COMPAT (8259 present) */
+} __attribute__((packed));
+
+struct madt_entry_hdr {
+	unsigned char type;
+	unsigned char length;
+} __attribute__((packed));
+
+#define MADT_TYPE_LAPIC   0u
+#define MADT_TYPE_IOAPIC  1u
+
+struct madt_lapic {
+	struct madt_entry_hdr h;
+	unsigned char  acpi_processor_id;
+	unsigned char  apic_id;
+	unsigned int   flags;                /* bit 0: Enabled */
+} __attribute__((packed));
+
+struct madt_ioapic {
+	struct madt_entry_hdr h;
+	unsigned char  ioapic_id;
+	unsigned char  reserved;
+	unsigned int   ioapic_phys;
+	unsigned int   gsi_base;
+} __attribute__((packed));
+
 static int g_available;
 static const struct sdt_hdr *g_tables[MAX_TABLES];
 static unsigned int          g_table_count;
 static unsigned short        g_pm1a_cnt_port;        /* 0 = no FADT */
+static unsigned int          g_cpu_count;
+static unsigned int          g_lapic_base;
+static unsigned int          g_ioapic_base;
 
 static inline void outw(unsigned short port, unsigned short val)
 {
@@ -271,7 +304,49 @@ void acpi_init(void)
 		log_hex(g_pm1a_cnt_port);
 		serial_putc('\n');
 	}
+
+	/* MADT walk: count enabled CPUs and grab LAPIC + first IOAPIC base.
+	 * No SMP wiring today -- these values are consumed by future SMP
+	 * bring-up and by `bootdiag` for visibility. Single-CPU boxes still
+	 * see g_cpu_count = 1 because the BSP advertises itself. */
+	const struct madt_hdr *madt =
+	    (const struct madt_hdr *)acpi_find_table("APIC");
+	if (madt) {
+		g_lapic_base = madt->lapic_phys;
+		const unsigned char *p = (const unsigned char *)madt + sizeof(*madt);
+		const unsigned char *end =
+		    (const unsigned char *)madt + madt->h.length;
+		while (p + sizeof(struct madt_entry_hdr) <= end) {
+			const struct madt_entry_hdr *e =
+			    (const struct madt_entry_hdr *)p;
+			if (e->length == 0 || p + e->length > end) break;
+			if (e->type == MADT_TYPE_LAPIC &&
+			    e->length >= sizeof(struct madt_lapic)) {
+				const struct madt_lapic *l =
+				    (const struct madt_lapic *)e;
+				if (l->flags & 1u) g_cpu_count++;
+			} else if (e->type == MADT_TYPE_IOAPIC &&
+			           e->length >= sizeof(struct madt_ioapic) &&
+			           g_ioapic_base == 0) {
+				const struct madt_ioapic *io =
+				    (const struct madt_ioapic *)e;
+				g_ioapic_base = io->ioapic_phys;
+			}
+			p += e->length;
+		}
+		serial_write("acpi: cpus=");
+		serial_write_dec(g_cpu_count);
+		serial_write(" lapic=");
+		log_hex(g_lapic_base);
+		serial_write(" ioapic=");
+		log_hex(g_ioapic_base);
+		serial_putc('\n');
+	}
 }
+
+unsigned int acpi_cpu_count(void)   { return g_cpu_count; }
+unsigned int acpi_lapic_base(void)  { return g_lapic_base; }
+unsigned int acpi_ioapic_base(void) { return g_ioapic_base; }
 
 int acpi_shutdown(void)
 {
