@@ -51,6 +51,12 @@ jobs:
       - name: Add toolchain to PATH
         run: echo "$HOME/opt/cross/bin" >> $GITHUB_PATH
 
+      # Rust nightly + rust-src for the v0.9 userland.
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
       - name: Build install ISO
         run: make stinkos-install.iso
 
