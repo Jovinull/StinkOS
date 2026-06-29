@@ -4,6 +4,9 @@
 #define _STINK_STDLIB_H
 #include "libstink.h"
 
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
+
 /* getenv is queried by Doom for things like DOOMWADDIR. We have no environment,
  * so always report unset; Doom falls back to the working-directory search path
  * which is what we want anyway. */

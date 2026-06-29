@@ -80,7 +80,7 @@ TYRIAN_CFLAGS = -O2 -m32 -ffreestanding -fno-pie -fno-stack-protector \
                 -ffunction-sections -fdata-sections \
                 -fno-builtin -fno-strict-aliasing \
                 -I $(TYRIAN_SHIMS) -I apps/doom-shims -I lib -I apps \
-                -w
+                -w -DTYRIAN_DIR=\"\"
 
 TYRIAN_SRCS = $(notdir $(wildcard $(TYRIAN_DIR)/*.c))
 TYRIAN_OBJS = $(addprefix build/tyrian/, $(TYRIAN_SRCS:.c=.o))
