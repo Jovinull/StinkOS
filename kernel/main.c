@@ -3,6 +3,7 @@
 #include "defs.h"
 #include "memlayout.h"
 #include "cpuid.h"
+#include "acpi.h"
 
 /* Linker-script symbol pointing at the END of the kernel image. With the
  * higher-half link, __bss_end is a VIRT address (~0x801XXXXX); the PMM
@@ -38,6 +39,14 @@ void kmain(void)
 	serial_write_hex(frame);
 	serial_putc('\n');
 	pmm_free(frame);
+
+	/* ACPI table discovery. Needs the kernel direct map to be live so
+	 * the IA-PC RSDP scan can deref low phys via P2V. No-op if firmware
+	 * doesn't advertise ACPI; downstream callers (sys_shutdown, MADT
+	 * consumers) check acpi_available() before relying on it. */
+	acpi_init();
+	bootdiag_add("firmware: acpi",
+	             acpi_available() ? BOOT_OK : BOOT_ABSENT);
 
 	struct vbe_mode vm;
 	vbe_read(&vm);
