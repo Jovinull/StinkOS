@@ -1,345 +1,370 @@
-/* Paging. The kernel address space is a flat identity map built from 4 MiB
- * pages (PSE). The userland region spans multiple 4 MiB PDEs, each backed by
- * its own 4 KiB page table so the app's code, stack and heap can be mapped at
- * page granularity. Only those user pages carry PG_USER, so every other PDE
- * stays supervisor and a ring-3 access outside the app's region faults. The
- * code and stack are mapped upfront when the kernel boots; heap pages are
- * allocated on demand (an app that never touches the heap costs no frames). */
+/* Paging. v0.5 PAE 3-level walker: CR3 -> PDPT (4 entries) -> PD (512
+ * entries x 8 bytes; PSE PDEs map 2 MiB huge pages, non-PSE PDEs point
+ * at a 4 KiB PT) -> PT (512 entries x 8 bytes). Higher-half kernel
+ * still at virt 0x80100000 (linked unchanged); the PAE switch only
+ * widens the walker so PTE bit 63 (NX) becomes available for §7 W^X.
+ *
+ * Per-process address space layout:
+ *   PDPT[0] -> per-proc PD0  -- user [0x400000, 0x1400000)
+ *   PDPT[1] -> shared kernel_pd1  -- virt [1 GiB, 2 GiB) (empty today)
+ *   PDPT[2] -> shared kernel_pd2  -- virt [KERNBASE, KERNBASE+1 GiB)
+ *                                    direct map of phys RAM (PSE 2 MiB)
+ *   PDPT[3] -> shared kernel_pd3  -- virt [3 GiB, 4 GiB), DEVSPACE MMIO
+ *
+ * Sharing PD1/PD2/PD3 across every proc means kernel mapping changes
+ * are picked up automatically without per-pgdir touch; only PD0
+ * differs per process. Same shape as xv6-public's setupkvm sharing
+ * kmap[] across procs, just split across PDPT slots because PAE
+ * forces a 3-level walk.
+ *
+ * Refs:
+ *   - Intel SDM Vol 3A §4.4 (PAE Paging) figure 4-9 (PDE/PTE format
+ *     with 8-byte entries + NX at bit 63)
+ *   - xv6-riscv kernel/vm.c walk() -- canonical multi-level walk
+ *     pattern (Sv39 = 3-level analog)
+ *   - serenity Kernel/Arch/x86_64/PageDirectory.h -- 8-byte PTE
+ *     accessor + NoExecute bit (0x8000000000000000) shape
+ */
 #include "paging.h"
 #include "pmm.h"
 #include "memlayout.h"
 
-#define PG_PRESENT 0x001
-#define PG_RW      0x002
-#define PG_USER    0x004
-#define PG_PS      0x080          /* 4 MiB page */
-
-#define PAGE_4MB    0x400000u
 #define PAGE_4KB    0x1000u
-#define ENTRIES     1024
-#define FRAME_MASK  0xFFFFF000u
+#define PAGE_2MB    0x200000u
+#define PAGE_1GB    0x40000000u
 
-/* User region layout. The USER_PDES contiguous 4 MiB PDEs starting at
- * USER_BASE form a 16 MiB virtual range, carved into:
- *   CODE+DATA+BSS : [USER_CODE,   USER_CODE_END)   1 MiB  (256 pages)
- *   STACK         : [USER_STACK_LO, USER_STACK_TOP) 256 KiB (64 pages)
- *   HEAP          : [USER_HEAP_LO, USER_HEAP_HI)   ~14 MiB (grows lazily)
- * The stack grows down from USER_STACK_TOP; the heap grows up from
- * USER_HEAP_LO via paging_user_alloc. */
-#define USER_BASE        0x400000u
-#define USER_PDES        4u
-#define USER_END         (USER_BASE + USER_PDES * PAGE_4MB)
+#define PDPT_ENTRIES 4u
+#define PD_ENTRIES   512u
+#define PT_ENTRIES   512u
 
-#define USER_CODE        USER_BASE
-#define USER_CODE_PAGES  256u
-#define USER_CODE_END    (USER_CODE + USER_CODE_PAGES * PAGE_4KB)
+#define PDPT_IDX(va) (((va) >> 30) & 0x3u)
+#define PD_IDX(va)   (((va) >> 21) & 0x1FFu)
+#define PT_IDX(va)   (((va) >> 12) & 0x1FFu)
 
-#define USER_STACK_PAGES 64u
-#define USER_STACK_LO    USER_CODE_END
-#define USER_STACK_TOP   (USER_STACK_LO + USER_STACK_PAGES * PAGE_4KB)
+/* Phys-address mask covering bits 12-35 (PAE supports 36-bit phys).
+ * The upper 28 bits of the 64-bit entry are reserved/NX; we mask down
+ * to what the CPU treats as the frame pointer. */
+#define FRAME_MASK_4KB  0x0000000FFFFFF000ULL
+#define FRAME_MASK_2MB  0x0000000FFFE00000ULL
 
-#define USER_HEAP_LO     USER_STACK_TOP
-#define USER_HEAP_HI     USER_END
+/* User region layout (unchanged from v0.4 -- USER_BASE etc stay where
+ * apps + linker scripts expect them). USER_PDES_2MB counts 2 MiB PDEs
+ * because under PAE the PSE page size halved from 4 MiB. */
+#define USER_BASE         0x400000u
+#define USER_END          0x1400000u
+#define USER_SPAN         (USER_END - USER_BASE)
+#define USER_PDES_2MB     (USER_SPAN / PAGE_2MB)        /* 8 PDEs */
 
-/* Userland framebuffer window: the physical LFB is mapped read/write into this
- * high, kernel-unused virtual range so a ring-3 app can blit straight to video
- * memory (double-buffering, no syscall per rectangle). Spans up to
- * USER_FB_PDES * 4 MiB of LFB, well clear of the pmm-managed RAM (1..32 MiB). */
-#define USER_FB_BASE     0x10000000u
-#define USER_FB_PDES     4u
+#define USER_CODE         USER_BASE
+#define USER_CODE_PAGES   256u
+#define USER_CODE_END     (USER_CODE + USER_CODE_PAGES * PAGE_4KB)
 
-/* page_dir holds the physical address of the currently-active page
- * directory. We treat it as `unsigned int *` so call sites can do
- * `KVA(page_dir)[i]` to read/write entries, but the raw value IS
- * a phys frame (matches PCB->cr3 / what we load into CR3).
- *
- * Every dereference goes through KVA() to land in the higher-half
- * mirror (virt KERNBASE + phys). User PTs cannot reach above KERNBASE,
- * so a kernel deref via KVA never crosses a user-controlled mapping --
- * even when the active CR3 is a user proc's pgdir. xv6-style; see
- * osdev-refs/xv6-public/memlayout.h P2V macro + vm.c usage. */
-static unsigned int *page_dir;
-/* §1 step 5.5: user_pts[] cache removed; user_pte derives the PT pointer
- * from page_dir on each call so multi-proc scheduling never sees a
- * stale cache (see commit message + user_pte comment). */
-static unsigned int  user_heap_next;             /* next unmapped heap address */
-static int           fb_pde_mapped;              /* 1 while the user FB PDE is live */
+#define USER_STACK_PAGES  64u
+#define USER_STACK_LO     USER_CODE_END
+#define USER_STACK_TOP    (USER_STACK_LO + USER_STACK_PAGES * PAGE_4KB)
 
-/* Translate a physical frame address into the kernel-only higher-half
- * virtual alias. Use for every read/write of pgdir entries, PT entries
- * and raw page contents from kernel code. */
-#define KVA(phys) ((unsigned int *)P2V((unsigned int)(phys)))
+#define USER_HEAP_LO      USER_STACK_TOP
+#define USER_HEAP_HI      USER_END
 
-static void load_cr3(void)
+#define USER_FB_BASE      0x10000000u
+
+typedef unsigned long long pae_entry_t;
+
+/* The PCB->cr3 field stores a KVA pointer to the active PDPT
+ * (kernel-only high-half virt). paging_switch() applies V2P before
+ * the actual CR3 load so the CPU sees a phys address. Treating it
+ * as `unsigned int *` keeps the ABI matching what proc.c / syscall.c
+ * already pass around -- only the internal interpretation changed
+ * from "PD pointer" to "PDPT pointer". */
+static pae_entry_t *page_pdpt;          /* KVA of active PDPT (4 entries used) */
+static unsigned int user_heap_next;
+static int          fb_pde_mapped;
+
+/* Shared kernel PDs (phys addrs). Built once at boot; every per-proc
+ * PDPT points its slots [1..3] at the same physical PDs so all
+ * processes see identical kernel mappings without per-create copy. */
+static unsigned int kernel_pd1_phys;    /* [1 GiB, 2 GiB) -- empty today */
+static unsigned int kernel_pd2_phys;    /* [KERNBASE, +1 GiB) direct map  */
+static unsigned int kernel_pd3_phys;    /* [3 GiB, 4 GiB) DEVSPACE MMIO   */
+
+#define KVA(phys) ((pae_entry_t *)P2V((unsigned int)(phys)))
+#define KVA32(phys) ((unsigned int *)P2V((unsigned int)(phys)))
+
+static void load_cr3_active(void)
 {
-	__asm__ volatile ("mov %0, %%cr3" : : "r"(V2P((unsigned int)page_dir)) : "memory");
+	__asm__ volatile ("mov %0, %%cr3" : :
+	                  "r"(V2P((unsigned int)page_pdpt)) : "memory");
 }
 
-/* Build the canonical xv6-style kernel pgdir layout into `pgdir`:
- *   - [0, USER_END)                : EMPTY (per-process user PTs install here)
- *   - [USER_END, KERNBASE)         : EMPTY (no virt below KERNBASE is kernel
- *                                    territory; this is the firewall that
- *                                    makes the bug we fixed impossible)
- *   - [KERNBASE, +KERNEL_DIRECT_MAP): direct map of phys RAM via 4 MiB PSE
- *                                    -- xv6-public/vm.c:107 kmap[]
- *   - [KERNEL_DEVSPACE, 4 GiB)     : identity for MMIO (LFB, e1000 BAR)
- *
- * NO identity-low here. Bootstrap pgdir in kernel/arch/kentry.s carried
- * a transient identity-low purely to keep EIP valid between CR0.PG=1 and
- * the indirect jump to the higher half; once paging_init swaps in this
- * pgdir, identity-low is dropped forever -- user PTs can never alias
- * kernel territory because there IS no kernel territory below KERNBASE.
- */
-static void build_kernel_pgdir(unsigned int *pgdir)
+static void zero_frame(unsigned int phys)
 {
-	for (unsigned int i = 0; i < ENTRIES; i++)
-		pgdir[i] = 0;
+	pae_entry_t *p = KVA(phys);
+	for (unsigned int i = 0; i < PAGE_4KB / sizeof(pae_entry_t); i++)
+		p[i] = 0;
+}
 
-	/* High-half direct map: virt [KERNBASE, +KERNEL_DIRECT_MAP) -> phys
-	 * [0, KERNEL_DIRECT_MAP). Covers the kernel image (linked at virt
-	 * 0x80100000, phys 0x100000) plus every PMM-managed frame. */
-	unsigned int kern_first = KERNBASE / PAGE_4MB;
-	unsigned int kern_count = KERNEL_DIRECT_MAP / PAGE_4MB;
-	for (unsigned int p = 0; p < kern_count; p++)
-		pgdir[kern_first + p] = (p * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+/* Build a shared kernel PD that PSE-maps a 1 GiB virt window.
+ *
+ * virt_base: top of the 1 GiB window this PD covers (must be 1 GiB-aligned).
+ * phys_base: phys address virt_base maps to; for the high-half direct
+ *            map this is 0 (virt KERNBASE -> phys 0); for DEVSPACE
+ *            identity this is virt_base itself.
+ * present_count: how many 2 MiB PDEs to fill from PD[0..]. The rest
+ *                stay zero (not present). For the direct map we cover
+ *                only [0, KERNEL_DIRECT_MAP); for DEVSPACE we cover
+ *                the full 1 GiB from KERNEL_DEVSPACE to 4 GiB.
+ */
+static void build_kernel_pd(unsigned int pd_phys,
+                            unsigned int phys_base,
+                            unsigned int present_count)
+{
+	zero_frame(pd_phys);
+	pae_entry_t *pd = KVA(pd_phys);
+	for (unsigned int i = 0; i < present_count; i++) {
+		unsigned int phys = phys_base + i * PAGE_2MB;
+		pd[i] = (pae_entry_t)phys | 0x83ULL;       /* PG_PRESENT | PG_RW | PG_PS */
+	}
+}
 
-	/* DEVSPACE: identity-map everything from KERNEL_DEVSPACE to 4 GiB so
-	 * fb LFB (0xFD000000), e1000 BAR (~0xFEB80000) and other PCI MMIO
-	 * stay reachable as plain phys = virt pointers. xv6's [DEVSPACE, 4G)
-	 * range. */
-	unsigned int dev_first = KERNEL_DEVSPACE / PAGE_4MB;
-	for (unsigned int i = dev_first; i < ENTRIES; i++)
-		pgdir[i] = (i * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+static void build_kernel_pds(void)
+{
+	kernel_pd1_phys = pmm_alloc();
+	kernel_pd2_phys = pmm_alloc();
+	kernel_pd3_phys = pmm_alloc();
+	/* PD1: virt [1 GiB, 2 GiB) -- nothing kernel-side here, leave empty. */
+	build_kernel_pd(kernel_pd1_phys, 0, 0);
+	/* PD2: virt [KERNBASE, KERNBASE+1 GiB) -> phys [0, KERNEL_DIRECT_MAP). */
+	build_kernel_pd(kernel_pd2_phys, 0, KERNEL_DIRECT_MAP / PAGE_2MB);
+	/* PD3: virt [3 GiB, 4 GiB) identity from KERNEL_DEVSPACE up. */
+	{
+		zero_frame(kernel_pd3_phys);
+		pae_entry_t *pd = KVA(kernel_pd3_phys);
+		unsigned int dev_first_idx = (KERNEL_DEVSPACE - 3 * PAGE_1GB) / PAGE_2MB;
+		for (unsigned int i = dev_first_idx; i < PD_ENTRIES; i++) {
+			unsigned int phys = 3 * PAGE_1GB + i * PAGE_2MB;
+			pd[i] = (pae_entry_t)phys | 0x83ULL;
+		}
+	}
+}
+
+static void wire_kernel_pdpt(pae_entry_t *pdpt)
+{
+	pdpt[1] = (pae_entry_t)kernel_pd1_phys | 1ULL;
+	pdpt[2] = (pae_entry_t)kernel_pd2_phys | 1ULL;
+	pdpt[3] = (pae_entry_t)kernel_pd3_phys | 1ULL;
 }
 
 void paging_init(void)
 {
-	/* Paging is OFF here: virt = phys, so raw pmm_alloc results are
-	 * directly addressable. After CR0.PG goes on, page_dir lives at its
-	 * higher-half virt alias so subsequent accesses survive a user proc
-	 * loading a CR3 whose USER PT would shadow the low-identity. */
-	unsigned int pd_phys = pmm_alloc();
-	build_kernel_pgdir((unsigned int *)pd_phys);
+	/* kentry's bootstrap PDPT already established identity-low,
+	 * high-half mirror and DEVSPACE identity. We now build a runtime
+	 * PDPT that:
+	 *   - DROPS identity-low (PDPT[0] = 0 until a user proc populates it)
+	 *   - SHARES kernel PDs (PD1/PD2/PD3) across every per-proc PDPT.
+	 * Same xv6 pattern that the v0.4 higher-half work introduced, just
+	 * lifted to PAE format. */
+	build_kernel_pds();
 
-	unsigned int cr4;
-	__asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
-	cr4 |= 0x10;                                        /* CR4.PSE */
-	__asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
+	unsigned int pdpt_phys = pmm_alloc();
+	zero_frame(pdpt_phys);
+	pae_entry_t *pdpt = KVA(pdpt_phys);
+	wire_kernel_pdpt(pdpt);
+	pdpt[0] = 0;          /* no user space until paging_init_user */
 
-	__asm__ volatile ("mov %0, %%cr3" : : "r"(pd_phys) : "memory");
-
-	unsigned int cr0;
-	__asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
-	cr0 |= 0x80000000;                                  /* CR0.PG */
-	__asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
-
-	/* From this point on, all pgdir derefs go through KVA(). */
-	page_dir = KVA(pd_phys);
+	page_pdpt = pdpt;
+	/* PAE was already enabled by kentry; just swap CR3 to the runtime
+	 * PDPT. Subsequent paging_init_user_pgdir installs PD0 entries. */
+	load_cr3_active();
 }
 
-/* Locate the PTE backing 'vaddr' within the user range. Returns 0 outside it
- * or when the user PDE is not present.
- *
- * §1 step 5.5: derive the PT pointer from the CURRENTLY ACTIVE page_dir
- * (set on every paging_switch / paging_activate) instead of a separate
- * user_pts[] cache. The cache used to drift between paging_switch
- * (CR3-only) and paging_activate (CR3 + cache refresh) under multi-proc
- * scheduling and led to stale-PT dereferences after fork. Pulling from
- * page_dir on each call makes the PT pointer authoritative and tied to
- * the same value the CPU itself uses.
- */
-static unsigned int *user_pte(unsigned int vaddr)
+/* Walk the active PDPT and return a pointer (KVA) to the PTE backing
+ * `va`. Returns 0 when:
+ *   - va isn't in PDPT[0]'s 1 GiB window (we only handle USER there)
+ *   - the PD entry is missing or marks a huge 2 MiB page
+ * If `alloc` is non-zero and the PT slot is empty, alloc a fresh PT
+ * frame, zero it and install. Mirrors xv6-riscv walk() shape. */
+static pae_entry_t *walk_user_pte(pae_entry_t *pdpt, unsigned int va, int alloc)
 {
-	if (vaddr < USER_BASE || vaddr >= USER_END)
+	if (PDPT_IDX(va) != 0)
 		return 0;
-	unsigned int idx = vaddr / PAGE_4MB;
-	unsigned int pde = page_dir[idx];
-	if (!(pde & PG_PRESENT) || (pde & PG_PS))
+	pae_entry_t pdpte = pdpt[0];
+	if (!(pdpte & 1ULL))
 		return 0;
-	unsigned int *pt = KVA(pde & FRAME_MASK);
-	return &pt[(vaddr >> 12) & 0x3FF];
+	pae_entry_t *pd = KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
+	pae_entry_t pde = pd[PD_IDX(va)];
+	if (!(pde & 1ULL)) {
+		if (!alloc)
+			return 0;
+		unsigned int pt_phys = pmm_alloc();
+		if (!pt_phys)
+			return 0;
+		zero_frame(pt_phys);
+		pde = (pae_entry_t)pt_phys | 0x7ULL;     /* PRESENT|RW|USER */
+		pd[PD_IDX(va)] = pde;
+	}
+	if (pde & 0x80ULL)
+		return 0;                                /* huge 2 MiB, no PT */
+	pae_entry_t *pt = KVA((unsigned int)(pde & FRAME_MASK_4KB));
+	return &pt[PT_IDX(va)];
 }
 
 static void map_user_page(unsigned int vaddr, unsigned int frame)
 {
-	unsigned int *pte = user_pte(vaddr);
-	*pte = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
+	pae_entry_t *pte = walk_user_pte(page_pdpt, vaddr, 1);
+	if (!pte)
+		return;
+	*pte = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL; /* P|RW|U */
 }
 
-/* Tear down the mapping at 'vaddr' and release its physical frame back to the
- * PMM. Invalidates the stale TLB entry so the next access fresh-walks. */
 static void unmap_user_page(unsigned int vaddr)
 {
-	unsigned int *pte = user_pte(vaddr);
-	if (!pte || !(*pte & PG_PRESENT))
+	pae_entry_t *pte = walk_user_pte(page_pdpt, vaddr, 0);
+	if (!pte || !(*pte & 1ULL))
 		return;
-	unsigned int frame = *pte & FRAME_MASK;
+	unsigned int frame = (unsigned int)(*pte & FRAME_MASK_4KB);
 	*pte = 0;
 	pmm_free(frame);
 	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
-/* Lay out the user address space into the given pgdir: one 4 KiB page
- * table per user PDE plus code+stack pages mapped at their fixed VAs.
- * The heap stays empty (paging_user_alloc grows it on demand). Returns
- * 0 on success, -1 on PMM exhaustion -- caller should clean up via
- * paging_destroy_user_pgdir.
+/* Lay out a fresh user address space into the given PDPT:
+ *   - allocate a PD0 (slot 0 of PDPT)
+ *   - allocate one PT per USER PDE (8 PTs covering [USER_BASE, USER_END))
+ *   - allocate code + stack frames, install their PTEs
+ *   - leave the heap empty (paging_user_alloc grows on demand)
  *
- * Refs:
- *   - PRIMARY xv6-public/vm.c:182 (inituvm) + vm.c:204 (loaduvm): split
- *       between "set up the empty pages" and "copy the ELF in". We
- *       fold them together because our caller (sys_exec) always does
- *       both -- inituvm-only is xv6's exec preamble, not a separate
- *       use case for us.
- *   - CONTRAST linux-0.01/mm/memory.c get_free_page: same pattern of
- *       "alloc-and-zero-PT, hook into PD with present+rw+user", just
- *       wrapped in their per-task LDT model.
+ * `pdpt` is a KVA pointer to the per-proc PDPT (slot 0 expected zero).
  */
-/* pgdir is a KVA pointer (higher-half virt). Each pmm_alloc returns a
- * phys frame; we store it raw in the PT entry and KVA() it for our own
- * dereference. No CR3 dance needed: KVA-targeted writes always land in
- * the high-half mirror, which no user PT can shadow (user PT stops at
- * USER_END = 0x1400000 << KERNBASE). */
-int paging_init_user_pgdir(unsigned int *pgdir)
+int paging_init_user_pgdir(unsigned int *pdpt_raw)
 {
-	for (unsigned int p = 0; p < USER_PDES; p++) {
+	pae_entry_t *pdpt = (pae_entry_t *)pdpt_raw;
+
+	unsigned int pd0_phys = pmm_alloc();
+	if (!pd0_phys)
+		return -1;
+	zero_frame(pd0_phys);
+	pdpt[0] = (pae_entry_t)pd0_phys | 1ULL;
+	pae_entry_t *pd0 = KVA(pd0_phys);
+
+	/* One 4 KiB PT per USER 2 MiB PDE. */
+	for (unsigned int p = 0; p < USER_PDES_2MB; p++) {
 		unsigned int pt_phys = pmm_alloc();
 		if (!pt_phys)
 			return -1;
-		unsigned int *pt = KVA(pt_phys);
-		for (unsigned int i = 0; i < ENTRIES; i++)
-			pt[i] = 0;
-		pgdir[(USER_BASE / PAGE_4MB) + p] =
-			pt_phys | PG_PRESENT | PG_RW | PG_USER;
+		zero_frame(pt_phys);
+		unsigned int pd_idx = PD_IDX(USER_BASE) + p;
+		pd0[pd_idx] = (pae_entry_t)pt_phys | 0x7ULL;    /* P|RW|U */
 	}
+
 	for (unsigned int i = 0; i < USER_CODE_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
 		if (!frame)
 			return -1;
 		unsigned int va = USER_CODE + i * PAGE_4KB;
-		unsigned int *pt = KVA(pgdir[va / PAGE_4MB] & FRAME_MASK);
-		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
+		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
+		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
+		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL;
 	}
 	for (unsigned int i = 0; i < USER_STACK_PAGES; i++) {
 		unsigned int frame = pmm_alloc();
 		if (!frame)
 			return -1;
 		unsigned int va = USER_STACK_LO + i * PAGE_4KB;
-		unsigned int *pt = KVA(pgdir[va / PAGE_4MB] & FRAME_MASK);
-		pt[(va >> 12) & 0x3FF] = (frame & FRAME_MASK) | PG_PRESENT | PG_RW | PG_USER;
+		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
+		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
+		pt[PT_IDX(va)] = (pae_entry_t)(frame & 0xFFFFF000u) | 0x7ULL;
 	}
-	/* FB PDE: reset to kernel identity (PSE, no PG_USER). Each app must
-	 * call SYS_MAP_FB explicitly to gain ring-3 access to the LFB. */
-	unsigned int fb_idx = USER_FB_BASE / PAGE_4MB;
-	pgdir[fb_idx] = (fb_idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
 	return 0;
 }
 
-/* Swap CR3 to pgdir and refresh the kernel's caches of "currently
- * active user PTs + heap watermark + FB-mapped flag" so every
- * map_user_page / paging_user_alloc / paging_map_fb call that follows
- * targets the new pgdir. The heap rewinds to USER_HEAP_LO and FB is
- * marked unmapped -- the new image owns its own heap and FB state.
- *
- * Refs:
- *   - PRIMARY xv6-public/vm.c:157 (switchuvm) is the canonical "lcr3
- *       to a per-proc pgdir" entry point; xv6 also retargets the TSS
- *       here, which we do separately in trap.c.
- *   - CONTRAST toaruos/kernel/sys/process.c uses arch_load_page_directory
- *       behind a clone+swap wrapper; semantically identical, more
- *       abstraction layers.
- */
-void paging_activate(unsigned int *pgdir)
+void paging_activate(unsigned int *pdpt_raw)
 {
-	if (!pgdir)
+	if (!pdpt_raw)
 		return;
-	page_dir = pgdir;
-	user_heap_next = USER_HEAP_LO;       /* new image starts with empty heap */
-	fb_pde_mapped  = 0;                  /* FB unmapped until next SYS_MAP_FB */
-	__asm__ volatile ("mov %0, %%cr3" : : "r"(V2P((unsigned int)pgdir)) : "memory");
+	page_pdpt = (pae_entry_t *)pdpt_raw;
+	user_heap_next = USER_HEAP_LO;
+	fb_pde_mapped  = 0;
+	__asm__ volatile ("mov %0, %%cr3" : :
+	                  "r"(V2P((unsigned int)pdpt_raw)) : "memory");
 }
 
 unsigned int *paging_boot_pgdir(void)
 {
-	return page_dir;
+	return (unsigned int *)page_pdpt;
 }
 
-/* Deep-copy USER PDEs from src into dst. dst must come from
- * paging_create_user_pgdir (kernel mapping pre-filled, user range
- * empty). Returns 0 ok, -1 on PMM exhaustion (caller should run
- * paging_destroy_user_pgdir on dst).
- *
- * Refs:
- *   - PRIMARY xv6-public/vm.c:316 (copyuvm): same loop -- walk source
- *       PDE -> PTE, alloc, memmove(P2V(mem), (char*)P2V(pa), PGSIZE),
- *       install. We diverge on the page table allocation: xv6 calls
- *       walkpgdir which allocates the dest PT lazily per-PTE; we
- *       pre-allocate the PT up front so the inner loop stays trivial.
- *   - CONTRAST linux-0.01/mm/memory.c:124 (copy_page_tables): same
- *       walk but DOES copy-on-write -- clears PG_RW on both src and
- *       dst PTEs and bumps mem_map[pa]. We intentionally do the
- *       expensive eager copy instead because we have no PMM refcount
- *       infrastructure; revisit when COW lands (post-§1).
- */
-/* dst, src are KVA pointers. Every phys frame returned by pmm_alloc and
- * every src/dst frame address is dereferenced via KVA() (high-half
- * mirror), so no CR3 dance is needed: the high-half map sits above
- * KERNBASE where user PTs cannot reach. xv6-public/vm.c:316 (copyuvm)
- * uses the same P2V pattern for the same reason. */
-int paging_copy_user_pgdir(unsigned int *dst, unsigned int *src)
+/* Deep-copy USER pages from src PDPT into dst PDPT. dst must come from
+ * paging_create_user_pgdir (own PD0, empty user PTs). Mirrors xv6-public
+ * copyuvm but threaded through PAE's 3-level walk. */
+int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 {
-	unsigned int user_first = USER_BASE / PAGE_4MB;
-	unsigned int user_last  = USER_END  / PAGE_4MB;
-	for (unsigned int p = user_first; p < user_last; p++) {
-		unsigned int spde = src[p];
-		if (!(spde & PG_PRESENT))
+	pae_entry_t *dst = (pae_entry_t *)dst_raw;
+	pae_entry_t *src = (pae_entry_t *)src_raw;
+
+	/* paging_create_user_pgdir leaves PDPT[0] zero so sys_fork's caller
+	 * can pick the population strategy (alloc PD0 + copy here, vs alloc
+	 * PD0 + populate via init_user_pgdir in sys_exec). Wire a fresh PD0
+	 * if dst doesn't already have one. */
+	if (!(dst[0] & 1ULL)) {
+		unsigned int pd0_phys = pmm_alloc();
+		if (!pd0_phys)
+			return -1;
+		zero_frame(pd0_phys);
+		dst[0] = (pae_entry_t)pd0_phys | 1ULL;
+	}
+	pae_entry_t *dst_pd0 = KVA((unsigned int)(dst[0] & FRAME_MASK_4KB));
+	pae_entry_t *src_pd0 = KVA((unsigned int)(src[0] & FRAME_MASK_4KB));
+
+	unsigned int first = PD_IDX(USER_BASE);
+	unsigned int last  = first + USER_PDES_2MB;
+
+	for (unsigned int p = first; p < last; p++) {
+		pae_entry_t spde = src_pd0[p];
+		if (!(spde & 1ULL))
 			continue;
-		if (spde & PG_PS)
-			continue;          /* shared MMIO PSE (FB) already inherited */
-		unsigned int *src_pt = KVA(spde & FRAME_MASK);
+		if (spde & 0x80ULL)
+			continue;                            /* 2 MiB huge -- skip (no user huge today) */
+
+		pae_entry_t *src_pt = KVA((unsigned int)(spde & FRAME_MASK_4KB));
 		unsigned int dst_pt_phys = pmm_alloc();
 		if (!dst_pt_phys)
 			return -1;
-		unsigned int *dst_pt = KVA(dst_pt_phys);
-		for (unsigned int e = 0; e < ENTRIES; e++)
-			dst_pt[e] = 0;
-		dst[p] = dst_pt_phys | (spde & 0xFFFu);
-		for (unsigned int e = 0; e < ENTRIES; e++) {
-			unsigned int spte = src_pt[e];
-			if (!(spte & PG_PRESENT))
+		zero_frame(dst_pt_phys);
+		pae_entry_t *dst_pt = KVA(dst_pt_phys);
+		dst_pd0[p] = (pae_entry_t)dst_pt_phys | (spde & 0xFFFULL);
+
+		for (unsigned int e = 0; e < PT_ENTRIES; e++) {
+			pae_entry_t spte = src_pt[e];
+			if (!(spte & 1ULL))
 				continue;
-			unsigned int src_frame = spte & FRAME_MASK;
+			unsigned int src_frame = (unsigned int)(spte & FRAME_MASK_4KB);
 			unsigned int dst_frame = pmm_alloc();
 			if (!dst_frame)
 				return -1;
-			unsigned int *sp = KVA(src_frame);
-			unsigned int *dp = KVA(dst_frame);
+			/* Page contents copy via the higher-half mirror so no
+			 * user PT can intercept the write. */
+			unsigned int *sp = KVA32(src_frame);
+			unsigned int *dp = KVA32(dst_frame);
 			for (unsigned int w = 0; w < PAGE_4KB / 4; w++)
 				dp[w] = sp[w];
-			dst_pt[e] = (dst_frame & FRAME_MASK) | (spte & 0xFFFu);
+			dst_pt[e] = (pae_entry_t)(dst_frame & 0xFFFFF000u) |
+			            (spte & 0xFFFULL);
 		}
 	}
 	return 0;
 }
 
-/* Build the userland address space at boot. Wraps paging_init_user_pgdir
- * around the live page_dir so legacy callers stay unchanged. */
 void paging_init_user(void)
 {
-	paging_init_user_pgdir(page_dir);
+	paging_init_user_pgdir((unsigned int *)page_pdpt);
 	user_heap_next = USER_HEAP_LO;
-	load_cr3();
+	load_cr3_active();
 }
 
-unsigned int paging_user_code(void)       { return USER_CODE; }
-unsigned int paging_user_code_end(void)   { return USER_CODE_END; }
-unsigned int paging_user_stack_top(void)  { return USER_STACK_TOP; }
+unsigned int paging_user_code(void)      { return USER_CODE; }
+unsigned int paging_user_code_end(void)  { return USER_CODE_END; }
+unsigned int paging_user_stack_top(void) { return USER_STACK_TOP; }
 
-/* Release every heap page the previous app mapped, then rewind the bump
- * pointer. Also restores the FB PDE to a kernel-only identity mapping so the
- * next app cannot access the LFB until it explicitly calls SYS_MAP_FB.
- * Counts and logs the frame reclamation so a memory-leak sweep can spot
- * regressions in app teardown. */
 void paging_reset_user_heap(void)
 {
 	unsigned int reclaimed = 0;
@@ -350,10 +375,16 @@ void paging_reset_user_heap(void)
 	user_heap_next = USER_HEAP_LO;
 
 	if (fb_pde_mapped) {
-		unsigned int idx = USER_FB_BASE / PAGE_4MB;
-		page_dir[idx] = (idx * PAGE_4MB) | PG_PRESENT | PG_RW | PG_PS;
+		/* Tear down the FB 2 MiB huge PDE we installed in paging_map_fb.
+		 * Active PD0 lives in PDPT[0]. */
+		pae_entry_t pdpte = page_pdpt[0];
+		if (pdpte & 1ULL) {
+			pae_entry_t *pd0 =
+			    KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
+			pd0[PD_IDX(USER_FB_BASE)] = 0;
+		}
 		fb_pde_mapped = 0;
-		load_cr3();
+		load_cr3_active();
 	}
 
 	if (reclaimed > 0) {
@@ -366,31 +397,30 @@ void paging_reset_user_heap(void)
 	}
 }
 
-/* Map the physical LFB at USER_FB_BASE using a single 4 MiB PSE page so
- * ring-3 apps can write directly to VRAM (zero syscalls per pixel). The
- * physical address must be 4 MiB-aligned; VBE guarantees this in practice.
- * Calling this again overwrites any prior mapping (safe for one LFB). */
+/* Map the physical LFB at USER_FB_BASE using a 2 MiB PSE huge PDE in
+ * the active proc's PD0. The LFB phys is 2 MiB-aligned in QEMU/VBE. */
 void paging_map_fb(unsigned int phys_base)
 {
 	if (phys_base == 0)
 		return;
-	unsigned int idx  = USER_FB_BASE / PAGE_4MB;
-	unsigned int aligned = phys_base & ~(PAGE_4MB - 1u);
-	page_dir[idx] = aligned | PG_PRESENT | PG_RW | PG_USER | PG_PS;
+	pae_entry_t pdpte = page_pdpt[0];
+	if (!(pdpte & 1ULL))
+		return;
+	pae_entry_t *pd0 = KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
+	unsigned int aligned = phys_base & ~(PAGE_2MB - 1u);
+	pd0[PD_IDX(USER_FB_BASE)] = (pae_entry_t)aligned | 0x87ULL; /* P|RW|U|PS */
 	fb_pde_mapped = 1;
-	load_cr3();
+	load_cr3_active();
 }
 
 unsigned int paging_user_fb_base(void) { return USER_FB_BASE; }
 
-/* Lazily map and return the next 4 KiB heap page (a virtual address), or 0 if
- * the heap is full or physical memory is exhausted. */
 unsigned int paging_user_alloc(void)
 {
 	if (user_heap_next >= USER_HEAP_HI)
 		return 0;
 	unsigned int frame = pmm_alloc();
-	if (frame == 0)
+	if (!frame)
 		return 0;
 	unsigned int v = user_heap_next;
 	map_user_page(v, frame);
@@ -398,20 +428,12 @@ unsigned int paging_user_alloc(void)
 	return v;
 }
 
-unsigned int paging_user_brk(void)
-{
-	return user_heap_next;
-}
+unsigned int paging_user_brk(void) { return user_heap_next; }
 
 unsigned int paging_user_mmap(unsigned int size)
 {
 	if (size == 0)
 		return 0;
-	/* Overflow guard: a hostile userland passing size ~= 0xFFFFFFFF
-	 * could otherwise wrap the (size + PAGE_4KB - 1) round-up to a
-	 * tiny page count, sneak past the heap-top check, and pull the
-	 * allocator into a million-page loop. Cap at the remaining heap
-	 * room (rounded down to page granularity). */
 	unsigned int room = USER_HEAP_HI - user_heap_next;
 	if (size > room)
 		return 0;
@@ -423,8 +445,6 @@ unsigned int paging_user_mmap(unsigned int size)
 	for (unsigned int i = 0; i < pages; i++) {
 		unsigned int frame = pmm_alloc();
 		if (!frame) {
-			/* Unwind every page we managed to allocate so the user
-			 * heap doesn't end up with half-mapped reservations. */
 			for (unsigned int j = 0; j < i; j++)
 				unmap_user_page(base + j * PAGE_4KB);
 			user_heap_next = base;
@@ -439,14 +459,18 @@ unsigned int paging_user_mmap(unsigned int size)
 unsigned int paging_user_mapped_pages(void)
 {
 	unsigned int n = 0;
-	unsigned int user_first = USER_BASE / PAGE_4MB;
-	for (unsigned int p = 0; p < USER_PDES; p++) {
-		unsigned int pde = page_dir[user_first + p];
-		if (!(pde & PG_PRESENT) || (pde & PG_PS))
+	pae_entry_t pdpte = page_pdpt[0];
+	if (!(pdpte & 1ULL))
+		return 0;
+	pae_entry_t *pd0 = KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
+	unsigned int first = PD_IDX(USER_BASE);
+	for (unsigned int p = 0; p < USER_PDES_2MB; p++) {
+		pae_entry_t pde = pd0[first + p];
+		if (!(pde & 1ULL) || (pde & 0x80ULL))
 			continue;
-		unsigned int *pt = KVA(pde & FRAME_MASK);
-		for (unsigned int e = 0; e < ENTRIES; e++)
-			if (pt[e] & PG_PRESENT)
+		pae_entry_t *pt = KVA((unsigned int)(pde & FRAME_MASK_4KB));
+		for (unsigned int e = 0; e < PT_ENTRIES; e++)
+			if (pt[e] & 1ULL)
 				n++;
 	}
 	return n;
@@ -458,9 +482,6 @@ int paging_user_munmap(unsigned int addr, unsigned int size)
 		return 0;
 	if (addr < USER_HEAP_LO || addr >= USER_HEAP_HI)
 		return -1;
-	/* Same overflow guard as paging_user_mmap: clamp size to the
-	 * remaining heap so the (size + PAGE_4KB - 1) round-up never
-	 * wraps a hostile request to a tiny page count. */
 	unsigned int room = USER_HEAP_HI - addr;
 	if (size > room)
 		return -1;
@@ -474,11 +495,6 @@ int paging_user_munmap(unsigned int addr, unsigned int size)
 	return 0;
 }
 
-/* Resize the heap so the program break sits at (or just above) 'new_brk',
- * mapping or unmapping pages as needed. Sub-page requests are rounded up so
- * the break always sits on a 4 KiB boundary. Returns the resulting break --
- * equal to the requested page-aligned target on success, or a smaller value
- * if growth ran out of physical memory or hit USER_HEAP_HI. */
 unsigned int paging_user_set_brk(unsigned int new_brk)
 {
 	if (new_brk < USER_HEAP_LO)
@@ -490,8 +506,8 @@ unsigned int paging_user_set_brk(unsigned int new_brk)
 
 	while (user_heap_next < aligned) {
 		unsigned int frame = pmm_alloc();
-		if (frame == 0)
-			return user_heap_next;          /* OOM: partial growth */
+		if (!frame)
+			return user_heap_next;
 		map_user_page(user_heap_next, frame);
 		user_heap_next += PAGE_4KB;
 	}
@@ -502,124 +518,67 @@ unsigned int paging_user_set_brk(unsigned int new_brk)
 	return user_heap_next;
 }
 
-/* ---- TODO §1 multitasking, step 1: per-process page directories ----
- *
- * These two routines are the foundation everything else in §1 stacks
- * onto. They build / tear down a self-contained per-process address
- * space without touching any of the legacy globals above (page_dir,
- * user_pts[], user_heap_next, fb_pde_mapped) -- step 1 deliberately
- * adds no call sites. Steps 2-4 rewire the rest of paging.c to operate
- * against a passed-in pgdir, at which point the globals retire.
- *
- * Refs picked for this commit:
- *   - PRIMARY: osdev-refs/xv6-public/vm.c
- *       setupkvm  (line 119): allocate PD, map the kernel into it via a
- *                              kmap[] table. We diverge -- xv6 has no
- *                              4 MiB PSE pages; it walks kmap[] and calls
- *                              mappages for each region. We don't need
- *                              that machinery because our kernel mapping
- *                              is just "PSE identity-map of all 4 GiB"
- *                              that already lives in the running pgdir,
- *                              so a single memcpy is exactly equivalent.
- *       freevm   (line 284): walks PDE -> PTE -> kfree each frame, then
- *                              kfree(pgdir). Same loop, our 4 MiB user
- *                              PDE range = (USER_BASE / PAGE_4MB ..
- *                              USER_END / PAGE_4MB).
- *   - CONTRAST: osdev-refs/linux-0.01/mm/memory.c
- *       free_page_tables (line 79): Linus's version. Loops over PDEs,
- *                              releases each PT page, decrements a
- *                              refcount in mem_map (for COW). We do NOT
- *                              do refcounts because no COW in v1 -- each
- *                              user page is owned by exactly one pgdir,
- *                              freed once. Simpler, but bears watching
- *                              when COW lands later.
- *
- * Why memcpy the kernel half instead of mappages: our paging_init laid
- * out 1024 4 MiB PSE PDEs covering 0..4 GiB; that mapping IS the kernel
- * address space. Cloning it byte-for-byte preserves the same kernel
- * code/data view through any later trap on the new pgdir. Cost: 4 KiB
- * memcpy per process create.
- */
-/* Returns a KVA pointer (higher-half virt) to a freshly-built pgdir.
- * Caller stores V2P(result) into PCB->cr3 / passes V2P to CR3 loads. */
+/* Allocate a fresh per-process PDPT. PDPT[1..3] inherit the shared
+ * kernel PDs; PDPT[0] stays zero so init_user_pgdir or copy_user_pgdir
+ * can populate it. */
 unsigned int *paging_create_user_pgdir(void)
 {
 	unsigned int phys = pmm_alloc();
 	if (!phys)
 		return 0;
-	unsigned int *pgdir = KVA(phys);
-	/* Inherit the running kernel mapping (every PSE PDE plus whatever
-	 * is in the user-window slots right now) then wipe the user
-	 * window so the new process starts with no mappings of its own. */
-	for (unsigned int i = 0; i < ENTRIES; i++)
-		pgdir[i] = page_dir[i];
-	unsigned int user_first = USER_BASE / PAGE_4MB;
-	unsigned int user_last  = USER_END  / PAGE_4MB;
-	for (unsigned int i = user_first; i < user_last; i++)
-		pgdir[i] = 0;
-	return pgdir;
+	zero_frame(phys);
+	pae_entry_t *pdpt = KVA(phys);
+	wire_kernel_pdpt(pdpt);
+	pdpt[0] = 0;
+	return (unsigned int *)pdpt;
 }
 
-/* Refs:
- *   - PRIMARY xv6-public/vm.c:157 (switchuvm): xv6 wraps the lcr3 in
- *       pushcli()/popcli() because its scheduler may run with interrupts
- *       enabled. We don't need to do that here -- paging_switch is
- *       called from proc_yield, which is itself only invoked from
- *       irq_handler (interrupts already off via the asm IRQ stub).
- *       Callers from cooperative contexts must hold their own IF=0.
- *   - CONTRAST toaruos/kernel/sys/process.c (switch_next): uses an
- *       arch_set_kernel_stack + arch_load_page_directory pair; same
- *       split as xv6 but with C++-ish naming. Our PCB carries cr3
- *       directly so we don't need the indirection.
- *
- * cr3 = 0 means "this proc still shares the boot page_dir" -- skip the
- * MOV CR3 to keep the single-process boot path identical until step 3
- * starts handing out per-proc pgdirs. */
-/* pgdir is a KVA pointer. Stores into page_dir so user_pte / map_user_page
- * etc see the new pgdir without re-reading CR3. */
-void paging_switch(unsigned int *pgdir)
+void paging_switch(unsigned int *pdpt_raw)
 {
-	if (!pgdir)
+	if (!pdpt_raw)
 		return;
-	page_dir = pgdir;
-	__asm__ volatile ("mov %0, %%cr3" : : "r"(V2P((unsigned int)pgdir)) : "memory");
+	page_pdpt = (pae_entry_t *)pdpt_raw;
+	__asm__ volatile ("mov %0, %%cr3" : :
+	                  "r"(V2P((unsigned int)pdpt_raw)) : "memory");
 }
 
-void paging_destroy_user_pgdir(unsigned int *pgdir)
+void paging_destroy_user_pgdir(unsigned int *pdpt_raw)
 {
-	if (!pgdir)
+	if (!pdpt_raw)
 		return;
-	unsigned int user_first = USER_BASE / PAGE_4MB;
-	unsigned int user_last  = USER_END  / PAGE_4MB;
-	for (unsigned int i = user_first; i < user_last; i++) {
-		unsigned int pde = pgdir[i];
-		if (!(pde & PG_PRESENT))
-			continue;
-		if (pde & PG_PS) {
-			/* 4 MiB user PSE page (e.g. the FB PDE if the user mapped it).
-			 * Skip -- the FB is host MMIO, not pmm-managed RAM. */
-			continue;
+	pae_entry_t *pdpt = (pae_entry_t *)pdpt_raw;
+	pae_entry_t pdpte = pdpt[0];
+	if (pdpte & 1ULL) {
+		unsigned int pd0_phys = (unsigned int)(pdpte & FRAME_MASK_4KB);
+		pae_entry_t *pd0 = KVA(pd0_phys);
+		unsigned int first = PD_IDX(USER_BASE);
+		for (unsigned int p = 0; p < USER_PDES_2MB; p++) {
+			pae_entry_t pde = pd0[first + p];
+			if (!(pde & 1ULL))
+				continue;
+			if (pde & 0x80ULL)
+				continue;                       /* huge -- skip (FB MMIO) */
+			unsigned int pt_phys =
+			    (unsigned int)(pde & FRAME_MASK_4KB);
+			pae_entry_t *pt = KVA(pt_phys);
+			for (unsigned int e = 0; e < PT_ENTRIES; e++) {
+				pae_entry_t pte = pt[e];
+				if (pte & 1ULL)
+					pmm_free(
+					    (unsigned int)(pte & FRAME_MASK_4KB));
+			}
+			pmm_free(pt_phys);
 		}
-		unsigned int pt_phys = pde & FRAME_MASK;
-		unsigned int *pt = KVA(pt_phys);
-		for (unsigned int e = 0; e < ENTRIES; e++) {
-			unsigned int pte = pt[e];
-			if (pte & PG_PRESENT)
-				pmm_free(pte & FRAME_MASK);
-		}
-		pmm_free(pt_phys);
+		pmm_free(pd0_phys);
 	}
-	pmm_free(V2P((unsigned int)pgdir));
+	pmm_free(V2P((unsigned int)pdpt_raw));
 }
 
-/* Validate a userland buffer before the kernel dereferences it: the range must
- * sit wholly inside one mapped span -- code+stack (contiguous) or the portion
- * of the heap that has actually been mapped so far. */
 int paging_user_range_ok(unsigned int addr, unsigned int len)
 {
 	if (len == 0)
 		return 1;
-	if (addr + len < addr)                              /* address overflow */
+	if (addr + len < addr)
 		return 0;
 
 	unsigned int end = addr + len;
