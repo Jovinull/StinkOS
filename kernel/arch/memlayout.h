@@ -81,4 +81,39 @@
 #define V2P(virt) ((unsigned int)(virt) - KERNBASE)
 #endif
 
+/* ----- Page-table entry flags ----------------------------------------
+ *
+ * Shared between legacy 32-bit non-PAE (4-byte PDEs, NX absent) and the
+ * v0.5 PAE path (8-byte PTEs with NX at bit 63). The low 12 bits of an
+ * entry are flags; PG_NX lives in the high 32 bits and ONLY takes
+ * effect when CR4.PAE=1 AND IA32_EFER.NXE=1. Pre-PAE code must NEVER
+ * set PG_NX -- the CPU treats bit 63 as reserved and #PFs the walker.
+ *
+ * Refs:
+ *   - Intel SDM Vol 3A §4.4 (PAE paging) figure 4-11 (PTE format),
+ *     §4.6 (Access Rights, NXE semantics)
+ *   - serenity Kernel/Arch/x86_64/PageDirectory.h:53,107 -- same bit
+ *     position (`NoExecute = 0x8000000000000000ULL`), same accessor
+ *     pattern shaped around individual flag predicates
+ *   - xv6-riscv kernel/riscv.h PTE_R / PTE_X separation -- positive-
+ *     polarity X bit; our PG_NX is the inverse, but the W^X intent
+ *     maps 1:1 ("text gets X, data gets W, never both")
+ */
+#define PG_PRESENT  0x001u   /* P:   entry valid                       */
+#define PG_RW       0x002u   /* R/W: 1 = writable                       */
+#define PG_USER     0x004u   /* U/S: 1 = ring-3 reachable               */
+#define PG_PWT      0x008u   /* page-level write-through                */
+#define PG_PCD      0x010u   /* page-level cache-disable                */
+#define PG_ACCESSED 0x020u   /* set by CPU on first walk                */
+#define PG_DIRTY    0x040u   /* set by CPU on first write               */
+#define PG_PS       0x080u   /* page size: 1 = 4 MiB (legacy) / 2 MiB (PAE) */
+#define PG_GLOBAL   0x100u   /* survives CR3 reload if CR4.PGE=1        */
+
+/* PG_NX is the high 32 bits' bit 31 of an 8-byte PAE PTE. As a
+ * uint64_t literal it sits at bit 63 of the whole entry; the
+ * separation into PG_NX_HI lets callers OR it into the upper word
+ * without forcing every entry-builder to widen to uint64 yet. */
+#define PG_NX_HI    0x80000000u                    /* upper 32 bits, bit 31 */
+#define PG_NX       (((unsigned long long)PG_NX_HI) << 32) /* whole-entry mask */
+
 #endif
