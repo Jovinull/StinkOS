@@ -493,6 +493,13 @@ test-headless: all
 smoke-multiproc: all
 	@python3 tools/smoke-multiproc.py
 
+# ACPI smoke: boots, opens the shell, runs `shutdown`, asserts the
+# ACPI S5 write path fired and QEMU powered off. Decoupled from
+# test-headless so it can validate the destructive shutdown path
+# without aborting the broader test run.
+smoke-acpi: all
+	@python3 tools/smoke-acpi.py
+
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
 # the target stays useful in any environment, including CI. Vendored sources
