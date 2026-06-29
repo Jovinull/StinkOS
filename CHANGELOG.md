@@ -6,8 +6,51 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
-Work in progress on `feat/v0.4-multitasking-loader`. See `TODO.md` (local,
-untracked) for the full pending list.
+## [0.4.0] -- multitasking proper + higher-half kernel
+
+§1 of the roadmap closes: per-process page directory, `sys_fork`,
+`sys_exec` upgrade. Kernel relocates to higher-half virt 0x80100000
+(xv6-public pattern) so user PTs in `[USER_BASE, USER_END)` can never
+shadow a kernel deref of a physical frame -- the bug class that bit the
+fork landing is now impossible by construction.
+
+### Added (post-rc1 -- the §1 finish line + higher-half migration)
+
+- Per-process page directory (`paging_create_user_pgdir` /
+  `paging_destroy_user_pgdir` / `paging_copy_user_pgdir`)
+- CR3 swap in scheduler (`paging_switch` before every `context_switch`)
+- `sys_exec` upgrade: new pgdir per exec, old pgdir destroyed on success
+- `sys_fork` (SYS_FORK, syscall 83) -- eager copyuvm, no COW in v1
+- Shell `bg <appname>` (fork + exec a child process in the background)
+- Higher-half kernel link (virt `0x80100000`, LMA `0x100000` via `AT()`)
+  -- xv6-public pattern; bootstrap pgdir in `kentry.s` does the
+  identity-low -> high-half transition then drops identity-low
+- `KERNBASE / KERNEL_DIRECT_MAP / KERNEL_DEVSPACE` in
+  `kernel/arch/memlayout.h` + `P2V` / `V2P` macros
+- `KVA()` helper in `paging.c`: every phys-frame deref routes through
+  the high-half mirror -- safe under any active CR3
+- Drivers migrated to `V2P()` for hardware DMA / descriptor addrs:
+  audio SB16 buffer, e1000 RX/TX rings + descriptor base, ata Bus
+  Master PRDT
+- `make smoke-multiproc` -- fast (~25 s) standalone target asserting
+  shell bg fork+exec
+- `make test-headless` extended with a multi-proc fork+exec phase
+- `tools/capture-screens.py` captures `shell_bg_demo.png` (shell prompt
+  alive while a forked child runs in the background)
+- TSS.esp0 follows the running proc's kstack on every context switch
+
+### Fixed
+
+- `app_return` for fork-child path: ZOMBIE + `proc_yield` instead of
+  `menu_exit`'s longjmp (was crashing on PID > 1 exit)
+- Stale `user_pts[]` PT cache after fork (now derived from active
+  page_dir on every lookup)
+- Kernel writes through the identity-low alias clobbering user
+  `.rodata` during `paging_copy_user_pgdir` -- temporary fix via
+  `kernel_only_pgdir` CR3 swap (commit `5b00964`), then permanent
+  fix via the higher-half migration (drops the alias entirely)
+
+### Original v0.4-rc1 contents
 
 ### Added
 
