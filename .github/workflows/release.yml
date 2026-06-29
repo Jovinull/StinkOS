@@ -55,13 +55,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF##*/}"
-          # Create the release if missing (idempotent). --notes-file lets
-          # the repo's changelog drive the body once we add one; until then
-          # a one-line placeholder keeps the API happy.
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --notes "StinkOS $TAG -- see CHANGELOG / commits for details."
+          # Pull title + body straight from the annotated git tag so the
+          # GitHub release mirrors what `git show <tag>` already prints.
+          # Per-feature tags (v0.5.0..) are annotated with the relevant
+          # CHANGELOG section; their first line is the title.
+          BODY=$(git tag -l --format='%(contents)' "$TAG")
+          TITLE=$(echo "$BODY" | head -n 1)
+          NOTES_FILE=$(mktemp)
+          # Strip the title line + blank line that follows it, keep the rest.
+          echo "$BODY" | tail -n +3 > "$NOTES_FILE"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "StinkOS $TAG -- see CHANGELOG / commits for details." > "$NOTES_FILE"
+          fi
+          if [ -z "$TITLE" ]; then TITLE="$TAG"; fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
           fi
           gh release upload "$TAG" stinkos-install.iso stinkos-install.iso.sha256 \
             --clobber
