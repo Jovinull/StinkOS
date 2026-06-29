@@ -6,6 +6,69 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+## [0.9.0] -- Rust userland scaffolding
+
+The first Rust apps run under StinkOS. Cargo + a custom
+`i686-stinkos` target spec + `-Z build-std=core,alloc` compile a
+no_std staticlib that links with the existing C `crt0.s` through
+new non-inline `libstink_syms.c` shims. Two Rust apps ship as
+proof: `rs-hello` (extern "C" main + sys_log) and `rs-alloc`
+(Box/Vec/free through `#[global_allocator]` over libstink K&R
+malloc).
+
+A shared `apps/rust/libstink` rlib gives every future Rust app
+ergonomic `println!`, `eprintln!`, `read_line`, `exit(code)`,
+and a default `#[panic_handler]`. `rs-stdio` exercises the shim
+end-to-end with formatted integers, hex, multi-arg format,
+`alloc::format!` and eprintln!.
+
+`sys_exit_code(N)` lets a process choose its exit code; the
+existing `sys_wait` / `sys_waitpid` path already propagated it
+from `proc.exit_code`, so the new syscall + crt0 default of 0
+hooks cleanly. `exitcode` C app validates parent observes
+child's chosen code.
+
+### Added
+
+- Custom Rust target spec `apps/rust/i686-stinkos.json` (i686
+  bare-metal, panic=abort, no SSE)
+- `lib/libstink_syms.c` non-inline shims for sys_log /
+  sys_exit / sys_exit_code / sys_draw / sys_getkey / sys_alloc /
+  sys_ticks / sys_sound / sys_fwrite / sys_fread + memcpy /
+  memset / memmove / memcmp (Rust extern "C" needs linkable
+  symbols; libstink.h is `static inline` only)
+- `apps/rust/rs-hello/` -- first Rust app + extern "C" main
+- `apps/rust/rs-alloc/` -- Box<T>, Vec growth, free+realloc
+  loop through #[global_allocator] over libstink malloc
+- `apps/rust/libstink/` -- shared shim crate with print
+  macros + read_line + default panic_handler
+- `apps/rust/rs-stdio/` -- exercises println!/eprintln!/
+  alloc::format! through the shim
+- `sys_exit_code(int)` libstink wrapper + kernel handler
+  reads ebx as exit code, defaults to 0 via updated crt0
+- `apps/exitcode.c` -- fork + child sys_exit_code(42) +
+  parent sys_wait asserts return == 42
+- `make smoke-rs-hello`, `make smoke-rs-alloc`,
+  `make smoke-rs-stdio`, `make smoke-exitcode` targets
+
+### Changed
+
+- `apps/crt0.s` zeroes `%ebx` before SYS_EXIT so existing C
+  apps that don't call sys_exit_code keep their old "exit 0"
+  behavior
+- `case 5:` SYS_EXIT handler reads `r->ebx` into
+  `cur->exit_code` before app_return
+
+### Deferred (not in v0.9.0)
+
+- Console multi-TTY (alt+Fn) -- requires N framebuffer back-
+  buffers (~9 MB of ~32 MB PMM) + per-TTY proc routing + key
+  driver redesign; too big for the autonomous session, low
+  Rust-blocking value. Stays in §7 TODO.
+- Paging follow-ups (kalloc / trampoline page / PG_G): no Rust
+  enablement value + risk of regressing v0.5..v0.8 paging.
+  Stays in §7 TODO "Paging / memory follow-ups".
+
 ## [0.8.0] -- VFS multi-mount
 
 `kernel/fs/fs.c` is now routed through a 2-slot mount table behind an
