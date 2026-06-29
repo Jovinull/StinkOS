@@ -3,6 +3,7 @@
  * app_return when a ring-3 app ends or faults. */
 #include "defs.h"
 #include "memlayout.h"
+#include "acpi.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -431,14 +432,17 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 65:                                   /* SYS_SHUTDOWN: power off the machine */
-		/* QEMU's "shutdown" knob: writing 0x2000 to port 0x604 (the PIIX4
-		 * APM control register that QEMU re-purposes as a shutdown trigger)
-		 * powers the VM off. Bochs reads 0xB004 with the same magic. On
-		 * real hardware without ACPI the best we can do is wait for the
-		 * watchdog -- we fall through to a hlt loop in that case. */
-		outw(0x604,  0x2000);
-		outw(0xB004, 0x2000);
-		outw(0x4004, 0x3400);                  /* VirtualBox shutdown port */
+		/* Real ACPI S5 first when the FADT advertised a PM1a_CNT_BLK --
+		 * works on physical hardware and on QEMU/VMware. The legacy
+		 * port-magic paths below stay as fallback for firmware that
+		 * doesn't expose ACPI tables (very old BIOS, Multiboot loaders
+		 * that strip them) or where SLP_TYPa differs from our hardcoded
+		 * 5 (a real AML interpreter would read \_S5_ for the exact
+		 * value -- see TODO.md "AML interpreter -- FUTURE"). */
+		acpi_shutdown();
+		outw(0x604,  0x2000);                  /* QEMU PIIX4 APM */
+		outw(0xB004, 0x2000);                  /* Bochs */
+		outw(0x4004, 0x3400);                  /* VirtualBox */
 		serial_write("shutdown: requested but no compatible path -- halting\n");
 		for (;;) __asm__ volatile ("cli; hlt");
 	case 71: {                                 /* SYS_SETPRIO: ebx=pid ecx=prio(0..31) -> 0 / -1 */

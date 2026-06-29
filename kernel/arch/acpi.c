@@ -58,9 +58,42 @@ struct sdt_hdr {
 	unsigned int   creator_revision;
 } __attribute__((packed));
 
+/* FADT layout (ACPI 6.5 §5.2.9 Table 5.9). Only the fields up through
+ * PM1a_CNT_BLK matter for S5 shutdown; further fields (PM_TMR_BLK,
+ * GPE blocks, generic address structures in revision 3+) are read by
+ * later subsystems if ever needed. */
+struct fadt {
+	struct sdt_hdr h;
+	unsigned int   firmware_ctrl;
+	unsigned int   dsdt_phys;
+	unsigned char  reserved0;
+	unsigned char  preferred_pm_profile;
+	unsigned short sci_int;
+	unsigned int   smi_cmd;
+	unsigned char  acpi_enable;
+	unsigned char  acpi_disable;
+	unsigned char  s4bios_req;
+	unsigned char  pstate_cnt;
+	unsigned int   pm1a_evt_blk;
+	unsigned int   pm1b_evt_blk;
+	unsigned int   pm1a_cnt_blk;
+	unsigned int   pm1b_cnt_blk;
+	unsigned int   pm2_cnt_blk;
+	unsigned int   pm_tmr_blk;
+} __attribute__((packed));
+
+#define S5_SLP_TYPa  5u                  /* per AML \_S5_ on essentially every PC */
+#define S5_SLP_EN    (1u << 13)          /* PM1_CNT bit 13: arm the sleep transition */
+
 static int g_available;
 static const struct sdt_hdr *g_tables[MAX_TABLES];
 static unsigned int          g_table_count;
+static unsigned short        g_pm1a_cnt_port;        /* 0 = no FADT */
+
+static inline void outw(unsigned short port, unsigned short val)
+{
+	__asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
+}
 
 static int memeq(const char *a, const char *b, unsigned int n)
 {
@@ -227,6 +260,28 @@ void acpi_init(void)
 			g_tables[g_table_count++] = t;
 	}
 	g_available = 1;
+
+	/* Cache PM1a_CNT_BLK for S5 shutdown so sys_shutdown doesn't have
+	 * to walk the table list on every call. PM1a is mandatory per
+	 * spec; PM1b is optional and we ignore it. */
+	const struct fadt *fadt = (const struct fadt *)acpi_find_table("FACP");
+	if (fadt && fadt->pm1a_cnt_blk) {
+		g_pm1a_cnt_port = (unsigned short)fadt->pm1a_cnt_blk;
+		serial_write("acpi: PM1a_CNT_BLK port=");
+		log_hex(g_pm1a_cnt_port);
+		serial_putc('\n');
+	}
+}
+
+int acpi_shutdown(void)
+{
+	if (!g_pm1a_cnt_port) return -1;
+	serial_write("acpi: writing S5 to PM1a_CNT_BLK\n");
+	outw(g_pm1a_cnt_port, (unsigned short)((S5_SLP_TYPa << 10) | S5_SLP_EN));
+	/* Power should drop before we return; if it doesn't (wrong
+	 * SLP_TYPa for this platform), let the caller try its fallback. */
+	for (volatile int i = 0; i < 1000000; i++) ;
+	return 0;
 }
 
 int acpi_available(void) { return g_available; }

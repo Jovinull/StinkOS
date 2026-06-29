@@ -28,4 +28,14 @@ int acpi_available(void);
  * struct after inspecting the header length. */
 const void *acpi_find_table(const char *sig4);
 
+/* Attempt an ACPI S5 (soft-off) shutdown via the FADT-described
+ * PM1a_CNT_BLK port: write (SLP_TYPa << 10) | SLP_EN. SLP_TYPa lives in
+ * the DSDT's \_S5_ AML package which we don't evaluate; hard-code 5
+ * (the value used by essentially every PC firmware -- QEMU, VMware,
+ * commodity desktop boards). Returns 0 if the write fired (CPU is
+ * expected to lose power before we read this return value); -1 if no
+ * FADT was found or PM1a_CNT_BLK is unset, in which case the caller
+ * should fall back to the legacy port-0x604 / 0xB004 / VBox path. */
+int acpi_shutdown(void);
+
 #endif
