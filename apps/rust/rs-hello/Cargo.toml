@@ -1,0 +1,26 @@
+[package]
+name = "rs-hello"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+# no_std + no-libc bare-metal build. Output is a static archive (.a)
+# that gets linked with our C crt0 + libstink by i386-elf-ld.
+
+[profile.dev]
+panic = "abort"
+opt-level = "s"
+debug = false
+lto = false
+codegen-units = 1
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+debug = false
+lto = true
+codegen-units = 1
+strip = "symbols"
