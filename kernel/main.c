@@ -2,6 +2,7 @@
  * The bootloader sets a VBE linear-framebuffer mode and hands control here. */
 #include "defs.h"
 #include "memlayout.h"
+#include "cpuid.h"
 
 /* Linker-script symbol pointing at the END of the kernel image. With the
  * higher-half link, __bss_end is a VIRT address (~0x801XXXXX); the PMM
@@ -15,6 +16,12 @@ void kmain(void)
 	serial_init();
 	serial_write("StinkOS: protected mode active\n");
 	bootdiag_add("serial: com1", BOOT_OK);
+
+	/* Log feature bits up front so a boot capture shows whether the host
+	 * CPU advertises PAE + NX -- both required for the §7 PAE+W^X path
+	 * landing next. Boot continues regardless; later phases gate on the
+	 * predicate returns. */
+	cpuid_log_features();
 
 	gdt_init();
 	serial_write("gdt: kernel+user segments and tss loaded\n");
