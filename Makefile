@@ -238,6 +238,11 @@ $(BUILD)/cowtest.elf: apps/crt0.s apps/cowtest.c lib/libstink.h apps/app.ld $(LI
 	$(CC) $(CFLAGS) -c apps/cowtest.c -o $(BUILD)/cowtest_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/cowtest.elf $(BUILD)/crt0.o $(BUILD)/cowtest_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/mounttest.elf: apps/crt0.s apps/mounttest.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/mounttest.c -o $(BUILD)/mounttest_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/mounttest.elf $(BUILD)/crt0.o $(BUILD)/mounttest_app.o $(LIBSTINK_OBJS)
+
 $(BUILD)/anim.elf: apps/crt0.s apps/anim.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
@@ -363,7 +368,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -424,7 +429,8 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  FREEDM.ELF=$(BUILD)/freedm.elf \
 	  FBDEMO.ELF=$(BUILD)/fbdemo.elf \
 	  WXATTACK.ELF=$(BUILD)/wxattack.elf \
-	  COWTEST.ELF=$(BUILD)/cowtest.elf"; \
+	  COWTEST.ELF=$(BUILD)/cowtest.elf \
+	  MOUNTTEST.ELF=$(BUILD)/mounttest.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
 	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
@@ -511,6 +517,12 @@ smoke-acpi: all
 # on subsequent writes (proves the COW #PF handler copied the frame).
 smoke-cow: all
 	@python3 tools/smoke-cow.py
+
+# VFS multi-mount smoke: boots, opens the shell, runs `mounttest`, asserts
+# sys_mount registers slot 1 (B:) + write + read roundtrip through the
+# prefix-routed fs API matches the bytes written.
+smoke-vfs-mounts: all
+	@python3 tools/smoke-vfs-mounts.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so

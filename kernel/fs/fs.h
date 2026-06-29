@@ -25,4 +25,14 @@ int fs_file_size(const char *name);            /* size in bytes, or -1 */
 int fs_file_lba_sectors(const char *name, unsigned int *lba_out,
                         unsigned int *sectors_out);
 
+/* Register an additional StinkFS mount at slot 'slot' (0 = A:, 1 = B:)
+ * backed by ATA 'drive' (0..3), with the directory at 'dir_lba' (2
+ * sectors) and data region [data_lba, data_end). Slot 0 is auto-
+ * registered by fs_init at the Makefile-pinned primary location;
+ * SYS_MOUNT uses this to wire additional StinkFS images at runtime.
+ * Returns 0 on success, -1 if the slot is out of range / already
+ * present / the directory load fails. */
+int fs_mount_register(int slot, int drive, unsigned int dir_lba,
+                      unsigned int data_lba, unsigned int data_end);
+
 #endif

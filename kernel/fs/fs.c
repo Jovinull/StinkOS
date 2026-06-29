@@ -418,13 +418,28 @@ static struct fs_mount *resolve(const char *name_in, const char **name_out)
 
 int fs_init(void)
 {
-	mounts[0].present  = 1;
-	mounts[0].drive    = 0;
-	mounts[0].dir_lba  = FS_DIR_LBA;
-	mounts[0].data_lba = FS_DATA_LBA;
-	mounts[0].data_end = FS_DATA_END;
-	mounts[0].ops      = &stinkfs_ops;
-	return stinkfs_dir_load(&mounts[0]);
+	return fs_mount_register(0, 0, FS_DIR_LBA, FS_DATA_LBA, FS_DATA_END);
+}
+
+int fs_mount_register(int slot, int drive, unsigned int dir_lba,
+                      unsigned int data_lba, unsigned int data_end)
+{
+	if (slot < 0 || slot >= FS_MAX_MOUNTS) return -1;
+	if (mounts[slot].present)              return -1;
+	if (drive < 0 || drive > 3)            return -1;
+	if (data_lba <= dir_lba || data_end <= data_lba) return -1;
+
+	mounts[slot].drive    = drive;
+	mounts[slot].dir_lba  = dir_lba;
+	mounts[slot].data_lba = data_lba;
+	mounts[slot].data_end = data_end;
+	mounts[slot].ops      = &stinkfs_ops;
+	mounts[slot].present  = 1;
+	if (stinkfs_dir_load(&mounts[slot]) != 0) {
+		mounts[slot].present = 0;
+		return -1;
+	}
+	return 0;
 }
 
 /* ---- public API: prefix-routed (A:/B:/...) with slot 0 default ---- */

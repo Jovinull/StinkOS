@@ -435,6 +435,25 @@ static inline int sys_kill(int pid)              { return __syscall(46, pid, 0, 
  * on PMM exhaustion or PCB table full. No COW in v1. */
 static inline int sys_fork(void)                 { return __syscall(83, 0, 0, 0); }
 
+/* Register an additional StinkFS mount slot. slot=0..1 (A:..B:),
+ * drive=0..3 (primary/secondary master/slave), dir_lba = first of two
+ * directory sectors, data_lba = first data sector, data_end = one past
+ * the last data sector. Returns 0 on success, -1 on bad args / slot
+ * already present / disk error. Slot 0 is the boot mount and is
+ * pre-registered by the kernel; sys_mount(1, ...) is the typical use. */
+static inline int sys_mount(int slot, int drive, unsigned int dir_lba,
+                            unsigned int data_lba, unsigned int data_end)
+{
+	int packed = ((slot & 0xFF) << 8) | (drive & 0xFF);
+	int ret;
+	__asm__ volatile ("int $0x80"
+	                  : "=a"(ret)
+	                  : "a"(84), "b"(packed), "c"(dir_lba),
+	                    "d"(data_lba), "S"(data_end)
+	                  : "memory");
+	return ret;
+}
+
 /* Block until any child of the caller exits, reap it, and return its exit
  * code. Returns -1 if the caller has no children. sys_waitpid blocks for a
  * specific PID and returns -1 if that PID is not a child of the caller. */
