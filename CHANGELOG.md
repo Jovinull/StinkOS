@@ -6,6 +6,42 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+## [0.6.0] -- ACPI static-table parsing
+
+Section 7 ACPI lands: kernel locates the RSDP via the IA-PC scan
+(EBDA + BIOS area), walks the RSDT (ACPI 1.0) or XSDT (2.0+), and
+parses the two tables we actually need today -- FADT for soft-off
+shutdown and MADT for CPU + IOAPIC topology. `sys_shutdown` now tries
+real ACPI S5 first (FADT-described PM1a_CNT_BLK port write) and only
+falls back to the legacy QEMU / Bochs / VirtualBox port-magic paths
+when ACPI is absent. MADT reports CPU count + LAPIC base + IOAPIC
+base on the boot serial line, ready for the future SMP bring-up.
+
+No AML interpreter: SLP_TYPa is hardcoded to 5 (the value used by
+essentially every PC firmware including QEMU). See TODO.md
+"AML interpreter -- FUTURE" for the honest impact assessment on
+laptop hardware and the path forward if we ever need it.
+
+### Added
+
+- `kernel/arch/acpi.{c,h}` with `acpi_init`, `acpi_available`,
+  `acpi_find_table(sig4)`, `acpi_shutdown`, `acpi_cpu_count`,
+  `acpi_lapic_base`, `acpi_ioapic_base`
+- IA-PC RSDP scan: 16-byte aligned over EBDA (BDA word at phys
+  0x40E) then 0xE0000..0xFFFFF, checksum-validated
+- RSDT and XSDT walker, every found table checksum-validated and
+  cached for `acpi_find_table` linear scan
+- FADT (signature "FACP") parser exposing PM1a_CNT_BLK
+- ACPI S5 shutdown path: writes `(SLP_TYPa<<10) | SLP_EN` to
+  PM1a_CNT_BLK port, falls through to legacy port-0x604 / 0xB004 /
+  0x4004 if ACPI is absent or refuses
+- MADT (signature "APIC") walker iterating Local APIC (type 0) and
+  IOAPIC (type 1) entries
+- Boot serial log: `acpi: RSDP @ ...`, `acpi: RSDT entries=N`, per-
+  table `acpi: <sig> @ <phys> len=<n>`, `acpi: PM1a_CNT_BLK port=...`,
+  `acpi: cpus=N lapic=... ioapic=...`
+- `bootdiag` row `firmware: acpi` (OK / ABSENT)
+
 ## [0.5.0] -- PAE + W^X
 
 Section 7 of the roadmap: paging upgrades from 32-bit 2-level (4 MiB
