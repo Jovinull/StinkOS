@@ -396,6 +396,26 @@ static struct fs_mount *active_mount(void)
 	return mounts[0].present ? &mounts[0] : 0;
 }
 
+/* Strip an optional "X:" DOS-style mount prefix off the front of a
+ * filename and return the resolved mount slot. X = A..H (case-insens)
+ * indexes mounts[X - 'A']. Without a prefix, defaults to slot 0.
+ * Returns 0 (NULL mount) when the slot is unregistered, letting the
+ * caller fall through to the standard "no such file" error path. */
+static struct fs_mount *resolve(const char *name_in, const char **name_out)
+{
+	char c = name_in[0];
+	if (name_in[1] == ':' && ((c >= 'A' && c <= 'H') ||
+	                          (c >= 'a' && c <= 'h'))) {
+		int slot = (c >= 'a') ? (c - 'a') : (c - 'A');
+		if (slot < 0 || slot >= FS_MAX_MOUNTS || !mounts[slot].present)
+			return 0;
+		*name_out = name_in + 2;
+		return &mounts[slot];
+	}
+	*name_out = name_in;
+	return active_mount();
+}
+
 int fs_init(void)
 {
 	mounts[0].present  = 1;
@@ -407,46 +427,55 @@ int fs_init(void)
 	return stinkfs_dir_load(&mounts[0]);
 }
 
-/* ---- public API (slot 0 only for now; prefix routing lands next) ---- */
+/* ---- public API: prefix-routed (A:/B:/...) with slot 0 default ---- */
 
 int fs_file_write(const char *name, const void *buf, unsigned int size)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_write(m, name, buf, size) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_write(m, rest, buf, size) : -1;
 }
 
 int fs_file_write_at(const char *name, const void *buf, unsigned int size,
                      unsigned int offset)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_write_at(m, name, buf, size, offset) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_write_at(m, rest, buf, size, offset) : -1;
 }
 
 int fs_file_append(const char *name, const void *buf, unsigned int size)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_append(m, name, buf, size) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_append(m, rest, buf, size) : -1;
 }
 
 int fs_file_read(const char *name, void *buf, unsigned int maxsize)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_read_at(m, name, buf, maxsize, 0) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_read_at(m, rest, buf, maxsize, 0) : -1;
 }
 
 int fs_file_read_at(const char *name, void *buf, unsigned int maxsize,
                     unsigned int offset)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_read_at(m, name, buf, maxsize, offset) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_read_at(m, rest, buf, maxsize, offset) : -1;
 }
 
 int fs_file_delete(const char *name)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_delete(m, name) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_delete(m, rest) : -1;
 }
 
+/* fs_file_count + fs_file_info enumerate slot 0 only; menu/ls have
+ * never needed cross-mount enumeration. A later API can add a slot
+ * argument when a real consumer appears. */
 int fs_file_count(void)
 {
 	struct fs_mount *m = active_mount();
@@ -461,13 +490,15 @@ int fs_file_info(int index, char *name_out)
 
 int fs_file_size(const char *name)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_size(m, name) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_size(m, rest) : -1;
 }
 
 int fs_file_lba_sectors(const char *name, unsigned int *lba_out,
                         unsigned int *sectors_out)
 {
-	struct fs_mount *m = active_mount();
-	return m ? m->ops->file_lba_sectors(m, name, lba_out, sectors_out) : -1;
+	const char *rest;
+	struct fs_mount *m = resolve(name, &rest);
+	return m ? m->ops->file_lba_sectors(m, rest, lba_out, sectors_out) : -1;
 }
