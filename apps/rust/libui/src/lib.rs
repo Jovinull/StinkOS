@@ -286,14 +286,14 @@ pub const TASKBAR_BG: u32 = 0x090e14;
 pub fn draw_taskbar(screen_w: i32) {
     fill(0, 0, screen_w, TASKBAR_H, TASKBAR_BG);
     fill(0, TASKBAR_H - 1, screen_w, 1, BORDER);
-    text(16, (TASKBAR_H - 8) / 2, b"StinkOS\0", ACCENT);
+    text16(16, (TASKBAR_H - 16) / 2, b"StinkOS\0", ACCENT);
 
     let mut t = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
     if read_clock(&mut t) == 0 {
         let mut buf = [0u8; 6];
         fmt_hhmm(t.hour, t.minute, &mut buf);
         let tw = 5 * 8; // "HH:MM" = 5 chars × 8 px each
-        text(screen_w - tw - 16, (TASKBAR_H - 8) / 2, &buf, FG_DIM);
+        text16(screen_w - tw - 16, (TASKBAR_H - 16) / 2, &buf, FG_DIM);
     }
 }
 
@@ -339,8 +339,8 @@ impl Button {
         fill(self.x + self.w - 1, self.y,              1, self.h, bdr);
         let lw = nul_len(self.label) as i32 * 8;
         let lx = self.x + (self.w - lw) / 2;
-        let ly = self.y + (self.h - 8) / 2;
-        text(lx, ly, self.label, fg);
+        let ly = self.y + (self.h - 16) / 2;
+        text16(lx, ly, self.label, fg);
     }
 
     pub fn contains(&self, px: i32, py: i32) -> bool {
@@ -392,8 +392,8 @@ impl Tile {
         /* Label centred below icon */
         let label_len = nul_len(self.label) as i32;
         let label_x   = self.x + self.w / 2 - (label_len * 8) / 2;
-        let label_y   = self.y + 14 + icon_h + 8;
-        text(label_x, label_y, self.label, fg);
+        let label_y   = self.y + 14 + icon_h + 6;
+        text16(label_x, label_y, self.label, fg);
     }
 
     pub fn contains(&self, px: i32, py: i32) -> bool {
