@@ -50,6 +50,7 @@ static APPS: &[AppEntry] = &[
     AppEntry { label: b"Net\0",        exec: b"rs-net\0"     },
     AppEntry { label: b"Taskman\0",    exec: b"rs-taskman\0" },
     AppEntry { label: b"Clock\0",      exec: b"rs-clock\0"   },
+    AppEntry { label: b"TODO\0",        exec: b"rs-todo\0"    },
     AppEntry { label: b"Calendar\0",   exec: b"rs-cal\0"     },
     AppEntry { label: b"About\0",      exec: b"rs-about\0"   },
     AppEntry { label: b"Shell\0",      exec: b"shell\0"       },

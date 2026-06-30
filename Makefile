@@ -425,6 +425,18 @@ $(BUILD)/rs-clock.elf: apps/crt0.s apps/rust/rs-clock/Cargo.toml \
 	      --no-whole-archive \
 	      $(LIBSTINK_OBJS) $(LIBGCC)
 
+$(BUILD)/rs-todo.elf: apps/crt0.s apps/rust/rs-todo/Cargo.toml \
+                       apps/rust/rs-todo/src/lib.rs \
+                       apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                       apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                       $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-todo/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-todo.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_todo.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
 $(BUILD)/rs-cal.elf: apps/crt0.s apps/rust/rs-cal/Cargo.toml \
                       apps/rust/rs-cal/src/lib.rs \
                       apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
@@ -622,7 +634,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/exitcode.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/exitcode.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -695,6 +707,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  RS-SYSINFO.ELF=$(BUILD)/rs-sysinfo.elf \
 	  RS-FILES.ELF=$(BUILD)/rs-files.elf \
 	  RS-CALC.ELF=$(BUILD)/rs-calc.elf \
+	  RS-TODO.ELF=$(BUILD)/rs-todo.elf \
 	  RS-CAL.ELF=$(BUILD)/rs-cal.elf \
 	  RS-HEX.ELF=$(BUILD)/rs-hex.elf \
 	  RS-VEC.ELF=$(BUILD)/rs-vec.elf \
