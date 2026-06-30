@@ -11,6 +11,9 @@ int  stink_font_str(int x, int y, const char *s, unsigned int rgb);
 int  stink_font_strn(int x, int y, const char *s, size_t n, unsigned int rgb);
 void stink_font_char(int x, int y, char c, unsigned int rgb);
 
+/* Returns pointer to the 16-byte glyph row data for character c. */
+const unsigned char *stink_font_get_glyph(char c);
+
 /* Font metrics */
 #define STINK_FONT_W  8
 #define STINK_FONT_H  16

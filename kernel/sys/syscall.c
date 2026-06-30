@@ -273,6 +273,7 @@ void app_return(void)
 	int pid = cur ? cur->pid : 0;
 	audio_mix_silence_pid(pid);
 	tcp_close_pid(pid);
+	win_destroy(pid);
 
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
 	 * process menu launched. menu_exit's klongjmp would crash the
@@ -335,7 +336,8 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 2:                                    /* SYS_DRAW: ebx=x ecx=y edx=rgb */
-		fb_putpixel(r->ebx, r->ecx, r->edx);
+		if (!win_redirect_putpixel((int)proc_current()->pid, r->ebx, r->ecx, r->edx))
+			fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
 		break;
 	case 3:                                    /* SYS_GETKEY: -> char or 0 */
@@ -750,6 +752,7 @@ void syscall_dispatch(struct regs *r)
 		target->exit_code = 137;           /* SIGKILL exit-code convention */
 		audio_mix_silence_pid(pid);        /* hush its mixer channels */
 		tcp_close_pid(pid);                /* reap any sockets it left open */
+		win_destroy(pid);                  /* release any compositor window */
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
@@ -874,11 +877,14 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
-	case 22:                                   /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
-		fb_rect(r->ebx >> 16, r->ebx & 0xFFFF,
-		        r->ecx >> 16, r->ecx & 0xFFFF, r->edx);
+	case 22: {                                 /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
+		unsigned int rx = r->ebx >> 16, ry = r->ebx & 0xFFFF;
+		unsigned int rw = r->ecx >> 16, rh = r->ecx & 0xFFFF;
+		if (!win_redirect_fillrect((int)proc_current()->pid, rx, ry, rw, rh, r->edx))
+			fb_rect(rx, ry, rw, rh, r->edx);
 		r->eax = 0;
 		break;
+	}
 	case 23: {                                 /* SYS_SLEEP_MS: ebx = milliseconds */
 		/* PIT runs at 100 Hz, so one tick is 10 ms. Round up so a request
 		 * for any non-zero number of ms always waits at least one tick.
@@ -1089,7 +1095,9 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
+		if (!win_redirect_blit((int)proc_current()->pid, x, y, w, h,
+		                       (const unsigned int *)r->ebx))
+			fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
 		r->eax = 0;
 		break;
 	}

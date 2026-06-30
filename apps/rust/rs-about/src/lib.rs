@@ -85,9 +85,11 @@ fn draw(tick: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-about: start");
+    win_init(b"About StinkOS\0");
 
     loop {
         draw(ticks());
+        win_flush();
 
         let k = poll_key();
         if k == b'q' as i32 || k == b'Q' as i32 || k == 27 { break; }
@@ -95,5 +97,6 @@ pub extern "C" fn main() {
         sleep_ms(500);
     }
 
+    win_done();
     println!("rs-about: exit");
 }

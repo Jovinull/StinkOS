@@ -86,6 +86,106 @@ extern "C" {
     fn sys_sound(freq: u32);
     fn sys_drawline(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32);
     fn stink_font_str(x: i32, y: i32, s: *const u8, rgb: u32) -> i32;
+    // window buffer drawing (libstink_winbuf)
+    fn win_fillrect_buf(buf: *mut u32, stride: u32, x: i32, y: i32, w: i32, h: i32, rgb: u32);
+    fn win_drawline_buf(buf: *mut u32, stride: u32, sw: u32, sh: u32,
+                        x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32);
+    fn win_font_str_buf(buf: *mut u32, stride: u32,
+                        x: i32, y: i32, s: *const u8, rgb: u32) -> i32;
+    // window syscalls
+    fn sys_win_create(w: u32, h: u32) -> i32;
+    fn sys_win_show(x: i32, y: i32, title: *const u8) -> i32;
+    fn sys_win_flush();
+    fn sys_win_destroy();
+    fn sys_win_get_event(ev: *mut WinEvent) -> i32;
+    fn sys_win_raise();
+    fn sys_win_move(x: i32, y: i32);
+}
+
+// ── Window event ─────────────────────────────────────────────────────────────
+
+#[repr(C)]
+pub struct WinEvent {
+    pub kind:    i32,   /* 0=none 1=mouse 2=key 3=close */
+    pub x:       i32,
+    pub y:       i32,
+    pub buttons: i32,
+    pub key:     i32,
+}
+
+pub const WIN_EV_NONE:  i32 = 0;
+pub const WIN_EV_MOUSE: i32 = 1;
+pub const WIN_EV_KEY:   i32 = 2;
+pub const WIN_EV_CLOSE: i32 = 3;
+
+// ── Window buffer ─────────────────────────────────────────────────────────────
+
+pub const WIN_BASE: u32  = 0x12000000;
+pub const SCREEN_W: i32  = 1024;
+pub const SCREEN_H: i32  = 768;
+
+pub fn win_init(title: &[u8]) {
+    unsafe {
+        sys_win_create(SCREEN_W as u32, SCREEN_H as u32);
+        sys_win_show(0, 0, title.as_ptr());
+    }
+}
+
+pub fn win_done() {
+    unsafe { sys_win_destroy(); }
+}
+
+pub fn win_flush() {
+    unsafe { sys_win_flush(); }
+}
+
+pub fn win_poll_event() -> Option<WinEvent> {
+    let mut ev = WinEvent { kind: 0, x: 0, y: 0, buttons: 0, key: 0 };
+    let r = unsafe { sys_win_get_event(&mut ev) };
+    if r == 0 { Some(ev) } else { None }
+}
+
+pub fn win_raise() {
+    unsafe { sys_win_raise(); }
+}
+
+/// Return a raw mutable pointer to the window pixel buffer.
+#[inline(always)]
+pub fn win_buf() -> *mut u32 {
+    WIN_BASE as *mut u32
+}
+
+/// Fill a rectangle in the window buffer.
+pub fn wfill(x: i32, y: i32, w: i32, h: i32, rgb: u32) {
+    unsafe { win_fillrect_buf(win_buf(), SCREEN_W as u32, x, y, w, h, rgb); }
+}
+
+/// Draw a line in the window buffer.
+pub fn wline(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32) {
+    unsafe { win_drawline_buf(win_buf(), SCREEN_W as u32,
+                              SCREEN_W as u32, SCREEN_H as u32,
+                              x0, y0, x1, y1, rgb); }
+}
+
+/// Set a single pixel in the window buffer.
+pub fn wpixel(x: i32, y: i32, rgb: u32) {
+    if x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H { return; }
+    unsafe {
+        *win_buf().add((y * SCREEN_W + x) as usize) = 0xFF000000 | rgb;
+    }
+}
+
+/// Render NUL-terminated text into window buffer using 8×16 font.
+pub fn wtext(x: i32, y: i32, s: &[u8], rgb: u32) -> i32 {
+    unsafe { win_font_str_buf(win_buf(), SCREEN_W as u32, x, y, s.as_ptr(), rgb) }
+}
+
+/// Draw a 1px border rectangle in the window buffer.
+pub fn wrect_outline(x: i32, y: i32, w: i32, h: i32, rgb: u32) {
+    wfill(x,         y,         w, 1, rgb);
+    wfill(x,         y + h - 1, w, 1, rgb);
+    wfill(x,         y,         1, h, rgb);
+    wfill(x + w - 1, y,         1, h, rgb);
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────

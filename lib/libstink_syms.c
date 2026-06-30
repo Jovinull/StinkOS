@@ -219,3 +219,45 @@ int sys_getpid(void)
 {
 	return __syscall(43, 0, 0, 0);
 }
+
+/* SYS_WIN_CREATE (85): ebx=w ecx=h -> 0 or -1 */
+int sys_win_create(unsigned int w, unsigned int h)
+{
+	return __syscall(85, (int)w, (int)h, 0);
+}
+
+/* SYS_WIN_SHOW (86): ebx=x ecx=y edx=*title -> 0 or -1 */
+int sys_win_show(int x, int y, const char *title)
+{
+	return __syscall(86, x, y, (int)title);
+}
+
+/* SYS_WIN_FLUSH (87) */
+void sys_win_flush(void)
+{
+	__syscall(87, 0, 0, 0);
+}
+
+/* SYS_WIN_DESTROY (88) */
+void sys_win_destroy(void)
+{
+	__syscall(88, 0, 0, 0);
+}
+
+/* SYS_WIN_GET_EVENT (89): ebx=*event -> 0 or -1 */
+int sys_win_get_event(void *ev)
+{
+	return __syscall(89, (int)ev, 0, 0);
+}
+
+/* SYS_WIN_RAISE (90) */
+void sys_win_raise(void)
+{
+	__syscall(90, 0, 0, 0);
+}
+
+/* SYS_WIN_MOVE (91): ebx=x ecx=y */
+void sys_win_move(int x, int y)
+{
+	__syscall(91, x, y, 0);
+}

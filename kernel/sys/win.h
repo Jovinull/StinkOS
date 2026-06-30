@@ -81,4 +81,14 @@ void win_move(int pid, int x, int y);
 /* Force a full composite of all visible windows to the framebuffer. */
 void win_composite(void);
 
+/* Redirect drawing syscalls to a process's window buffer.
+ * Returns 1 if the pixel/rect/blit was written to the window buffer,
+ * 0 if the process has no window (caller should write to FB). */
+int win_redirect_putpixel(int pid, unsigned int x, unsigned int y, unsigned int rgb);
+int win_redirect_fillrect(int pid, unsigned int x, unsigned int y,
+                          unsigned int w, unsigned int h, unsigned int rgb);
+int win_redirect_blit(int pid, unsigned int x, unsigned int y,
+                      unsigned int w, unsigned int h,
+                      const unsigned int *src);
+
 #endif

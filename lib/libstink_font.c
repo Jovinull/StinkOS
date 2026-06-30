@@ -166,3 +166,10 @@ int stink_font_str(int x, int y, const char *s, unsigned int rgb)
     }
     return x - ox;
 }
+
+const unsigned char *stink_font_get_glyph(char c)
+{
+    if (c < 32 || c > 126)
+        return FONT[0];
+    return FONT[(unsigned char)c - 32];
+}

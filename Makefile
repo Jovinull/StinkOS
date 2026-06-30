@@ -72,7 +72,8 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
                 $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o \
                 $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o \
-                $(BUILD)/libstink_font.o $(BUILD)/libstink_syms.o
+                $(BUILD)/libstink_font.o $(BUILD)/libstink_syms.o \
+                $(BUILD)/libstink_winbuf.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -213,6 +214,9 @@ $(BUILD)/libstink_gfx.o: lib/libstink_gfx.c lib/libstink.h | $(BUILD)
 
 $(BUILD)/libstink_font.o: lib/libstink_font.c lib/libstink_font.h lib/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_font.c -o $(BUILD)/libstink_font.o
+
+$(BUILD)/libstink_winbuf.o: lib/libstink_winbuf.c lib/libstink_winbuf.h lib/libstink_font.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_winbuf.c -o $(BUILD)/libstink_winbuf.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.

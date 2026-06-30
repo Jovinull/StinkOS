@@ -211,6 +211,67 @@ void win_move(int pid, int x, int y)
     slots[si].dirty = 1;
 }
 
+/* ── Syscall routing (redirect drawing calls to window buffer) ───────────── */
+
+/* Write an ARGB pixel to the window buffer at (x, y). */
+static void win_write_px(struct win_slot *s,
+                         unsigned int x, unsigned int y, unsigned int argb)
+{
+    if (x >= s->w || y >= s->h) return;
+    unsigned int byte_off = (y * s->w + x) * 4;
+    unsigned int fi  = byte_off / 4096;
+    unsigned int off = byte_off % 4096;
+    if ((int)fi >= s->n_frames) return;
+    unsigned int *p = (unsigned int *)((char *)P2V(s->frames[fi]) + off);
+    *p = argb;
+}
+
+/* Put one pixel into the window buffer. Returns 1 if handled, 0 to fall through. */
+int win_redirect_putpixel(int pid, unsigned int x, unsigned int y, unsigned int rgb)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    win_write_px(&slots[si], x, y, 0xFF000000u | rgb);
+    return 1;
+}
+
+/* Fill a rectangle in the window buffer. Returns 1 if handled, 0 to fall through. */
+int win_redirect_fillrect(int pid,
+                          unsigned int x, unsigned int y,
+                          unsigned int w, unsigned int h,
+                          unsigned int rgb)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    struct win_slot *s = &slots[si];
+    unsigned int argb = 0xFF000000u | rgb;
+    for (unsigned int row = 0; row < h; row++) {
+        for (unsigned int col = 0; col < w; col++) {
+            win_write_px(s, x + col, y + row, argb);
+        }
+    }
+    return 1;
+}
+
+/* Blit a user-supplied ARGB buffer into the window buffer. Returns 1/0. */
+int win_redirect_blit(int pid,
+                      unsigned int x, unsigned int y,
+                      unsigned int w, unsigned int h,
+                      const unsigned int *src)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    struct win_slot *s = &slots[si];
+    for (unsigned int row = 0; row < h; row++) {
+        for (unsigned int col = 0; col < w; col++) {
+            unsigned int px = src[row * w + col];
+            if (px >> 24)   /* skip transparent pixels */
+                win_write_px(s, x + col, y + row, px);
+        }
+    }
+    return 1;
+}
+
 /* ── Compositor ──────────────────────────────────────────────────────────── */
 
 /* Blit one window to the framebuffer. Handles page boundaries. */
