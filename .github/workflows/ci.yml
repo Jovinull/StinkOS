@@ -97,6 +97,9 @@ jobs:
       - name: Smoke -- Rust JSON parser
         run: make smoke-rs-json
 
+      - name: Smoke -- Rust Conway's Life
+        run: make smoke-rs-life
+
       - name: Static-analysis sweep
         run: make audit
         continue-on-error: true   # surface findings without failing the build yet
