@@ -24,7 +24,7 @@ const WIN_Y: i32 = 40;
 const WIN_W: i32 = SCREEN_W - 80;
 const WIN_H: i32 = SCREEN_H - 80;
 
-const ROW_H:   i32 = 14;
+const ROW_H:   i32 = 18;
 const BYTES_PER_ROW: usize = 16;
 const BUF_CAP: usize = 4096;
 const MAX_FILES: usize = 64;
@@ -44,7 +44,7 @@ fn draw_header(name: &[u8; 16], file_len: usize, file_idx: usize, file_count: us
     let cx = WIN_X + 8;
 
     // File name
-    text(cx, title_y, name, FG);
+    text16(cx, title_y, name, FG);
 
     // Size
     let mut sbuf = [0u8; 24];
@@ -60,7 +60,7 @@ fn draw_header(name: &[u8; 16], file_len: usize, file_idx: usize, file_count: us
         sbuf[pos] = b')'; pos += 1;
         sbuf[pos] = 0;
     }
-    text(cx + 16 * 8, title_y, &sbuf, FG_DIM);
+    text16(cx + 16 * 8, title_y, &sbuf, FG_DIM);
 
     // File index indicator
     let mut ibuf = [0u8; 16];
@@ -74,7 +74,7 @@ fn draw_header(name: &[u8; 16], file_len: usize, file_idx: usize, file_count: us
         for i in 0..l2 { ibuf[pos] = tmp[i]; pos += 1; }
         ibuf[pos] = 0;
     }
-    text(WIN_X + WIN_W - 60, title_y, &ibuf, FG_DIM);
+    text16(WIN_X + WIN_W - 60, title_y, &ibuf, FG_DIM);
 
     // Separator
     fill(WIN_X + 1, title_y + 12, WIN_W - 2, 1, BORDER);
@@ -141,20 +141,20 @@ fn draw_dump(buf: &[u8], file_len: usize, scroll: usize, cx: i32, top_y: i32, bo
         // Offset
         for i in 0..8usize {
             let mut cb = [line[i], 0];
-            text(cx + i as i32 * char_w, y, &cb, FG_DIM);
+            text16(cx + i as i32 * char_w, y, &cb, FG_DIM);
             cb[0] = 0; // silence unused warning
         }
         // Spacer ": "
         {
             let cb = [b':', b' ', 0];
-            text(cx + 8 * char_w, y, &cb, BORDER);
+            text16(cx + 8 * char_w, y, &cb, BORDER);
         }
         // Hex bytes
         for i in 10..=(10 + BYTES_PER_ROW * 3) {
             if i >= lp { break; }
             let col = if i >= 10 && i <= 10 + BYTES_PER_ROW * 3 { 0x8899aa } else { FG };
             let mut cb = [line[i], 0u8];
-            text(cx + i as i32 * char_w, y, &cb, col);
+            text16(cx + i as i32 * char_w, y, &cb, col);
         }
         // Pipe + ASCII
         let pipe_i = 10 + BYTES_PER_ROW * 3 + 2;
@@ -162,7 +162,7 @@ fn draw_dump(buf: &[u8], file_len: usize, scroll: usize, cx: i32, top_y: i32, bo
             if i >= line.len() { break; }
             let col = if line[i] == b'|' { BORDER } else { FG };
             let mut cb = [line[i], 0u8];
-            text(cx + i as i32 * char_w, y, &cb, col);
+            text16(cx + i as i32 * char_w, y, &cb, col);
         }
 
         y += ROW_H;
@@ -220,9 +220,9 @@ pub extern "C" fn main() {
             draw_dump(&buf, file_len, scroll, cx, top_y, bot_y);
 
             // Footer
-            let footer_y = WIN_Y + WIN_H - 16;
+            let footer_y = WIN_Y + WIN_H - 20;
             fill(WIN_X + 1, footer_y - 4, WIN_W - 2, 1, BORDER);
-            text(cx, footer_y, b"Left/Right: file   Up/Down: scroll   Q: quit\0", FG_DIM);
+            text16(cx, footer_y, b"Left/Right: file   Up/Down: scroll   Q: quit\0", FG_DIM);
 
             dirty = false;
         }

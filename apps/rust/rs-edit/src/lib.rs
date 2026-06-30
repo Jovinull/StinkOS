@@ -26,10 +26,10 @@ const WIN_H:    i32 = SCREEN_H - 60;
 
 // Titlebar height is 33px (from draw_window_frame) + 1px separator = 34
 const CONTENT_TOP: i32 = WIN_Y + 34;
-const CONTENT_BOT: i32 = WIN_Y + WIN_H - 20; // leave 20px for status bar
+const CONTENT_BOT: i32 = WIN_Y + WIN_H - 22; // leave 22px for status bar
 const TEXT_X:      i32 = WIN_X + 12;
 const TEXT_W:      i32 = WIN_W - 24;
-const LINE_H:      i32 = 14;
+const LINE_H:      i32 = 18;
 const CHARS_PER_LINE: usize = (TEXT_W / 8) as usize;
 const VISIBLE_LINES:  usize = ((CONTENT_BOT - CONTENT_TOP) / LINE_H) as usize;
 
@@ -284,9 +284,9 @@ fn file_picker() -> PickResult {
     let mut prev_k = 0i32;
 
     // Footer hint
-    let footer_y = WIN_Y + WIN_H - 18;
+    let footer_y = WIN_Y + WIN_H - 20;
     fill(WIN_X + 1, footer_y - 3, WIN_W - 2, 1, BORDER);
-    text(WIN_X + 12, footer_y, b"Up/Down - select   N - new file   Enter - open   Esc - cancel\0", FG_DIM);
+    text16(WIN_X + 12, footer_y, b"Up/Down - select   N - new file   Enter - open   Esc - cancel\0", FG_DIM);
 
     let mut redraw = true;
     loop {
@@ -294,7 +294,7 @@ fn file_picker() -> PickResult {
             fill(WIN_X + 1, list_y - 2, WIN_W - 2, CONTENT_BOT - list_y + 2, SURFACE);
 
             if count == 0 {
-                text(WIN_X + 16, list_y, b"(no text files)\0", FG_DIM);
+                text16(WIN_X + 16, list_y, b"(no text files)\0", FG_DIM);
             } else {
                 for v in 0..vis {
                     let idx = scroll + v;
@@ -303,7 +303,7 @@ fn file_picker() -> PickResult {
                     let is_s  = idx == sel;
                     fill(WIN_X + 1, ry, WIN_W - 2, row_h - 1, if is_s { SURFACE_ALT } else { SURFACE });
                     if is_s { fill(WIN_X + 1, ry, 3, row_h - 1, ACCENT); }
-                    text(WIN_X + 12, ry + (row_h - 8) / 2, &names[idx],
+                    text16(WIN_X + 12, ry + (row_h - 16) / 2, &names[idx],
                          if is_s { ACCENT } else { FG });
                 }
             }
@@ -374,7 +374,7 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
         let mut lnbuf = [0u8; 12];
         fmt_u32((line_num + 1) as u32, &mut lnbuf);
         let lnw = nul_len(&lnbuf) as i32;
-        text(WIN_X + 4 + (26 - lnw * 8), row_y + (LINE_H - 8) / 2, &lnbuf, FG_DIM);
+        text16(WIN_X + 4 + (26 - lnw * 8), row_y + (LINE_H - 16) / 2, &lnbuf, FG_DIM);
 
         // Text content
         let ls   = ed.line_start(line_num);
@@ -385,7 +385,7 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
             let mut lbuf = [0u8; 128];
             for i in 0..disp { lbuf[i] = ed.buf[ls + i]; }
             lbuf[disp] = 0;
-            text(text_x, row_y + (LINE_H - 8) / 2, &lbuf, FG);
+            text16(text_x, row_y + (LINE_H - 16) / 2, &lbuf, FG);
         }
 
         // Cursor
@@ -397,9 +397,9 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
     }
 
     // Status bar
-    let st_y = WIN_Y + WIN_H - 18;
+    let st_y = WIN_Y + WIN_H - 20;
     fill(WIN_X + 1, st_y - 3, WIN_W - 2, 1, BORDER);
-    fill(WIN_X + 1, st_y - 2, WIN_W - 2, 20, 0x090e14);
+    fill(WIN_X + 1, st_y - 2, WIN_W - 2, 22, 0x090e14);
 
     // Position indicator
     let mut posbuf = [0u8; 24];
@@ -413,8 +413,8 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
     for i in 0..n { posbuf[pi] = tmp[i]; pi += 1; }
     posbuf[pi] = 0;
 
-    text(WIN_X + 12, st_y, &posbuf, FG_DIM);
-    text(WIN_X + 80, st_y, b"Ctrl+S save  Ctrl+Z undo  Ctrl+Q quit\0", FG_DIM);
+    text16(WIN_X + 12, st_y, &posbuf, FG_DIM);
+    text16(WIN_X + 80, st_y, b"Ctrl+S save  Ctrl+Z undo  Ctrl+Q quit\0", FG_DIM);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

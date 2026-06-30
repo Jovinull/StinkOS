@@ -104,7 +104,7 @@ fn draw_list(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
     let list_top = WIN_Y + 34 + 8;
 
     if count == 0 {
-        text(CX, list_top + 10, b"No items. Press A to add.\0", FG_DIM);
+        text16(CX, list_top + 10, b"No items. Press A to add.\0", FG_DIM);
     } else {
         for vi in 0..visible {
             let idx = scroll + vi;
@@ -120,7 +120,7 @@ fn draw_list(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
             let cbx = CX + 2;
             let done = items[idx].done;
             let check_col = if done { 0x57c96d } else { FG_DIM };
-            text(cbx, ry + (ROW_H - 8) / 2, if done { b"[x]\0" } else { b"[ ]\0" }, check_col);
+            text16(cbx, ry + (ROW_H - 8) / 2, if done { b"[x]\0" } else { b"[ ]\0" }, check_col);
 
             // Text
             let text_col = if done { FG_DIM } else if is_sel { FG } else { FG };
@@ -128,7 +128,7 @@ fn draw_list(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
             let l = items[idx].len.min(ITEM_CAP - 1);
             tmp[..l].copy_from_slice(&items[idx].text[..l]);
             tmp[l] = 0;
-            text(cbx + 32, ry + (ROW_H - 8) / 2, &tmp, text_col);
+            text16(cbx + 32, ry + (ROW_H - 8) / 2, &tmp, text_col);
         }
     }
 
@@ -146,12 +146,12 @@ fn draw_list(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
     for i in 0..l2 { sbuf[sp] = tmp2[i]; sp += 1; }
     let suffix = b" done\0";
     for b in suffix { sbuf[sp] = *b; sp += 1; if *b == 0 { break; } }
-    text(CX, stats_y + 2, &sbuf, FG_DIM);
+    text16(CX, stats_y + 2, &sbuf, FG_DIM);
 
     // Hint bar
     let hint_y = WIN_Y + WIN_H - 18;
     fill(WIN_X + 1, hint_y - 4, WIN_W - 2, 1, BORDER);
-    text(CX, hint_y, b"A add  Space toggle  D del  S save  Q quit\0", FG_DIM);
+    text16(CX, hint_y, b"A add  Space toggle  D del  S save  Q quit\0", FG_DIM);
 }
 
 // ── Inline input ──────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ fn read_line(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
     let prompt_y = WIN_Y + WIN_H - 54;
     fill(WIN_X + 1, prompt_y - 4, WIN_W - 2, 1, BORDER);
     fill(WIN_X + 1, prompt_y, WIN_W - 2, 20, 0x0e1a0e);
-    text(CX, prompt_y + 6, b"New item: \0", ACCENT);
+    text16(CX, prompt_y + 6, b"New item: \0", ACCENT);
 
     let mut buf = [0u8; ITEM_CAP];
     let mut len = 0usize;
@@ -175,7 +175,7 @@ fn read_line(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
         disp[..len].copy_from_slice(&buf[..len]);
         disp[len] = b'_';
         disp[len + 1] = 0;
-        text(input_x, prompt_y + 6, &disp, FG);
+        text16(input_x, prompt_y + 6, &disp, FG);
 
         let k = poll_key();
         if k != 0 && k != prev_k {
@@ -197,7 +197,7 @@ fn read_line(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
         draw_list(items, count, sel, scroll, visible, dirty);
         fill(WIN_X + 1, prompt_y - 4, WIN_W - 2, 1, BORDER);
         fill(WIN_X + 1, prompt_y, WIN_W - 2, 20, 0x0e1a0e);
-        text(CX, prompt_y + 6, b"New item: \0", ACCENT);
+        text16(CX, prompt_y + 6, b"New item: \0", ACCENT);
 
         sleep_ms(16);
     }

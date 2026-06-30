@@ -54,15 +54,15 @@ const MONTH_NAMES: [&[u8]; 13] = [
 fn draw_num_right(x: i32, y: i32, n: u32, color: u32, field_w: i32) {
     let mut buf = [0u8; 12];
     let len = fmt_u32(n, &mut buf) as i32;
-    text(x + field_w - len * 8, y, &buf, color);
+    text16(x + field_w - len * 8, y, &buf, color);
 }
 
 fn draw_year_month(y: u32, m: u32) {
     let mut buf = [0u8; 12];
     let yl = fmt_u32(y, &mut buf);
     buf[yl] = 0;
-    text(CX, WIN_Y + 34 + 8, MONTH_NAMES[m as usize], ACCENT);
-    text(CX + 120, WIN_Y + 34 + 8, &buf, FG);
+    text16(CX, WIN_Y + 34 + 10, MONTH_NAMES[m as usize], ACCENT);
+    text16(CX + 120, WIN_Y + 34 + 10, &buf, FG);
 }
 
 fn draw_grid(month: u32, year: u32, today_day: u32, today_month: u32, today_year: u32) {
@@ -78,7 +78,7 @@ fn draw_grid(month: u32, year: u32, today_day: u32, today_month: u32, today_year
     for d in 0..7usize {
         let hx = CX + d as i32 * cell_w;
         let col = if d == 0 || d == 6 { 0x7b8a9a } else { FG_DIM };
-        text(hx + (cell_w - 16) / 2, grid_top + 4, day_names[d], col);
+        text16(hx + (cell_w - 16) / 2, grid_top + 4, day_names[d], col);
     }
     fill(WIN_X + 1, grid_top + 16, WIN_W - 2, 1, BORDER);
 
@@ -116,9 +116,9 @@ fn redraw(month: u32, year: u32, today_day: u32, today_month: u32, today_year: u
     draw_grid(month, year, today_day, today_month, today_year);
 
     // Footer
-    let fy = WIN_Y + WIN_H - 18;
+    let fy = WIN_Y + WIN_H - 22;
     fill(WIN_X + 1, fy - 4, WIN_W - 2, 1, BORDER);
-    text(CX, fy, b"Left/Right: month   Q: quit\0", FG_DIM);
+    text16(CX, fy, b"Left/Right: month   Q: quit\0", FG_DIM);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

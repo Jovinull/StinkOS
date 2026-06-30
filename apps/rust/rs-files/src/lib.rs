@@ -78,7 +78,7 @@ pub extern "C" fn main() {
             fill(WIN_X + 1, content_y, WIN_W - 2, WIN_H - 34, SURFACE);
 
             if count == 0 {
-                text(WIN_X + 16, list_top, b"(no files)\0", FG_DIM);
+                text16(WIN_X + 16, list_top, b"(no files)\0", FG_DIM);
             } else {
                 for vis in 0..visible {
                     let idx = scroll + vis;
@@ -97,14 +97,14 @@ pub extern "C" fn main() {
 
                     /* Filename */
                     let name_rgb = if is_sel { ACCENT } else { FG };
-                    text(WIN_X + 12, row_y + (ROW_H - 8) / 2, &names[idx], name_rgb);
+                    text16(WIN_X + 12, row_y + (ROW_H - 8) / 2, &names[idx], name_rgb);
 
                     /* Size (right-aligned in a 100px column) */
                     let mut sbuf = [0u8; 16];
                     fmt_size(sizes[idx], &mut sbuf);
                     let slen  = nul_len(&sbuf) as i32;
                     let size_x = WIN_X + WIN_W - 8 - slen * 8;
-                    text(size_x, row_y + (ROW_H - 8) / 2, &sbuf, FG_DIM);
+                    text16(size_x, row_y + (ROW_H - 16) / 2, &sbuf, FG_DIM);
                 }
             }
 
@@ -120,7 +120,7 @@ pub extern "C" fn main() {
             /* Footer */
             let footer_y = WIN_Y + WIN_H - 20;
             fill(WIN_X + 1, footer_y - 4, WIN_W - 2, 1, BORDER);
-            text(WIN_X + 12, footer_y, b"Up/Down - navigate   Enter - launch   Q - quit\0", FG_DIM);
+            text16(WIN_X + 12, footer_y, b"Up/Down - navigate   Enter - launch   Q - quit\0", FG_DIM);
 
             need_draw = false;
         }

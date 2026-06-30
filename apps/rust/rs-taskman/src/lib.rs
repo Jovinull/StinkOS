@@ -26,11 +26,11 @@ const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
 const CONTENT_X: i32 = WIN_X + 8;
 const CONTENT_Y: i32 = WIN_Y + 34;
-const ROW_H: i32 = 14;
+const ROW_H: i32 = 20;
 const MAX_PROCS: usize = 32;
 
 // Visible rows = (content area height - header - hint bar) / ROW_H
-const VISIBLE: usize = ((WIN_H - 34 - 14 - 20 - 8) / ROW_H) as usize;
+const VISIBLE: usize = ((WIN_H - 34 - 22 - 22 - 8) / ROW_H) as usize;
 
 // ── Process parsing ───────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ fn draw(procs: &[ProcEntry; MAX_PROCS], count: usize, sel: usize, my_pid: i32) {
     // Column header
     let hy = CONTENT_Y;
     fill(CONTENT_X, hy, WIN_W - 16, ROW_H + 2, SURFACE);
-    text(CONTENT_X + 4, hy + 3, b"PID  STATE PRIO PARENT NAME\0", FG_DIM);
+    text16(CONTENT_X + 4, hy + (ROW_H - 16) / 2, b"PID  STATE PRIO PARENT NAME\0", FG_DIM);
     fill(CONTENT_X, hy + ROW_H + 2, WIN_W - 16, 1, BORDER);
 
     // Process rows
@@ -119,7 +119,7 @@ fn draw(procs: &[ProcEntry; MAX_PROCS], count: usize, sel: usize, my_pid: i32) {
         let l = procs[pi].len.min(49);
         tmp[..l].copy_from_slice(&procs[pi].line[..l]);
         tmp[l] = 0;
-        text(CONTENT_X + 4, ry + 3, &tmp, fg);
+        text16(CONTENT_X + 4, ry + (ROW_H - 16) / 2, &tmp, fg);
     }
 
     // Scroll indicator
@@ -133,16 +133,16 @@ fn draw(procs: &[ProcEntry; MAX_PROCS], count: usize, sel: usize, my_pid: i32) {
     }
 
     // Hint bar
-    let hint_y = WIN_Y + WIN_H - 18;
+    let hint_y = WIN_Y + WIN_H - 22;
     fill(WIN_X + 8, hint_y - 2, WIN_W - 16, 1, BORDER);
-    text(CONTENT_X, hint_y + 2, b"K kill  auto-refresh 2s  Q quit  (yellow=self)\0", FG_DIM);
+    text16(CONTENT_X, hint_y, b"K kill  auto-refresh 2s  Q quit  (yellow=self)\0", FG_DIM);
 
     // Count
     let mut cbuf = [0u8; 12];
     let cn = fmt_u32(count as u32, &mut cbuf);
     let _ = cn;
-    text(WIN_X + WIN_W - 80, hint_y + 2, b"procs: \0", FG_DIM);
-    text(WIN_X + WIN_W - 80 + 56, hint_y + 2, &cbuf, FG);
+    text16(WIN_X + WIN_W - 80, hint_y, b"procs: \0", FG_DIM);
+    text16(WIN_X + WIN_W - 80 + 56, hint_y, &cbuf, FG);
 
     _ = visible_end;
 }

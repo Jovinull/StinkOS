@@ -27,7 +27,7 @@ const BTN_GAP: i32 = 10;
 // ── Section helpers ───────────────────────────────────────────────────────────
 
 fn section_header(label: &[u8], y: i32) {
-    text(CX, y, label, ACCENT);
+    text16(CX, y, label, ACCENT);
     fill(CX, y + 11, WIN_W - 40, 1, BORDER);
 }
 
@@ -63,8 +63,8 @@ fn render(mx: i32, my: i32, pressed: Option<usize>, layout: i32, muted: bool) {
         Button { label, x: bx, y: kb_y, w: BW, h: BH }.draw(state);
     }
     let layout_name: &[u8] = if layout == 0 { b"US (QWERTY)\0" } else { b"BR (ABNT2)\0" };
-    text(CX + 2*(BW + BTN_GAP) + 8, kb_y + (BH - 8) / 2, b"active: \0", FG_DIM);
-    text(CX + 2*(BW + BTN_GAP) + 72, kb_y + (BH - 8) / 2, layout_name, FG);
+    text16(CX + 2*(BW + BTN_GAP) + 8, kb_y + (BH - 8) / 2, b"active: \0", FG_DIM);
+    text16(CX + 2*(BW + BTN_GAP) + 72, kb_y + (BH - 8) / 2, layout_name, FG);
 
     // ── Sound section ────────────────────────────────────────────────────────
     let snd_section_y = kb_y + BH + 28;
@@ -92,7 +92,7 @@ fn render(mx: i32, my: i32, pressed: Option<usize>, layout: i32, muted: bool) {
     // ── Quit hint ────────────────────────────────────────────────────────────
     let hint_y = WIN_Y + WIN_H - 20;
     fill(WIN_X + 8, hint_y - 4, WIN_W - 16, 1, BORDER);
-    text(CX, hint_y + 4, b"Q  close\0", FG_DIM);
+    text16(CX, hint_y + 4, b"Q  close\0", FG_DIM);
 
     draw_cursor(mx, my);
 }
