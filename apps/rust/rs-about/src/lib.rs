@@ -86,6 +86,12 @@ pub extern "C" fn main() {
 
     loop {
         draw(ticks(), cw, ch);
+        if let Some(ev) = win_poll_event() {
+            if ev.kind == WIN_EV_RESIZE && win_resize(ev.x, ev.y) {
+                cw = ev.x; ch = ev.y;
+            }
+        }
+
         win_flush();
 
         let k = poll_key();

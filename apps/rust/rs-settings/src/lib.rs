@@ -139,6 +139,12 @@ pub extern "C" fn main() {
             render(mx, my, hov, layout, muted, cw, ch);
             dirty = false;
         }
+        if let Some(ev) = win_poll_event() {
+            if ev.kind == WIN_EV_RESIZE && win_resize(ev.x, ev.y) {
+                cw = ev.x; ch = ev.y; dirty = true;
+            }
+        }
+
         win_flush();
         sleep_ms(16);
     }

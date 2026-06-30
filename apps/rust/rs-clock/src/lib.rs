@@ -191,6 +191,16 @@ pub extern "C" fn main() {
             }
         }
 
+        if let Some(ev) = win_poll_event() {
+            if ev.kind == WIN_EV_RESIZE && win_resize(ev.x, ev.y) {
+                cw = ev.x; ch = ev.y;
+                fill(0, 0, cw, ch, BG);
+                window_frame(0, 0, cw, ch, b"Digital Clock\0");
+                fill(8, 34, cw - 16, ch - 42, SURFACE);
+                prev_h = 99; prev_m = 99; prev_s = 99;
+            }
+        }
+
         win_flush();
         sleep_ms(200);
     }

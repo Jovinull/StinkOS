@@ -27,11 +27,22 @@ static struct win_slot slots[WIN_MAX];
 static int focused_slot = -1;    /* index into slots[], -1 = none */
 
 /* Drag state: set when user holds button 1 on a window titlebar. */
-#define DRAG_TITLEBAR_H 34       /* must match OY used by apps */
+#define DRAG_TITLEBAR_H  34   /* must match OY used by apps */
+#define RESIZE_BORDER     6   /* px from right/bottom edge that starts a resize drag */
 static int drag_slot  = -1;
 static int drag_off_x =  0;
 static int drag_off_y =  0;
 static int prev_btn   =  0;
+
+/* Border-resize state: compositor tracks target size; pushes WIN_EV_RESIZE on release. */
+static int resize_slot    = -1;
+static int resize_edge    =  0;  /* bit0=right, bit1=bottom */
+static int resize_base_w  =  0;
+static int resize_base_h  =  0;
+static int resize_start_x =  0;
+static int resize_start_y =  0;
+static int resize_cur_w   =  0;
+static int resize_cur_h   =  0;
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 
@@ -194,6 +205,7 @@ void win_destroy(int pid)
 
     if (focused_slot == si) focused_slot = -1;
     if (drag_slot    == si) drag_slot    = -1;
+    if (resize_slot  == si) resize_slot  = -1;
 
     /* Unmap from user VAS. */
     paging_unmap_win_buf(USER_WIN_BASE, s->n_frames);
@@ -523,6 +535,39 @@ static void route_mouse_events(void)
         return;
     }
 
+    /* ── Border resize in progress ───────────────────────────────────── */
+    if (resize_slot >= 0) {
+        if (btn1) {
+            int new_w = resize_base_w;
+            int new_h = resize_base_h;
+            if (resize_edge & 1) {
+                new_w = resize_base_w + (mx - resize_start_x);
+                if (new_w < 80)        new_w = 80;
+                if (new_w > SCREEN_W)  new_w = SCREEN_W;
+            }
+            if (resize_edge & 2) {
+                new_h = resize_base_h + (my - resize_start_y);
+                if (new_h < 60)                   new_h = 60;
+                if (new_h > SCREEN_H - TASKBAR_H) new_h = SCREEN_H - TASKBAR_H;
+            }
+            if (new_w != resize_cur_w || new_h != resize_cur_h) {
+                resize_cur_w = new_w;
+                resize_cur_h = new_h;
+                for (int i = 0; i < WIN_MAX; i++)
+                    if (slots[i].pid && slots[i].visible) slots[i].dirty = 1;
+            }
+        }
+        if (btn1_up) {
+            struct win_event ev = { WIN_EV_RESIZE, resize_cur_w, resize_cur_h, 0, 0 };
+            ev_push(&slots[resize_slot], &ev);
+            resize_slot = -1;
+            for (int i = 0; i < WIN_MAX; i++)
+                if (slots[i].pid && slots[i].visible) slots[i].dirty = 1;
+        }
+        prev_btn = (int)mb;
+        return;
+    }
+
     /* ── Taskbar area ────────────────────────────────────────────────────── */
     if (my >= SCREEN_H - TASKBAR_H) {
         if (btn1_down) {
@@ -558,6 +603,27 @@ static void route_mouse_events(void)
             focused_slot = top_si;
         prev_btn = (int)mb;
         return;
+    }
+
+    /* ── Border resize: right / bottom edge ──────────────────────────────── */
+    if (btn1_down) {
+        int rel_x = mx - s->x;
+        int rel_y = my - s->y;
+        int on_right  = (rel_x >= (int)s->w - RESIZE_BORDER);
+        int on_bottom = (rel_y >= (int)s->h - RESIZE_BORDER);
+        if (on_right || on_bottom) {
+            resize_slot    = top_si;
+            resize_edge    = (on_right ? 1 : 0) | (on_bottom ? 2 : 0);
+            resize_base_w  = (int)s->w;
+            resize_base_h  = (int)s->h;
+            resize_start_x = mx;
+            resize_start_y = my;
+            resize_cur_w   = (int)s->w;
+            resize_cur_h   = (int)s->h;
+            if (focused_slot != top_si) focused_slot = top_si;
+            prev_btn = (int)mb;
+            return;
+        }
     }
 
     /* ── Normal event routing ────────────────────────────────────────────── */
@@ -603,6 +669,20 @@ void win_composite(void)
             blit_window(s);
             s->dirty = 0;
         }
+    }
+
+    /* Resize preview: draw 2px outline at target size while border-dragging. */
+    if (resize_slot >= 0 && resize_slot < WIN_MAX && slots[resize_slot].pid) {
+        struct win_slot *rs = &slots[resize_slot];
+        unsigned int px = (rs->x < 0) ? 0u : (unsigned int)rs->x;
+        unsigned int py = (rs->y < 0) ? 0u : (unsigned int)rs->y;
+        unsigned int pw = (unsigned int)resize_cur_w;
+        unsigned int ph = (unsigned int)resize_cur_h;
+        unsigned int ac = 0x57f287u;
+        fb_rect(px,          py,          pw, 2,  ac);  /* top    */
+        fb_rect(px,          py + ph - 2, pw, 2,  ac);  /* bottom */
+        fb_rect(px,          py,          2,  ph, ac);  /* left   */
+        fb_rect(px + pw - 2, py,          2,  ph, ac);  /* right  */
     }
 
     /* Taskbar always redraws on top of windows. */

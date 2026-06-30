@@ -120,6 +120,21 @@ pub const WIN_EV_RESIZE: i32 = 4;  /* x=new_w, y=new_h */
 pub const SCREEN_W_FULL: i32 = 1024;
 pub const SCREEN_H_FULL: i32 = 768 - 24; /* 768 minus taskbar */
 
+// ── Error type ───────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum StinkError {
+    OutOfMemory      = 1,
+    InvalidArg       = 2,
+    NotFound         = 3,
+    PermissionDenied = 4,
+    IoError          = 5,
+    WindowError      = 6,
+}
+
+pub type StinkResult<T> = Result<T, StinkError>;
+
 // ── Window buffer ─────────────────────────────────────────────────────────────
 
 pub const WIN_BASE: u32  = 0x12000000;
