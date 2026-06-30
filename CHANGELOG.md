@@ -6,6 +6,52 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+### Added
+
+- `apps/rust/rs-life/` -- Conway's Game of Life in pure Rust: 128x96
+  toroidal grid, 8x8 px cells on the linear framebuffer, Gosper glider
+  gun seed pattern (Conway/Gosper 1970). Diff-painting so only changed
+  cells repaint between generations. Controls `q` quit, `r` reset,
+  space pause. Periodic serial log `life: gen=N alive=N` every 50
+  generations.
+- `tools/smoke-rs-life.py` + `make smoke-rs-life` -- drives shell to
+  `run rs-life`, asserts gen counter monotonic + alive count varies
+  across multiple distinct values (proves the step() rule fires, not
+  a static grid).
+- CI step `Smoke -- Rust Conway's Life` covering the above.
+
+## [0.10.0] -- rs-json + test-headless split
+
+First real Rust app exercising Rust's memory-safety win over C: JSON
+parsing. Zero external crates (StinkOS rule), recursive-descent parser,
+64-deep nesting cap, ~390 LOC pure Rust. Round-trips nested objects,
+arrays, escape sequences, integers + floats, booleans, null, empty
+`{}` and `[]` through libstink K&R malloc behind `#[global_allocator]`.
+
+### Added
+
+- `apps/rust/rs-json/` -- `Value` enum (Null/Bool/Number/String/Array/
+  Object), recursive-descent parser, pretty printer (2-space indent).
+  Reads `TEST.JSON` from StinkFS and pretty-prints back via libstink
+  `println!`.
+- `tools/smoke-rs-json.py` + `make smoke-rs-json` validates every
+  expected fragment of the round-trip output.
+
+### Changed
+
+- Split shell + wxattack phase OUT of `test-headless` into dedicated
+  `smoke-wxattack.py`. CI runner slack pushed late assertions past
+  timeout; separation cuts the menu sweep to deterministic timing.
+- Added `-snapshot` to `test-headless` QEMU so writes don't bloat
+  `os.bin`'s stinkfs across runs (the old behaviour filled
+  `FS_MAX_FILES` on the 3rd or 4th local run).
+- StinkFS directory grown 2 -> 4 sectors (`FS_MAX_FILES` 40 -> 80) so
+  the v0.9 Rust apps + future userland fit headroom.
+- `mounttest` data_lba adjusted for the larger dir region.
+- CI workflow runs 10 dedicated smoke targets after `test-headless`
+  (multiproc, acpi, cow, vfs-mounts, wxattack, exitcode, rs-hello,
+  rs-alloc, rs-stdio, rs-json).
+
 ## [0.9.0] -- Rust userland scaffolding
 
 The first Rust apps run under StinkOS. Cargo + a custom

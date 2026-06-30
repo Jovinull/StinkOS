@@ -11,14 +11,19 @@ truth is the code itself — this document only summarises the shape.
 ```
 boot/        16-bit + 32-bit boot stages, GDT/IDT/usermode asm stubs
 kernel/
-  arch/      paging, PMM, GDT, low-level I/O macros
+  arch/      PAE paging, PMM (refcount-aware), GDT, ACPI, CPUID, I/O macros
   drivers/   audio, input, net, storage, video, misc (RTC, serial)
-  fs/        StinkFS on-disk format, MBR helpers, VFS descriptor layer
-  sys/       interrupts, syscalls, process table, pipes, ELF loader, boot diag
+  fs/        StinkFS on-disk format, MBR helpers, VFS multi-mount + ops table
+  sys/       interrupts, syscalls, process table, fork/exec/wait, COW handler,
+             pipes, signals, ELF loader, boot diag
   ui/        graphical menu / launcher
-lib/         libstink: userland C wrappers, allocator, stdio, http, sha256
+lib/         libstink: userland C wrappers (static inline) + libstink_syms.c
+             (non-inline shims for Rust extern "C"), allocator, stdio, http, sha256
 apps/        ring-3 programs (shell, snake, doom, installer, stink-pkg, ...)
-tools/       Python helpers (StinkFS image builder, WAD fetcher, repo server)
+  rust/      Rust userland: i686-stinkos target spec, shared libstink rlib,
+             rs-hello / rs-alloc / rs-stdio / rs-json / rs-life
+tools/       Python helpers (StinkFS image builder, WAD fetcher, repo server,
+             smoke drivers, screenshot capture)
 ```
 
 `kernel/defs.h` is an umbrella header that re-includes every subsystem
@@ -46,9 +51,12 @@ hardware:
    registers + stack, zeroes the kernel `.bss`, and calls `kmain`.
 5. **`kmain`** (`kernel/main.c`) wires every subsystem in a fixed order,
    each followed by a one-line `bootdiag_add()` for the POST screen:
-   serial → GDT → PMM → paging → VBE/FB → IDT → PIT → `proc_init` → keyboard
+   serial → CPUID (PAE + NX detect) → GDT → PMM (refcount table) → paging
+   (PAE 3-level, W^X for kernel image) → VBE/FB → IDT → PIT → `proc_init`
+   → ACPI (RSDP scan, RSDT/XSDT walk, FADT + MADT parse) → keyboard
    → mouse → audio (SB16) → PCI → ATA (incl. PIIX Bus-Master DMA) → e1000
-   → DHCP → `sti` → POST panel → `menu_run`.
+   → DHCP → VFS multi-mount (`A:` slot 0 auto-registered) → `sti`
+   → POST panel → `menu_run`.
 
 If video is absent the kernel halts after the diag; if any non-critical device
 is missing (SB16, e1000, ATA) the corresponding subsystem stays disabled and
@@ -133,6 +141,45 @@ switch; argument pointers are validated via `paging_user_range_ok` before
 any read or write. See [SYSCALLS.md](SYSCALLS.md) for the full numbered
 table.
 
+## Rust userland
+
+A Rust userland sits next to the C apps. Toolchain is `cargo` + nightly
++ `rust-src` + a custom `i686-stinkos.json` target spec (i686 bare-metal,
+panic=abort, no SSE/MMX). Crates are built with `-Z build-std=core,alloc`
+so `core` and `alloc` compile from source against the target, and link
+as a `staticlib` (`.a`). The linker pulls that `.a` with `--whole-archive`
+alongside the existing C `apps/crt0.s` -- one ELF, one entry point, no
+runtime split.
+
+Two libstinks coexist:
+
+* **`lib/libstink.h`** is `static inline` everywhere -- C apps consume
+  it header-only, zero symbols emitted.
+* **`lib/libstink_syms.c`** re-exports the same surface as **linkable
+  symbols** so Rust `extern "C"` declarations resolve at link time
+  (sys_log / sys_exit / sys_exit_code / sys_draw / sys_getkey /
+  sys_alloc / sys_ticks / sys_sound / sys_fwrite / sys_fread + the
+  freestanding `memcpy` / `memset` / `memmove` / `memcmp` that Rust's
+  `core` calls into).
+* **`apps/rust/libstink/`** is a Rust rlib that wraps the C surface in
+  ergonomic helpers: `println!` / `eprintln!` macros over `core::fmt::Write`,
+  `read_line(buf)`, `exit(code)`, a default `#[panic_handler]` that
+  logs + exits 1, and a `#[global_allocator]` shim that routes Rust's
+  `alloc` crate (Box/Vec/String/...) through the libstink K&R `malloc`.
+
+Apps today:
+
+| Name        | Purpose |
+|-------------|---------|
+| `rs-hello`  | First Rust ELF; `extern "C" fn main` + `sys_log` -- toolchain proof |
+| `rs-alloc`  | `Box::new`, `Vec` growth, free + realloc loop through `#[global_allocator]` |
+| `rs-stdio`  | `println!` / `eprintln!` / multi-arg format / `alloc::format!` |
+| `rs-json`   | ~390 LOC recursive-descent JSON parser, zero external crates; reads `TEST.JSON` from StinkFS and pretty-prints |
+| `rs-life`   | Conway's Game of Life on the framebuffer; Gosper glider gun seed, 128x96 toroidal grid, 8x8 px cells, diff-painting |
+
+Each app ships a dedicated smoke (`tools/smoke-rs-*.py`) that drives
+QEMU + asserts a feature-specific invariant. CI runs all five.
+
 ## Subsystem highlights
 
 * **Audio** — SB16 driver, ISA DMA channel 1, half-buffer IRQs at 22050 Hz
@@ -142,10 +189,20 @@ table.
   UDP / DHCP / DNS / TCP. TCP has a retransmit timer with exponential
   backoff; LISTEN sockets accept one connection in-place. See
   [NETWORK.md](NETWORK.md).
-* **Filesystem** — StinkFS: a flat fixed-position 2-sector directory at
-  LBA 128 followed by ~100 MiB of data. The VFS layer (`vfs.c`) exposes
-  POSIX-ish descriptors over it, with a per-process 16-slot table embedded
-  in the PCB. See [STINKFS.md](STINKFS.md).
+* **Filesystem** — StinkFS: a flat fixed-position **4-sector** directory at
+  LBA 128 (80 file slots) followed by ~100 MiB of data. Routed through a
+  2-slot `fs_mount` table behind an `fs_ops` dispatch (v0.8); filenames
+  may carry an optional DOS-style 2-char prefix (`A:foo` / `B:foo`) that
+  picks the mount slot. `SYS_MOUNT` registers an additional StinkFS region
+  at runtime (second disk under `B:`). The VFS layer (`vfs.c`) exposes
+  POSIX-ish descriptors over the dispatched ops, with a per-process
+  16-slot table embedded in the PCB. See [STINKFS.md](STINKFS.md).
+* **ACPI** — RSDP scan (EBDA + BIOS area, 16-byte aligned, checksum-validated),
+  RSDT/XSDT walker, FADT (S5 soft-off via PM1a_CNT_BLK port write) and
+  MADT (Local APIC + IOAPIC topology). No AML interpreter; SLP_TYPa is
+  hardcoded to 5 (the value used by essentially every PC firmware
+  including QEMU). `sys_shutdown` tries ACPI first, falls back to legacy
+  QEMU / Bochs / VirtualBox port-magic paths.
 * **UI** — Linear framebuffer + bitmap font; the menu (`menu.c`) launches
   apps by ELF name, and the shell is just another app.
 
@@ -161,10 +218,23 @@ table.
    which re-launches the shell (if the app was `SYS_EXEC`-spawned) or the
    graphical menu (otherwise).
 
-The current launcher model is "one ring-3 app at a time" because user-space
-still shares one address space. The scheduler is wired in but only juggles
-kernel threads today; per-process CR3s + a true `fork`/`exec` arrive in a
-later commit.
+Per-process page directories and `sys_fork` / `sys_exec` / `sys_wait` /
+`sys_waitpid` have landed (v0.4). The scheduler juggles multiple ring-3
+processes simultaneously; the shell `bg <name>` builtin proves the path
+end-to-end (fork + exec + parent stays at the prompt; `ps` lists both
+procs). `sys_fork` is **copy-on-write** since v0.7 -- writable pages are
+shared at fork time with `PG_COW` set (PTE software bit 9) and RW
+cleared on both sides. The first writer takes a #PF; `paging_handle_cow_fault`
+either lifts RW (refcount == 1, last owner) or allocates a fresh frame
++ memcpys + installs RW at the writer's PTE while decrementing the
+shared frame's refcount. Read-only pages (`.text` / `.rodata` under
+v0.5 W^X) stay shared without `PG_COW`; writes to those remain real
+W^X violations and the trap path kills the offender as before.
+
+The launcher model is "one menu-launched app at a time" but multiple
+shell-backgrounded apps can run concurrently. Each owns a private
+pgdir; CR3 swaps in the scheduler (`paging_switch` before every
+`context_switch`).
 
 ## Build
 

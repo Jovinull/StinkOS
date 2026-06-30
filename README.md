@@ -9,12 +9,12 @@
                   Boots real hardware. No libc. No regrets.
 </pre></div>
 
-<p align="center"><strong>boot sector → kernel → paging → ring 3 → syscalls → filesystem · zero external dependencies · C + assembly</strong></p>
+<p align="center"><strong>boot sector → kernel → PAE+W^X paging → multitasking → COW fork → syscalls → VFS → ring 3 (C + Rust) · zero external dependencies</strong></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue.svg" alt="License: GPLv3"></a>
   <img src="https://img.shields.io/badge/arch-x86%20i386-orange.svg" alt="x86 i386">
-  <img src="https://img.shields.io/badge/lang-C%20%2B%20Assembly-red.svg" alt="C + Assembly">
+  <img src="https://img.shields.io/badge/lang-C%20%2B%20Rust%20%2B%20Assembly-red.svg" alt="C + Rust + Assembly">
   <img src="https://img.shields.io/badge/runs%20on-QEMU%20%2B%20real%20PC-green.svg" alt="Runs on QEMU and real PC">
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome">
 </p>
@@ -57,12 +57,18 @@ Yeah, the name is a joke. The code isn't.
   <img src="images/shell_status.png" width="48%" alt="StinkOS shell running help, mem, ps and netinfo back to back">
   <img src="images/fbdemo.png" width="48%" alt="FBDEMO writing colour bars directly to the linear framebuffer via SYS_MAP_FB">
 </p>
+<p align="center">
+  <img src="images/rs_life.png" width="48%" alt="rs-life Rust Conway's Game of Life with a Gosper glider gun seed emitting gliders across the framebuffer">
+  <img src="images/shell_bg_demo.png" width="48%" alt="Shell bg anim demo: ps lists two procs, parent shell + ANIM child forked into the background">
+</p>
 
 <sub>
 Top-left: the boot menu, every userland app on the disk picked by ENTER.
 Top-right: Freedoom1 mid-combat — original Doom HUD, status bar, status face, weapon grid, all running through doomgeneric.
-Bottom-left: the shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code> — DHCP bound from QEMU's user-mode SLIRP, free-page count via <code>SYS_MEMINFO</code>.
-Bottom-right: <code>SYS_MAP_FB</code> in action — the framebuffer mapped read-write into the user address space, so every pixel write is one store, zero syscalls.
+Middle-left: the shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code> — DHCP bound from QEMU's user-mode SLIRP, free-page count via <code>SYS_MEMINFO</code>.
+Middle-right: <code>SYS_MAP_FB</code> in action — the framebuffer mapped read-write into the user address space, so every pixel write is one store, zero syscalls.
+Bottom-left: <code>rs-life</code> running Conway's Game of Life in pure Rust. Gosper glider gun seed, 128×96 toroidal grid, diff-painting between generations. Zero external crates.
+Bottom-right: multiprocess proof — shell forks <code>anim</code> into the background, then runs <code>ps</code> against itself; the listing shows TWO procs alive (parent shell + ANIM child), each with its own page directory.
 </sub>
 
 ## What it does today
@@ -72,11 +78,14 @@ On boot, StinkOS will:
 1. **Load itself from disk** via the BIOS, enable A20, build a GDT, and switch the CPU into 32-bit protected mode. (`boot.s`)
 2. **Set a VBE linear framebuffer** at 1024×768×32 — pixels go straight to video memory. (`vbe.c`, `fb.c`)
 3. **Wire up interrupts** — IDT, remap the PIC, configure the PIT at 100 Hz, drive the PS/2 keyboard. (`trap.c`, `keyboard.c`)
-4. **Enable paging** with a 4 MiB identity map for the kernel, backed by a physical frame allocator. Userland gets its own isolated 4 KiB-paged region. (`paging.c`, `pmm.c`)
-5. **Install a TSS** and drop into a graphical start menu. (`menu.c`, `gdt.c`)
-6. **Load and run apps in Ring 3.** The kernel reads a named ELF file from StinkFS, copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`)
+4. **Enable PAE paging with W^X**. 3-level page tables (PDPT → PD → PT, 8-byte entries, NX bit 63). Kernel `.text` is R-X, `.rodata` R-NX, `.data` / `.bss` RW-NX. Userland ELFs honour `p_flags` per segment. (`paging.c`, `pmm.c`, `kentry.s`)
+5. **Locate ACPI tables** (RSDP scan → RSDT/XSDT → FADT + MADT). `sys_shutdown` does a real ACPI S5 port-write; CPU + IOAPIC topology gets logged. (`acpi.c`)
+6. **Install a TSS** and drop into a graphical start menu. (`menu.c`, `gdt.c`)
+7. **Load and run apps in Ring 3** with per-process page directories. `sys_fork` is COW (refcount-based, write-faults privatize). `sys_exec` swaps in a fresh pgdir; multiple ring-3 apps live at once (round-robin scheduler at 100 Hz). The kernel reads a named ELF file from StinkFS (or `B:` mount), copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`, `proc.c`)
 
-There's also a filesystem of my own design (`fs.c` — "StinkFS"), a PC speaker driver (`speaker.c`), an ATA disk driver (`ata.c`), and a serial console used for debug output (visible in the QEMU stdio log). The boot path ends with a BIOS-style POST screen reporting each subsystem's status (`bootdiag.c`), and a network stack (e1000 NIC → ARP/IP/ICMP/UDP/TCP/DHCP/DNS) backs the shell's `netinfo` and `ping` commands.
+There's also a filesystem of my own design (`fs.c` — "StinkFS") behind a VFS multi-mount table (`A:`/`B:` DOS-style prefixes route to mount slots), a PC speaker + SB16 driver, an ATA disk driver (`ata.c`), and a serial console used for debug output (visible in the QEMU stdio log). The boot path ends with a BIOS-style POST screen reporting each subsystem's status (`bootdiag.c`), and a network stack (e1000 NIC → ARP/IP/ICMP/UDP/TCP/DHCP/DNS) backs the shell's `netinfo` and `ping` commands.
+
+Rust userland is wired up: a nightly toolchain + custom `i686-stinkos` target + shared `libstink` rlib lets `no_std` Rust apps link with the existing C `crt0.s` and call syscalls through `extern "C"` shims. Five Rust apps ship today: `rs-hello` (toolchain proof), `rs-alloc` (`Box`/`Vec` over libstink K&R `malloc`), `rs-stdio` (`println!` / `eprintln!` / `alloc::format!`), `rs-json` (~390 LOC recursive-descent JSON parser, zero crates), `rs-life` (Conway's Game of Life on the framebuffer).
 
 ## Run it (2 minutes)
 
@@ -101,7 +110,7 @@ Other useful targets: `make` (build only), `make hex` (hexdump the disk image), 
 
 ## Syscalls
 
-Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `ebx`/`ecx`/`edx`, return value in `eax`.
+Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `ebx`/`ecx`/`edx`/`esi`, return value in `eax`.
 
 | # | Name | Arguments | Effect |
 |--:|------|-----------|--------|
@@ -109,7 +118,7 @@ Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `eb
 | 2 | `draw`    | `ebx`=x `ecx`=y `edx`=rgb         | Plot a pixel |
 | 3 | `getkey`  | —                                 | Return next keypress (0 if none) |
 | 4 | `alloc`   | —                                 | Hand back a fresh page of user memory |
-| 5 | `exit`    | —                                 | Return to the menu |
+| 5 | `exit`    | `ebx`=code                        | Terminate; parent observes `code` via `wait` |
 | 6 | `ticks`   | —                                 | Timer ticks since boot (10 ms each) |
 | 7 | `sound`   | `ebx`=hz                          | Beep at frequency (0 = silence) |
 | 8 | `fwrite`  | `ebx`=name `ecx`=buf `edx`=size   | Write a file in StinkFS |
@@ -118,26 +127,41 @@ Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `eb
 | 11 | `finfo`  | `ebx`=idx `ecx`=name_buf          | Name of the i-th file |
 | 12 | `fdelete`| `ebx`=name                        | Delete a file |
 | 13 | `fappend`| `ebx`=name `ecx`=buf `edx`=size   | Append to an existing file |
+| 83 | `fork`  | —                                 | COW fork; parent gets child pid, child gets 0 |
+| 84 | `mount` | `ebx`=(slot<<8)\|drive `ecx`=dir_lba `edx`=data_lba `esi`=data_end | Mount StinkFS at `B:` |
+| 86 | `exit_code` | `ebx`=code | Set exit code (libstink `exit(n)` wrapper) |
 
-The table above is a representative slice; the ABI is ~44 calls today — file
+The table above is a representative slice; the ABI is ~80 calls today — file
 and VFS I/O, on-screen text and blits, audio, TCP/UDP sockets, DNS, `netinfo`
-and `ping`, `exec`, and direct framebuffer mapping. C apps don't write
-`int 0x80` by hand — `lib/libstink.h` wraps each call as a static inline. Drop
-it in and call `sys_draw(x, y, 0xff00ff)`.
+and `ping`, `exec`, `fork`, `wait`/`waitpid`, signal raise/poll, `mount`,
+and direct framebuffer mapping. C apps don't write `int 0x80` by hand —
+`lib/libstink.h` wraps each call as a `static inline`. Drop it in and call
+`sys_draw(x, y, 0xff00ff)`.
+
+Rust apps go through `lib/libstink_syms.c` (non-inline shims so `extern "C"` resolves at link time) and `apps/rust/libstink/` (an rlib with `println!`, `eprintln!`, `read_line`, `exit(code)`, a default `#[panic_handler]`, and a `#[global_allocator]` shim over the K&R `malloc`).
 
 ## Userland apps
 
-Apps are independent ELF binaries. They live as named ELF files in StinkFS and show up in the start menu at boot:
+Apps are independent ELF binaries. They live as named ELF files in StinkFS and show up in the start menu at boot. ~28 C/asm apps + 5 Rust apps today:
 
 | Name | What it is |
 |------|------------|
 | `HELLO` / `BOX`       | Assembly demos — log to serial, paint pixels |
 | `FAULT`               | Deliberately touches kernel memory, gets killed cleanly |
 | `GAME`                | Keyboard-controlled block (assembly) |
-| `HIC` / `ANIM`        | First C apps — prove `crt0.s` + `libstink.h` work |
+| `HI` / `ANIM`         | First C apps — prove `crt0.s` + `libstink.h` work |
 | `BEEP`                | Plays notes through the PC speaker |
 | `SAVE` / `FILES` / `LS` / `DEL` | StinkFS demos: write, list, read, delete |
 | `PLAY`                | A tiny collector game that persists its high score in StinkFS |
+| `SHELL`               | The shell — `ps`, `bg`, `kill`, `mem`, `netinfo`, `ping`, `dns`, ... |
+| `EDIT`                | Full-screen text editor over the VFS |
+| `SNAKE` / `PONG` / `ASTEROIDS` | Keyboard games over the framebuffer |
+| `DOOM1` / `DOOM2` / `FREEDM` | Vendored doomgeneric port over the SB16 mixer |
+| `STINKPKG`            | Package manager (`stink-pkg install / upgrade / verify`) |
+| `INSTALLER`           | Real MBR installer onto a second disk image |
+| `WXATTACK`            | Adversarial app proving W^X kills `.data` execution |
+| `COWTEST` / `MOUNTTEST` / `EXITCODE` | End-to-end smokes for fork-COW / VFS-mounts / exit codes |
+| `RS-HELLO` / `RS-ALLOC` / `RS-STDIO` / `RS-JSON` / `RS-LIFE` | Rust apps — toolchain, heap, stdio shim, JSON parser, Conway's Life |
 
 ## Write an app
 
@@ -182,9 +206,12 @@ every subsystem header so they need a single include instead of a long list.
 | Input (keyboard, mouse)              | `kernel/drivers/input/{keyboard,mouse}.c` |
 | Storage (ATA), audio, misc           | `kernel/drivers/storage/ata.c`, `kernel/drivers/audio/`, `kernel/drivers/misc/{serial,rtc}.c` |
 | Network stack                        | `kernel/drivers/net/` (e1000, ethernet, arp, ipv4, icmp, udp, tcp, dhcp, dns, pci) |
-| StinkFS + VFS                        | `kernel/fs/{fs,vfs,mbr}.c` |
+| StinkFS + VFS (multi-mount, `A:`/`B:` routing) | `kernel/fs/{fs,vfs,mbr}.c` |
+| ACPI (RSDP/RSDT/XSDT/FADT/MADT, S5 shutdown) | `kernel/arch/acpi.c` |
+| Process model (fork-COW, exec, wait, signals) | `kernel/sys/proc.c`, `kernel/arch/paging.c` |
 | ELF loader + Ring 3 entry            | `kernel/sys/elf.c`, `kernel/ui/menu.c`, `boot/usermode_asm.s` |
-| Userland C library                   | `lib/libstink.h`, `apps/crt0.s` |
+| Userland C library                   | `lib/libstink.h`, `lib/libstink_syms.c`, `apps/crt0.s` |
+| Rust userland (libstink rlib + apps) | `apps/rust/libstink/`, `apps/rust/rs-*/`, `apps/rust/i686-stinkos.json` |
 
 ## Docs
 
@@ -215,22 +242,31 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 - [x] 32-bit protected mode (LBA load, A20, GDT, TSS)
 - [x] VBE linear framebuffer, font + text rendering
 - [x] Interrupts: IDT, PIC remap, PIT timer, PS/2 keyboard
-- [x] Paging + physical frame allocator
+- [x] **PAE paging + W^X** (v0.5) — PDPT/PD/PT 8-byte entries, NX bit 63, kernel + user per-segment permissions, `wxattack` app proves `.data` execution dies at #PF
+- [x] **Multitasking proper** (v0.4) — per-process page directory, `sys_fork` + `sys_exec`, round-robin scheduler at PIT 100 Hz
+- [x] **COW fork** (v0.7) — `PG_COW` PTE bit 9 + 8 KiB PMM refcount table; first writer takes #PF, kernel privatizes
+- [x] **ACPI static tables** (v0.6) — RSDP scan → RSDT/XSDT → FADT (S5 soft-off via PM1a_CNT_BLK) + MADT (CPU/IOAPIC topology)
+- [x] **VFS multi-mount** (v0.8) — `fs_mount` + `fs_ops` dispatch, DOS-style `A:`/`B:` prefix routing, `sys_mount` registers a second StinkFS slot
+- [x] **Rust userland** (v0.9, v0.10) — nightly + custom `i686-stinkos` target + shared `libstink` rlib; apps: `rs-hello`, `rs-alloc`, `rs-stdio`, `rs-json`, `rs-life`
 - [x] Userland (Ring 3), isolated address space, fault isolation
-- [x] ELF program loader
-- [x] StinkFS (flat named files, persisted to disk; apps load from here)
-- [x] Sound — PC speaker + Sound Blaster 16 (DMA-driven output)
+- [x] ELF program loader (3-PHDR `app.ld`, per-segment perms)
+- [x] StinkFS (flat named files, persisted to disk; 80 file slots)
+- [x] Sound — PC speaker + Sound Blaster 16 (DMA-driven output, 8-channel mixer)
 - [x] Start menu, graphical shell, full-screen text editor
 - [x] PS/2 mouse driver + cursor, exposed to apps via syscall
 - [x] Networking — e1000 NIC, ARP/IP/ICMP/UDP/TCP, DHCP/DNS, `netinfo`/`ping`
 - [x] `sys_map_fb` — apps blit by writing the framebuffer directly
 - [x] Package manager (`stink-pkg`) with SHA-256 integrity verification
 - [x] Boot-time POST diagnostic with per-subsystem status
+- [x] Doom port — `DOOM1` / `DOOM2` / `FREEDM` over doomgeneric + SB16 mixer
 
 **Up next** (in no particular order):
 
-- [ ] Preemptive multitasking — multiple concurrent Ring 3 processes
-- [ ] Doom music (needs an OPL/MIDI synth; sound effects already play via the SB16 mixer)
+- [ ] Multi-TTY console (Alt+Fn switch between framebuffer back-buffers)
+- [ ] AML interpreter — needed for ACPI on real laptops (today's S5 path is hard-coded `SLP_TYPa=5`)
+- [ ] Doom music (OPL/MIDI synth backend)
+- [ ] SMP bring-up — IOAPIC + LAPIC + atomic ops in PMM refcount + per-CPU lock for COW
+- [ ] More Rust apps that exploit Rust's safety wins (parsers, protocol decoders)
 
 ## Doom
 

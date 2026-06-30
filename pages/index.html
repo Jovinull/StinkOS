@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>StinkOS -- a 32-bit x86 hobby OS that runs Doom</title>
-<meta name="description" content="StinkOS is a freestanding 32-bit x86 operating system: ELF-aware bootloader, multitasking kernel, TCP/IP stack, package manager, and a full Doom port. ~110 KiB stripped kernel, 28 userland apps, 62+ host-side unit tests.">
+<title>StinkOS -- a 32-bit x86 hobby OS with PAE+W^X, COW fork, ACPI, Rust userland</title>
+<meta name="description" content="StinkOS is a freestanding 32-bit x86 operating system: ELF-aware bootloader, PAE paging with W^X, multitasking kernel with COW fork, ACPI shutdown, VFS multi-mount, TCP/IP stack, package manager, full Doom port, and Rust userland (5 Rust apps). 28 C/asm apps + 5 Rust apps, 64+ host-side unit tests, zero external deps.">
 <meta name="theme-color" content="#0d1117">
-<meta property="og:title" content="StinkOS — a 32-bit x86 hobby OS that runs Doom">
-<meta property="og:description" content="A 32-bit x86 hobby OS with ELF-aware boot, multitasking, TCP/IP, a package manager, and a Doom port. Built from scratch.">
+<meta property="og:title" content="StinkOS — a 32-bit x86 hobby OS with PAE+W^X, COW fork, ACPI, Rust userland">
+<meta property="og:description" content="A 32-bit x86 hobby OS with ELF-aware boot, PAE paging + W^X, COW fork, ACPI shutdown, VFS multi-mount, TCP/IP stack, package manager, Doom port, and Rust userland. Built from scratch.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://jovinull.github.io/StinkOS/">
 <meta property="og:image" content="https://jovinull.github.io/StinkOS/images/doom_e1m1.png">
 <meta property="og:image:alt" content="Freedoom1 running as a userland app on StinkOS">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="StinkOS — a 32-bit x86 hobby OS that runs Doom">
-<meta name="twitter:description" content="A 32-bit x86 hobby OS with ELF-aware boot, multitasking, TCP/IP, a package manager, and a Doom port. Built from scratch.">
+<meta name="twitter:title" content="StinkOS — a 32-bit x86 hobby OS with PAE+W^X, COW fork, ACPI, Rust userland">
+<meta name="twitter:description" content="A 32-bit x86 hobby OS with ELF-aware boot, PAE+W^X paging, COW fork, ACPI, VFS multi-mount, TCP/IP, package manager, Doom port, Rust userland. Built from scratch.">
 <meta name="twitter:image" content="https://jovinull.github.io/StinkOS/images/doom_e1m1.png">
 <link rel="canonical" href="https://jovinull.github.io/StinkOS/">
 <link rel="preload" as="image" href="images/doom_e1m1.webp" type="image/webp" fetchpriority="high">
@@ -26,7 +26,7 @@
   "name": "StinkOS",
   "applicationCategory": "OperatingSystem",
   "operatingSystem": "Bare metal x86",
-  "description": "A 32-bit x86 hobby operating system built from scratch: ELF-aware bootloader, multitasking kernel, TCP/IP stack, package manager, and a full Doom port. ~110 KiB stripped kernel, 28 userland apps.",
+  "description": "A 32-bit x86 hobby operating system built from scratch: ELF-aware bootloader, PAE paging with W^X, COW fork, ACPI static-table parsing, VFS multi-mount, TCP/IP stack, package manager, full Doom port, and a Rust userland (5 Rust apps). 28 C/asm apps + 5 Rust apps.",
   "url": "https://jovinull.github.io/StinkOS/",
   "author": {
     "@type": "Person",
@@ -34,8 +34,8 @@
     "url": "https://github.com/Jovinull"
   },
   "codeRepository": "https://github.com/Jovinull/StinkOS",
-  "license": "https://opensource.org/licenses/MIT",
-  "programmingLanguage": ["C", "x86 Assembly"]
+  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+  "programmingLanguage": ["C", "Rust", "x86 Assembly"]
 }
 </script>
 <link rel="stylesheet" href="style.css">
@@ -45,13 +45,18 @@
 <header>
 	<div class="wrap">
 		<h1>StinkOS<span class="cursor"></span></h1>
-		<p class="tagline">A 32-bit x86 operating system written from scratch. Boots from a custom ELF-aware bootloader, schedules processes, talks TCP/IP, ships a package manager, and runs Doom.</p>
+		<p class="tagline">A 32-bit x86 operating system written from scratch. Boots from a custom ELF-aware bootloader, runs PAE paging with W^X, multitasking with COW fork, ACPI shutdown, VFS multi-mount, talks TCP/IP, ships a package manager, runs Doom, and hosts a Rust userland.</p>
 		<div class="badges">
 			<span>i386 freestanding</span>
+			<span>PAE + W^X</span>
+			<span>COW fork</span>
+			<span>ACPI S5</span>
+			<span>VFS multi-mount</span>
+			<span>Rust userland</span>
 			<span>MBR boot (no GRUB)</span>
 			<span>multiboot-compatible kernel</span>
 			<span>QEMU + real PC</span>
-			<span>MIT (first-party)</span>
+			<span>GPLv3</span>
 		</div>
 		<div class="cta-group">
 			<a class="cta" href="#getstarted">Get started &rarr;</a>
@@ -72,10 +77,10 @@
 	<div class="wrap">
 		<div class="stats">
 			<div class="stat"><b>~110 KiB</b><span>stripped kernel</span></div>
-			<div class="stat"><b>44</b><span>syscalls</span></div>
-			<div class="stat"><b>28</b><span>userland apps</span></div>
-			<div class="stat"><b>62+</b><span>host unit tests</span></div>
-			<div class="stat"><b>239+</b><span>v0.4 commits</span></div>
+			<div class="stat"><b>~80</b><span>syscalls</span></div>
+			<div class="stat"><b>28 + 5</b><span>C/asm + Rust apps</span></div>
+			<div class="stat"><b>64+</b><span>host unit tests</span></div>
+			<div class="stat"><b>v0.10</b><span>latest release</span></div>
 			<div class="stat"><b>0</b><span>third-party libs in kernel</span></div>
 		</div>
 	</div>
@@ -91,8 +96,10 @@
 				<ul>
 					<li><strong>ELF-aware bootloader</strong>: 16-sector bootblock loads <code>kernel.elf</code> from disk, walks PT_LOAD program headers, jumps to entry.</li>
 					<li><strong>Multiboot-1 header</strong> in the kernel ELF so GRUB can boot it too.</li>
-					<li>Kernel linked at <code>0x100000</code>; userland window at <code>0x400000</code>.</li>
-					<li>Flat 4 GiB identity-mapped paging, separate user code/heap/stack windows.</li>
+					<li><strong>Higher-half kernel</strong> linked at virt <code>0x80100000</code>, loaded at phys <code>0x100000</code> via <code>AT()</code>.</li>
+					<li><strong>PAE paging</strong> (PDPT/PD/PT, 8-byte entries, NX bit 63); CPUID-gated <code>EFER.NXE</code>.</li>
+					<li><strong>W^X</strong> across kernel image + every user process: <code>.text</code> R-X, <code>.rodata</code> R-NX, <code>.data</code>/<code>.bss</code> RW-NX; <code>wxattack</code> app proves it.</li>
+					<li><strong>ACPI</strong> RSDP scan → RSDT/XSDT → FADT (S5 soft-off via PM1a_CNT_BLK) + MADT (CPU + IOAPIC topology).</li>
 					<li>GDT + IDT + PIT @ 100 Hz, PIC remapped, full IRQ dispatch.</li>
 				</ul>
 			</div>
@@ -100,10 +107,11 @@
 			<div>
 				<h3>Multitasking</h3>
 				<ul>
-					<li>Process control block, process table (PROC_MAX = 16).</li>
+					<li>Per-process page directory; CR3 swap in scheduler; PROC_MAX = 16.</li>
+					<li><strong>COW fork</strong>: <code>PG_COW</code> PTE bit 9 + 8 KiB PMM refcount; first writer takes #PF, kernel privatizes (alloc + memcpy + install RW) or just lifts RW (refcount==1).</li>
 					<li>Kernel-stack context switch; round-robin scheduler driven by the PIT IRQ.</li>
 					<li>Anonymous pipes, cooperative signals (SIGINT/SIGTERM), per-process VFS.</li>
-					<li><code>SYS_GETPID / KILL / WAIT / WAITPID / SETPRIO / SUSPEND / RESUME / PROC_INFO</code>.</li>
+					<li><code>SYS_FORK / EXEC / WAIT / WAITPID / EXIT_CODE / KILL / SETPRIO / SUSPEND / RESUME / PROC_INFO</code>.</li>
 					<li>Mid-syscall preemption (interrupts re-enabled inside <code>syscall_dispatch</code>).</li>
 				</ul>
 			</div>
@@ -132,10 +140,23 @@
 			<div>
 				<h3>Storage &amp; FS</h3>
 				<ul>
-					<li>StinkFS: contiguous-file FS on a raw partition, ~100 MiB data region.</li>
+					<li>StinkFS: contiguous-file FS on a raw partition, ~100 MiB data region, 80 file slots (4-sector dir).</li>
+					<li><strong>VFS multi-mount</strong> via <code>fs_mount</code> + <code>fs_ops</code> dispatch; DOS-style <code>A:</code> / <code>B:</code> prefix routes per-slot.</li>
+					<li><code>SYS_MOUNT</code> registers an additional StinkFS region at runtime (second disk image under <code>B:</code>).</li>
 					<li>VFS layer with per-process fd table, open/read/write/seek/close.</li>
 					<li>ATA driver with PIIX bus-master DMA + PIO fallback.</li>
 					<li>Real MBR partition tables on install media.</li>
+				</ul>
+			</div>
+
+			<div>
+				<h3>Rust userland</h3>
+				<ul>
+					<li>Nightly toolchain + <code>rust-src</code> + custom <code>i686-stinkos</code> target spec (i686 bare-metal, panic=abort, no SSE).</li>
+					<li><code>-Z build-std=core,alloc</code> compiles core/alloc from source per target.</li>
+					<li>Shared <code>apps/rust/libstink</code> rlib: <code>println!</code>, <code>eprintln!</code>, <code>read_line</code>, <code>exit(code)</code>, default <code>#[panic_handler]</code>, <code>#[global_allocator]</code> shim over K&amp;R <code>malloc</code>.</li>
+					<li><code>lib/libstink_syms.c</code> non-inline shims (<code>libstink.h</code> is <code>static inline</code> only -- Rust <code>extern "C"</code> needs linkable symbols).</li>
+					<li>Apps: <code>rs-hello</code> (toolchain), <code>rs-alloc</code> (Box/Vec/free), <code>rs-stdio</code> (println shim), <code>rs-json</code> (~390 LOC recursive-descent parser, zero crates), <code>rs-life</code> (Conway's Game of Life on the framebuffer).</li>
 				</ul>
 			</div>
 
@@ -177,32 +198,28 @@
 		<h2>Screenshots</h2>
 		<div class="shots">
 			<figure>
-				<picture>
-				<source srcset="images/menu.webp" type="image/webp">
-				<img src="images/menu.png" alt="StinkOS boot menu listing 25 userland apps including Doom variants" loading="lazy" width="1024" height="768">
-			</picture>
-				<figcaption>The boot menu lists every userland app on the disk -- 25 apps in this image, picked by ENTER on the highlighted entry.</figcaption>
+				<img src="images/menu.png" alt="StinkOS boot menu listing every userland app on the disk including Rust apps and Doom variants" loading="lazy" width="1024" height="768">
+				<figcaption>The boot menu lists every userland app on the disk -- 28 C/asm + 5 Rust apps, picked by ENTER on the highlighted entry.</figcaption>
 			</figure>
 			<figure>
-				<picture>
-				<source srcset="images/doom_walking.webp" type="image/webp">
-				<img src="images/doom_walking.png" alt="Freedoom1 mid-combat with pistol drawn, status bar showing 93% health" loading="lazy" width="1024" height="768">
-			</picture>
+				<img src="images/doom_walking.png" alt="Freedoom1 mid-combat with pistol drawn, status bar showing health and ammo" loading="lazy" width="1024" height="768">
 				<figcaption>Freedoom1 mid-combat. Status bar (health, ammo, armor, weapons grid) is the original Doom HUD running through doomgeneric.</figcaption>
 			</figure>
 			<figure>
-				<picture>
-				<source srcset="images/shell_status.webp" type="image/webp">
 				<img src="images/shell_status.png" alt="StinkOS shell running help, mem, ps, and netinfo commands back to back" loading="lazy" width="1024" height="768">
-			</picture>
 				<figcaption>The shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code>. DHCP bound, gateway and DNS picked up from QEMU's user-mode SLIRP, free-page count exposed via <code>SYS_MEMINFO</code>.</figcaption>
 			</figure>
 			<figure>
-				<picture>
-				<source srcset="images/fbdemo.webp" type="image/webp">
 				<img src="images/fbdemo.png" alt="FBDEMO app writing colour bars directly to the linear framebuffer" loading="lazy" width="1024" height="768">
-			</picture>
 				<figcaption><code>SYS_MAP_FB</code> in action -- the framebuffer is mapped read-write into the user address space, so each pixel write is one store instruction, zero syscalls.</figcaption>
+			</figure>
+			<figure>
+				<img src="images/rs_life.png" alt="rs-life: Rust Conway Game of Life with a Gosper glider gun seed emitting gliders diagonally across the framebuffer" loading="lazy" width="1024" height="768">
+				<figcaption><code>rs-life</code> -- Conway's Game of Life in pure Rust. Gosper glider gun seed (Conway/Gosper 1970), 128x96 toroidal grid, 8x8 px cells, diff-painting between generations. Zero external crates; allocator routed through libstink K&amp;R <code>malloc</code>.</figcaption>
+			</figure>
+			<figure>
+				<img src="images/shell_bg_demo.png" alt="Shell bg anim demo: ps listing shows two procs, parent shell and ANIM child forked into the background" loading="lazy" width="1024" height="768">
+				<figcaption>Multi-process proof: shell forks <code>anim</code> into the background, then runs <code>ps</code> against itself. The listing shows TWO procs alive -- parent shell + ANIM child -- each with its own page directory (COW-shared at fork, privatized on first write).</figcaption>
 			</figure>
 		</div>
 	</div>
@@ -280,8 +297,8 @@ stink-pkg upgrade</pre>
 <section id="contrib">
 	<div class="wrap">
 		<h2>Contributing</h2>
-		<p>The repo accepts PRs. Branch protection on <code>master</code> requires the headless boot test to pass; CI runs the cross-toolchain build and every host-side unit test on every push.</p>
-		<p>Open issues for any of the items in the changelog backlog -- per-process CR3, <code>sys_fork</code>, AC97/HDA audio, PXE install, rtl8139 / virtio-net, IPv6 -- and the rest of the multi-process and driver surface.</p>
+		<p>The repo accepts PRs. Branch protection on <code>master</code> requires the headless boot test + 11 dedicated smoke tests to pass; CI runs the cross-toolchain build, every host-side unit test, and the full Rust toolchain build on every push.</p>
+		<p>Open issues for any of the items in the changelog backlog -- multi-TTY console, AML interpreter for real-laptop ACPI, OPL/MIDI Doom music, SMP bring-up (LAPIC/IOAPIC + atomic ops in PMM refcount), AC97/HDA audio, PXE install, rtl8139 / virtio-net, IPv6 -- and more Rust apps that exploit Rust's safety wins.</p>
 		<p>Pick something small to start: there is a list of <code>TODO §X.Y</code> markers across the kernel that are explicitly tagged for new contributors.</p>
 	</div>
 </section>
@@ -290,7 +307,7 @@ stink-pkg upgrade</pre>
 
 <footer>
 	<div class="wrap">
-		<p>Built by <a href="https://github.com/Jovinull">Jovinull</a> &middot; MIT for first-party code, GPLv2 for the vendored Doom port &middot; <a href="https://github.com/Jovinull/StinkOS">github.com/Jovinull/StinkOS</a></p>
+		<p>Built by <a href="https://github.com/Jovinull">Jovinull</a> &middot; GPLv3 for first-party code, GPLv2 for the vendored Doom port &middot; <a href="https://github.com/Jovinull/StinkOS">github.com/Jovinull/StinkOS</a></p>
 	</div>
 </footer>
 
