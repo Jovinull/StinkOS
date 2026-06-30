@@ -22,7 +22,11 @@ qemu = subprocess.Popen(
     # EDX bit 20); without this the kernel skips IA32_EFER.NXE under its
     # CPUID guard and the wxattack check would false-pass because the
     # shellcode in .data runs instead of #PF'ing.
-    ["qemu-system-i386", "-cpu", "Penryn",
+    # -snapshot so userland writes (game hiscore, files, fd.txt, ...)
+    # land on a per-run COW overlay and do NOT bloat os.bin's stinkfs
+    # across test re-runs. Without it the test fills FS_MAX_FILES on
+    # the third or fourth run and later assertions start failing.
+    ["qemu-system-i386", "-cpu", "Penryn", "-snapshot",
      "-drive", "format=raw,file=os.bin", "-display", "none",
      "-serial", "file:" + SER, "-monitor", "unix:%s,server,nowait" % MON,
      "-no-reboot"],
@@ -214,45 +218,13 @@ time.sleep(0.5)                                   # open/write/seek/read/close
 sock.sendall(b"sendkey z\n")                      # exit fd -> menu
 time.sleep(0.4)
 
-# Back at menu (cursor on FD): move to "15 SHELL", launch the graphical
-# shell, type `bg anim` to fork+exec ANIM in the background, then `ps`
-# to prove the parent shell is still serving the prompt. Asserts the
-# multi-proc path (per-process pgdir + sys_fork + sys_exec upgrade) is
-# wired end-to-end -- this is the §1 multitasking proper acceptance
-# check, equivalent to `make smoke-multiproc` but folded into the main
-# test target so CI catches regressions on every push.
-for key in ("s", "ret"):
-    sock.sendall(("sendkey %s\n" % key).encode())
-    time.sleep(0.2)
-time.sleep(3.5)                                   # shell paints prompt + loads history (bumped for the now-34-file stinkfs)
-
-def shellkey(name, pause=0.16):
-    sock.sendall(("sendkey %s\n" % name).encode())
-    time.sleep(pause)
-
-def shellkeys(text, pause=0.10):
-    for ch in text:
-        shellkey("spc" if ch == " " else ch.lower(), pause)
-
-shellkeys("bg anim")
-shellkey("ret", pause=0.6)
-time.sleep(4.0)                                   # child reaches ring3 + logs a few lines
-shellkeys("ps")
-shellkey("ret", pause=0.6)
-time.sleep(1.5)
-# v0.5 W^X adversarial: launch the wxattack ELF, which writes a one-byte
-# shellcode into a .data global and tries to call it via a function pointer.
-# Pre-W^X this would succeed (the kernel mapped user data RW + executable);
-# under v0.5 W^X the .data page is NX so the CPU page-faults at the first
-# instruction fetch from .data and the kernel kills the process. We assert
-# both the "about to jump" line (proves the app ran to the attack point) and
-# the resulting fault (proves W^X enforcement fired).
-shellkeys("run wxattack")
-shellkey("ret", pause=0.6)
-time.sleep(2.5)                                   # extra slack for wxattack load + fault
-shellkeys("exit")
-shellkey("ret", pause=0.6)
-time.sleep(0.5)
+# Shell phase + wxattack split out of this file because CI runners are
+# slow enough that the cumulative menu sweep + per-app sleeps push the
+# late assertions past their timeout window. Coverage preserved by
+# dedicated smokes:
+#   - smoke-multiproc.py: shell bg anim + ps (fork+exec verification)
+#   - smoke-wxattack.py:  W^X .data execution blocked
+# CI invokes both immediately after test-headless.
 
 out = serial()
 w, h, px = read_ppm(FB)
@@ -301,15 +273,8 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
-    "wx attack blocked":
-                       "wxattack: about to jump" in out and
-                       "wxattack: REACHED" not in out and
-                       "app: fault, killed" in out,
-    "multi-proc fork+exec":
-                       "exec: anim" in out and
-                       ("ring3: anim app running" in out or
-                        "ring3: anim: time flows" in out) and
-                       out.count("fs: wrote SHELL.HIS") >= 2,
+    # wx attack blocked: see tools/smoke-wxattack.py
+    # multi-proc fork+exec: see tools/smoke-multiproc.py
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -318,4 +283,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; shell fork+exec runs an app in the background; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")

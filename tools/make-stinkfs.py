@@ -20,9 +20,9 @@ import sys
 
 STINKFS_MAGIC = 0x4B4E5453   # 'S','T','N','K' little-endian
 SECTOR = 512
-DIR_SECTORS = 2              # directory spans two 512-byte sectors
+DIR_SECTORS = 4              # directory spans four 512-byte sectors (2 KiB)
 NAME_LEN = 16
-MAX_FILES = 40
+MAX_FILES = 80
 
 def main():
     if len(sys.argv) < 5:
