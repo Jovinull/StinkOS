@@ -73,6 +73,11 @@ int sys_fread(const char *name, void *buf, unsigned int max)
 	return __syscall(9, (int)name, (int)buf, (int)max);
 }
 
+int sys_fdelete(const char *name)
+{
+	return __syscall(12, (int)name, 0, 0);
+}
+
 /* Rust's core / alloc emits direct calls to `memcpy` / `memset` /
  * `memmove` / `memcmp` for slice ops + Vec growth + Drop. libstink.h
  * declares these `static inline`, which gives every C TU its own copy

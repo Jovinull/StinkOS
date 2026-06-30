@@ -4,10 +4,8 @@
 //! Navigate with arrows; type to insert; Backspace to delete; Ctrl+S to save;
 //! Esc or Ctrl+Q to discard and quit.
 //!
-//! References:
-//! - Two-pane file-picker layout: Serenity FileManager MainWidget.cpp
-//! - Cursor / viewport model: simplified gap-buffer without gap (flat array,
-//!   O(n) insert/delete is fine for the 4 KB StinkFS file cap)
+//! If LAUNCH.TMP exists on StinkFS, its content is treated as the filename to
+//! open directly (written by the file browser when launching a text file).
 
 #![no_std]
 #![no_main]
@@ -428,23 +426,35 @@ pub extern "C" fn main() {
     let mut fname = [0u8; 16];
     let mut ed    = Editor::new();
 
-    match file_picker() {
-        PickResult::Cancel => {
-            win_done();
-            println!("rs-edit: cancelled");
-            return;
-        }
-        PickResult::New => {
-            // Empty editor with a default filename
-            let dflt = b"NOTES.TXT\0";
-            for i in 0..dflt.len() { fname[i] = dflt[i]; }
-        }
-        PickResult::Open(name) => {
-            fname = name;
-            let mut raw = [0u8; BUF_CAP];
-            // sys_fread is available through libstink (extern "C" in libui)
-            let n = fread(&fname, &mut raw);
-            if n > 0 { ed.load(&raw, n as usize); }
+    /* Check if the file browser wrote a filename to LAUNCH.TMP for us. */
+    let mut launch_name = [0u8; 16];
+    let launched = {
+        let n = fread(b"LAUNCH.TMP\0", &mut launch_name);
+        n > 0 && launch_name[0] != 0
+    };
+    if launched {
+        fdelete(b"LAUNCH.TMP\0");
+        fname = launch_name;
+        let mut raw = [0u8; BUF_CAP];
+        let n = fread(&fname, &mut raw);
+        if n > 0 { ed.load(&raw, n as usize); }
+    } else {
+        match file_picker() {
+            PickResult::Cancel => {
+                win_done();
+                println!("rs-edit: cancelled");
+                return;
+            }
+            PickResult::New => {
+                let dflt = b"NOTES.TXT\0";
+                for i in 0..dflt.len() { fname[i] = dflt[i]; }
+            }
+            PickResult::Open(name) => {
+                fname = name;
+                let mut raw = [0u8; BUF_CAP];
+                let n = fread(&fname, &mut raw);
+                if n > 0 { ed.load(&raw, n as usize); }
+            }
         }
     }
 

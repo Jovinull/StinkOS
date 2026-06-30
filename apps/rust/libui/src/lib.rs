@@ -71,6 +71,7 @@ extern "C" {
     fn sys_proc_info(buf: *mut u8, cap: i32) -> i32;
     fn sys_fread(name: *const u8, buf: *mut u8, max: u32) -> i32;
     fn sys_fwrite(name: *const u8, buf: *const u8, size: u32) -> i32;
+    fn sys_fdelete(name: *const u8) -> i32;
     fn sys_kill(pid: i32) -> i32;
     fn sys_getpid() -> i32;
     fn sys_arp_info(buf: *mut u8, cap: i32) -> i32;
@@ -263,6 +264,11 @@ pub fn fread(name: &[u8], buf: &mut [u8]) -> i32 {
 /// Write buf to a StinkFS file. Returns bytes written or -1.
 pub fn fwrite(name: &[u8], buf: &[u8]) -> i32 {
     unsafe { sys_fwrite(name.as_ptr(), buf.as_ptr(), buf.len() as u32) }
+}
+
+/// Delete a StinkFS file. Returns 0 on success, -1 if not found.
+pub fn fdelete(name: &[u8]) -> i32 {
+    unsafe { sys_fdelete(name.as_ptr()) }
 }
 
 /// Set keyboard layout: 0=US, 1=BR. Returns previous layout.
