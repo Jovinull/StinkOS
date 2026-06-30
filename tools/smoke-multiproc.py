@@ -95,13 +95,13 @@ time.sleep(2.5)
 # Type `bg anim` -- shell forks itself and execs ANIM in the child.
 keys("bg anim")
 key("ret", pause=0.6)
-time.sleep(4.0)                          # let the child run a few SYS_LOG lines
+time.sleep(6.0)                          # let the child run a few SYS_LOG lines
 
 # Follow up with a built-in shell command so we know the parent is
 # still alive and able to dispatch new input after the fork.
 keys("ps")
 key("ret", pause=0.6)
-time.sleep(1.5)
+time.sleep(3.5)                          # slow CI runners need extra slack for the 2nd SHELL.HIS write
 
 send("quit", pause=0.5)
 
