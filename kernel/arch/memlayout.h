@@ -51,6 +51,7 @@
 #define USER_HEAP_BASE   0x00540000u   /* sbrk/mmap start           */
 #define USER_FB_BASE     0x10000000u   /* SYS_MAP_FB target         */
 #define USER_WIN_BASE    0x12000000u   /* sys_win_create buffer     */
+#define USER_WIN_SIZE    0x00300000u   /* 768 frames * 4096 = 3 MiB */
 
 /* Higher-half kernel direct map (xv6-style).
  *

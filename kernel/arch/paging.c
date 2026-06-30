@@ -803,5 +803,7 @@ int paging_user_range_ok(unsigned int addr, unsigned int len)
 		return 1;
 	if (addr >= USER_HEAP_LO && end <= user_heap_next)
 		return 1;
+	if (addr >= USER_WIN_BASE && end <= USER_WIN_BASE + USER_WIN_SIZE)
+		return 1;
 	return 0;
 }
