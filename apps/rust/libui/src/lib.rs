@@ -506,3 +506,87 @@ impl Tile {
         py >= self.y && py < self.y + self.h
     }
 }
+
+// ── Widget layout ─────────────────────────────────────────────────────────────
+
+/// A button item in a layout list. `id` is returned by hit_test on click.
+pub struct UiBtn {
+    pub id:    u8,
+    pub label: &'static [u8],
+    pub w:     i32,
+    pub h:     i32,
+}
+
+/// Vertical stack of buttons, auto-positioned top-to-bottom.
+pub struct UiColumn<'a> {
+    pub items: &'a [UiBtn],
+    pub gap:   i32,
+}
+
+impl<'a> UiColumn<'a> {
+    /// Draw all buttons at (x, y), stacking downward.
+    pub fn render(&self, x: i32, mut y: i32, hov: u8, pressed: u8) {
+        for item in self.items {
+            let state = if item.id == pressed { BtnState::Pressed }
+                        else if item.id == hov { BtnState::Hovered }
+                        else { BtnState::Normal };
+            Button { label: item.label, x, y, w: item.w, h: item.h }.draw(state);
+            y += item.h + self.gap;
+        }
+    }
+
+    /// Return the id of the button hit at (mx, my), or None.
+    pub fn hit_test(&self, x: i32, mut y: i32, mx: i32, my: i32) -> Option<u8> {
+        for item in self.items {
+            if mx >= x && mx < x + item.w && my >= y && my < y + item.h {
+                return Some(item.id);
+            }
+            y += item.h + self.gap;
+        }
+        None
+    }
+
+    /// Total pixel height occupied by this column.
+    pub fn total_height(&self) -> i32 {
+        if self.items.is_empty() { return 0; }
+        let sum: i32 = self.items.iter().map(|b| b.h).sum();
+        sum + self.gap * (self.items.len() as i32 - 1)
+    }
+}
+
+/// Horizontal row of buttons, auto-positioned left-to-right.
+pub struct UiRow<'a> {
+    pub items: &'a [UiBtn],
+    pub gap:   i32,
+}
+
+impl<'a> UiRow<'a> {
+    /// Draw all buttons at (x, y), advancing rightward.
+    pub fn render(&self, mut x: i32, y: i32, hov: u8, pressed: u8) {
+        for item in self.items {
+            let state = if item.id == pressed { BtnState::Pressed }
+                        else if item.id == hov { BtnState::Hovered }
+                        else { BtnState::Normal };
+            Button { label: item.label, x, y, w: item.w, h: item.h }.draw(state);
+            x += item.w + self.gap;
+        }
+    }
+
+    /// Return the id of the button hit at (mx, my), or None.
+    pub fn hit_test(&self, mut x: i32, y: i32, mx: i32, my: i32) -> Option<u8> {
+        for item in self.items {
+            if mx >= x && mx < x + item.w && my >= y && my < y + item.h {
+                return Some(item.id);
+            }
+            x += item.w + self.gap;
+        }
+        None
+    }
+
+    /// Total pixel width occupied by this row.
+    pub fn total_width(&self) -> i32 {
+        if self.items.is_empty() { return 0; }
+        let sum: i32 = self.items.iter().map(|b| b.w).sum();
+        sum + self.gap * (self.items.len() as i32 - 1)
+    }
+}
