@@ -1,0 +1,99 @@
+//! rs-about: "About StinkOS" information screen.
+//!
+//! Shows OS version, architecture, kernel info, and a brief feature list.
+//! Reads live uptime + wall clock from the kernel. Press Q or Esc to exit.
+
+#![no_std]
+#![no_main]
+
+use libstink::println;
+use libui::*;
+
+const SCREEN_W: i32 = 1024;
+const SCREEN_H: i32 = 768;
+const WIN_W: i32 = 640;
+const WIN_H: i32 = 480;
+const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
+const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
+
+// Content area top after window frame
+const CONTENT_X: i32 = WIN_X + 24;
+const CONTENT_Y: i32 = WIN_Y + 48; // titlebar(34) + 14px pad
+const LINE_H: i32 = 18;
+
+static LINES: &[(&[u8], u32)] = &[
+    (b"StinkOS\0",                              0x57f287), // ACCENT
+    (b"An original x86 32-bit hobby OS\0",      0xe6edf3),
+    (b"\0",                                     0x000000),
+    (b"Architecture   x86 (i686), 32-bit protected mode\0",   0x8b949e),
+    (b"Video          VBE 1024x768 32bpp linear framebuffer\0",0x8b949e),
+    (b"Kernel         Ring 0 C kernel, PAE paging, COW fork\0",0x8b949e),
+    (b"Userland       Ring 3 ELF processes, 80+ syscalls\0",   0x8b949e),
+    (b"Filesystem     StinkFS flat-file raw-sector layout\0",  0x8b949e),
+    (b"Network        TCP/IP stack, Ethernet, UDP\0",          0x8b949e),
+    (b"Audio          PC speaker beeper\0",                    0x8b949e),
+    (b"\0",                                                    0x000000),
+    (b"Built with     i386-elf-gcc cross-compiler + NASM\0",   0x8b949e),
+    (b"Emulation      QEMU (test), bare metal (target)\0",     0x8b949e),
+    (b"\0",                                                    0x000000),
+    (b"Apps           Desktop, Files, Editor, Paint, Calc\0",  0x8b949e),
+    (b"               Sysinfo, Snake, Pong, Asteroids, Doom\0",0x8b949e),
+];
+
+fn draw(tick: u32) {
+    fill(0, 0, SCREEN_W, SCREEN_H, BG);
+    window_frame(WIN_X, WIN_Y, WIN_W, WIN_H, b"About StinkOS\0");
+
+    // Accent bar under title area
+    fill(CONTENT_X - 4, CONTENT_Y - 6, WIN_W - 32, 1, BORDER);
+
+    let mut y = CONTENT_Y;
+    for (line, color) in LINES.iter() {
+        if !line.is_empty() && line[0] != 0 {
+            text(CONTENT_X, y, line, *color);
+        }
+        y += LINE_H;
+    }
+
+    // Live stats section
+    let stats_y = WIN_Y + WIN_H - 80;
+    fill(WIN_X + 8, stats_y - 4, WIN_W - 16, 1, BORDER);
+
+    // Uptime
+    let uptime_sec = tick / 1000;
+    let uh = uptime_sec / 3600;
+    let um = (uptime_sec % 3600) / 60;
+    let us = uptime_sec % 60;
+    let mut tbuf = [0u8; 9];
+    fmt_hhmmss(uh, um, us, &mut tbuf);
+    text(CONTENT_X, stats_y + 4, b"Uptime  \0", FG_DIM);
+    text(CONTENT_X + 72, stats_y + 4, &tbuf, FG);
+
+    // Wall clock
+    let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
+    if read_clock(&mut rtc) == 0 {
+        let mut cbuf = [0u8; 9];
+        fmt_hhmmss(rtc.hour, rtc.minute, rtc.second, &mut cbuf);
+        text(CONTENT_X, stats_y + 22, b"Clock   \0", FG_DIM);
+        text(CONTENT_X + 72, stats_y + 22, &cbuf, FG);
+    }
+
+    // Dismiss hint
+    text(WIN_X + WIN_W - 120, WIN_Y + WIN_H - 22, b"Q  close\0", FG_DIM);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn main() {
+    println!("rs-about: start");
+
+    loop {
+        draw(ticks());
+
+        let k = poll_key();
+        if k == b'q' as i32 || k == b'Q' as i32 || k == 27 { break; }
+
+        sleep_ms(500);
+    }
+
+    println!("rs-about: exit");
+}
