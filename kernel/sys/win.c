@@ -337,12 +337,77 @@ static void sort_by_z(int *order, int n)
     }
 }
 
+/* ── Taskbar ─────────────────────────────────────────────────────────────── */
+
+#define SCREEN_W      1024
+#define SCREEN_H       768
+#define TASKBAR_BTN_W  120
+#define TASKBAR_BTN_PAD  4
+
+/* Map button index (left-to-right) → slot index; returns -1 when out of range. */
+static int taskbar_btn_to_slot(int bx_hit)
+{
+    int btn = 0;
+    for (int i = 0; i < WIN_MAX; i++) {
+        if (!slots[i].pid || !slots[i].visible) continue;
+        int bx = btn * (TASKBAR_BTN_W + TASKBAR_BTN_PAD) + TASKBAR_BTN_PAD;
+        if (bx_hit >= bx && bx_hit < bx + TASKBAR_BTN_W)
+            return i;
+        btn++;
+        if (bx + TASKBAR_BTN_W > SCREEN_W) break;
+    }
+    return -1;
+}
+
+static void draw_taskbar(void)
+{
+    int ty = SCREEN_H - TASKBAR_H;
+
+    /* Background + separator */
+    fb_rect(0, (unsigned int)ty, SCREEN_W, TASKBAR_H, 0x0d1117);
+    fb_rect(0, (unsigned int)ty, SCREEN_W, 1,         0x30363d);
+
+    /* One button per visible window */
+    int btn = 0;
+    for (int i = 0; i < WIN_MAX; i++) {
+        struct win_slot *s = &slots[i];
+        if (!s->pid || !s->visible) continue;
+
+        int bx = btn * (TASKBAR_BTN_W + TASKBAR_BTN_PAD) + TASKBAR_BTN_PAD;
+        if (bx + TASKBAR_BTN_W > SCREEN_W) break;
+
+        unsigned int bg = (i == focused_slot) ? 0x2d3748u : 0x1a202cu;
+        unsigned int fg = (i == focused_slot) ? 0xe6edf3u : 0x8b949eu;
+
+        fb_rect((unsigned int)bx,
+                (unsigned int)(ty + 4),
+                TASKBAR_BTN_W,
+                (unsigned int)(TASKBAR_H - 8),
+                bg);
+        fb_text((unsigned int)(bx + 6),
+                (unsigned int)(ty + 8),
+                s->title[0] ? s->title : "App",
+                fg);
+        btn++;
+    }
+}
+
 /* Route accumulated mouse delta to the focused window's event queue. */
 static void route_mouse_events(void)
 {
     int mx, my;
     unsigned char mb;
     mouse_get_state(&mx, &my, &mb);
+
+    /* Taskbar area: handle click to raise window, don't route to windows. */
+    if (my >= SCREEN_H - TASKBAR_H) {
+        if (mb & 1) {
+            int si = taskbar_btn_to_slot(mx);
+            if (si >= 0)
+                win_raise(slots[si].pid);
+        }
+        return;
+    }
 
     /* Find topmost visible window at mouse position. */
     int top_si = -1;
@@ -400,6 +465,9 @@ void win_composite(void)
             }
         }
     }
+
+    /* Taskbar always redraws on top of windows. */
+    draw_taskbar();
 
     /* Route mouse events to the window under the cursor. */
     route_mouse_events();

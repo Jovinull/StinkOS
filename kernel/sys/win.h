@@ -12,6 +12,9 @@
 /* Maximum windows simultaneously on screen. */
 #define WIN_MAX        8
 
+/* Compositor taskbar reserved at the bottom of the screen. */
+#define TASKBAR_H      24
+
 /* Maximum 4KiB frames per window buffer.
  * 768 × 4096 = 3,145,728 bytes → supports 1024×768 at 32bpp. */
 #define WIN_MAX_FRAMES 768
