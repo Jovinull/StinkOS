@@ -6,7 +6,8 @@
 
 #define CELL        16
 #define CELLS_W     64           /* 1024 / CELL */
-#define CELLS_H     48           /*  768 / CELL */
+#define CELLS_H     45           /* (768 - OY) / CELL = 734/16, floored */
+#define OY          34           /* titlebar height + separator */
 #define MAX_LEN     200
 #define MOVE_TICKS  8            /* initial ticks per step (decreases with score) */
 #define BG          0x001022
@@ -24,7 +25,7 @@ static int food_x, food_y;
 
 static void draw_cell(int cx, int cy, unsigned int rgb)
 {
-	sys_fillrect(cx * CELL, cy * CELL, CELL, CELL, rgb);
+	sys_fillrect(cx * CELL, cy * CELL + OY, CELL, CELL, rgb);
 }
 
 static int occupied(int x, int y)
@@ -71,7 +72,8 @@ static void place_food(void)
 
 static void clear_screen(void)
 {
-	sys_fillrect(0, 0, 1024, 768, BG);
+	draw_window_frame(0, 0, 1024, 768, "Snake  --  Arrows: move  |  p: pause  q: quit");
+	sys_fillrect(0, OY, 1024, 768 - OY, BG);
 }
 
 /* Returns the exit reason: 0 = player quit, 1 = hit wall, 2 = hit self.
