@@ -38,8 +38,10 @@ pub const SHADOW:      u32 = 0x050810;
 
 // ── Key codes ────────────────────────────────────────────────────────────────
 
-pub const KEY_UP:   i32 = 28;
-pub const KEY_DOWN: i32 = 29;
+pub const KEY_UP:    i32 = 28;
+pub const KEY_DOWN:  i32 = 29;
+pub const KEY_LEFT:  i32 = 30;
+pub const KEY_RIGHT: i32 = 31;
 
 // ── RTC time ─────────────────────────────────────────────────────────────────
 
@@ -74,6 +76,8 @@ extern "C" {
     fn sys_fcount() -> i32;
     fn sys_finfo(index: i32, name: *mut u8) -> i32;
     fn sys_proc_info(buf: *mut u8, cap: i32) -> i32;
+    fn sys_fread(name: *const u8, buf: *mut u8, max: u32) -> i32;
+    fn sys_fwrite(name: *const u8, buf: *const u8, size: u32) -> i32;
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────
@@ -139,6 +143,16 @@ pub fn finfo(index: i32, name: &mut [u8; 16]) -> i32 {
 /// Returns bytes written into buf.
 pub fn proc_info(buf: &mut [u8]) -> i32 {
     unsafe { sys_proc_info(buf.as_mut_ptr(), buf.len() as i32) }
+}
+
+/// Read a StinkFS file into buf. Returns bytes read or -1.
+pub fn fread(name: &[u8], buf: &mut [u8]) -> i32 {
+    unsafe { sys_fread(name.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) }
+}
+
+/// Write buf to a StinkFS file. Returns bytes written or -1.
+pub fn fwrite(name: &[u8], buf: &[u8]) -> i32 {
+    unsafe { sys_fwrite(name.as_ptr(), buf.as_ptr(), buf.len() as u32) }
 }
 
 // ── Number formatting ────────────────────────────────────────────────────────
