@@ -135,7 +135,7 @@ fn draw_date(year: u32, month: u32, day: u32) {
     let dx = WIN_X + (WIN_W - dw) / 2;
     let dy = CLOCK_Y + DH + 10;
     fill(WIN_X + 16, dy - 2, WIN_W - 32, 10 + 2, SURFACE);
-    text(dx, dy, &buf, FG_DIM);
+    text16(dx, dy, &buf, FG_DIM);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

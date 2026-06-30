@@ -139,10 +139,10 @@ fn redraw(mx: i32, my: i32, frame: u32) {
     draw_taskbar(SCREEN_W);
 
     /* Subtitle */
-    text(16, TASKBAR_H + 10, b"Choose an app\0", FG_DIM);
+    text16(16, TASKBAR_H + 10, b"Choose an app\0", FG_DIM);
 
     /* Section label */
-    text(GRID_X, GRID_Y - 14, b"Applications\0", FG_DIM);
+    text16(GRID_X, GRID_Y - 20, b"Applications\0", FG_DIM);
 
     /* App tiles */
     let hov = hovered_idx(mx, my);

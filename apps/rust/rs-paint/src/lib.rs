@@ -78,13 +78,13 @@ fn draw_toolbar(sel_colour: u32, brush: i32, line_mode: bool) {
     // Tool status (right side)
     let bx = SCREEN_W - 200;
     let mode_label: &[u8] = if line_mode { b"Tool: Line  \0" } else { b"Tool: Brush \0" };
-    text(bx, TOOL_Y + 6, mode_label, if line_mode { ACCENT } else { FG });
+    text16(bx, TOOL_Y + 6, mode_label, if line_mode { ACCENT } else { FG });
     let mut bs = [0u8; 16];
     bs[0] = b'S'; bs[1] = b'z'; bs[2] = b':'; bs[3] = b' ';
     bs[4] = b'0' + (brush % 10) as u8;
     bs[5] = b' '; bs[6] = b'p'; bs[7] = b'x'; bs[8] = 0;
-    text(bx, TOOL_Y + 22, &bs, FG_DIM);
-    text(bx + 80, TOOL_Y + 22, b"1/2/3 L C Q\0", FG_DIM);
+    text16(bx, TOOL_Y + 22, &bs, FG_DIM);
+    text16(bx + 80, TOOL_Y + 22, b"1/2/3 L C Q\0", FG_DIM);
 }
 
 fn draw_brush(mx: i32, my: i32, colour: u32, brush: i32) {
