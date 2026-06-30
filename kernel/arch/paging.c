@@ -22,8 +22,6 @@
  *     with 8-byte entries + NX at bit 63)
  *   - xv6-riscv kernel/vm.c walk() -- canonical multi-level walk
  *     pattern (Sv39 = 3-level analog)
- *   - serenity Kernel/Arch/x86_64/PageDirectory.h -- 8-byte PTE
- *     accessor + NoExecute bit (0x8000000000000000) shape
  */
 #include "paging.h"
 #include "pmm.h"
@@ -193,10 +191,7 @@ extern char __kernel_data_end[];
  * (BIOS data area, unused low phys) gets the conservative RW-NX default
  * so a write-where bug cannot land executable bytes there.
  *
- * Pattern mirrors xv6-public's vm.c per-section R/W setup (it predates
- * NX so it only enforces R vs RW), threaded through PAE for NX support.
- * Refs: Intel SDM Vol 3A §4.6 (page-level protections) + serenity
- *       Kernel/Arch/x86_64/PageDirectory.cpp (kernel image NX split). */
+ * Refs: Intel SDM Vol 3A §4.6 (page-level protections). */
 static void kernel_wx_install_pt(void)
 {
 	unsigned int pt_phys = pmm_alloc();
@@ -334,7 +329,7 @@ static void map_user_page(unsigned int vaddr, unsigned int frame)
  *                    the original frame (RO + PG_COW) until they too
  *                    take the fault.
  *
- * Pattern from toaruos `mmu_copy_on_write` (arch/x86_64/mmu.c:1313). */
+ */
 int paging_handle_cow_fault(unsigned int va)
 {
 	pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
@@ -508,8 +503,7 @@ unsigned int *paging_boot_pgdir(void)
  * stay shared without PG_COW; writes to them are real W^X violations
  * and the existing trap path kills the offender.
  *
- * Matches toaruos `copy_page_maybe` (arch/x86_64/mmu.c:442) -- same
- * refcount + per-PTE COW bit design. */
+ */
 int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 {
 	pae_entry_t *dst = (pae_entry_t *)dst_raw;

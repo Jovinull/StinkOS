@@ -94,9 +94,6 @@
  * Refs:
  *   - Intel SDM Vol 3A §4.4 (PAE paging) figure 4-11 (PTE format),
  *     §4.6 (Access Rights, NXE semantics)
- *   - serenity Kernel/Arch/x86_64/PageDirectory.h:53,107 -- same bit
- *     position (`NoExecute = 0x8000000000000000ULL`), same accessor
- *     pattern shaped around individual flag predicates
  *   - xv6-riscv kernel/riscv.h PTE_R / PTE_X separation -- positive-
  *     polarity X bit; our PG_NX is the inverse, but the W^X intent
  *     maps 1:1 ("text gets X, data gets W, never both")

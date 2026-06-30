@@ -12,12 +12,6 @@
 //!   Each repaint is fast because it uses sys_fillrect (kernel fills memory
 //!   directly) and avoids per-pixel syscalls for the background.
 //!
-//! ## References
-//!
-//! - Z-order / focus management pattern: Orbital src/window_order.rs
-//!   (VecDeque<WindowId> + zbuffer; simplified here to a single foreground).
-//! - Tile state machine: Makepad widgets/src/button.rs (hover/down/normal).
-//! - Window decorations: ToaruOS lib/decor-fancy.c (33px titlebar, close btn).
 
 #![no_std]
 #![no_main]

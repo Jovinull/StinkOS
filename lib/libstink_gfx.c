@@ -79,8 +79,6 @@ void draw_rect_outline(int x, int y, int w, int h, unsigned int rgb)
  *
  * Uses two overlapping fillrects for the interior cross, then fills each
  * corner quadrant with horizontal spans derived from a circle of radius r.
- * Based on the same per-quadrant scan approach used by ToaruOS graphics.c
- * (draw_rounded_rectangle_pattern), adapted to use StinkOS fillrect calls.
  */
 void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb)
 {
@@ -115,12 +113,7 @@ void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb)
 }
 
 /* Window decoration: titlebar, close button, outer border.
- *
- * Layout derived from ToaruOS decor-fancy (TITLEBAR_HEIGHT=33, close button
- * at right, title left-aligned), colours adapted to the StinkOS dark palette.
- *
  * Returns the Y coordinate of the inner content area (titlebar bottom + 1).
- * The caller is responsible for drawing content below that Y.
  */
 #define WIN_TITLEBAR_H  33
 #define WIN_CLOSE_W     24
@@ -140,7 +133,7 @@ int draw_window_frame(int x, int y, int w, int h, const char *title)
     /* Title text: vertically centred in titlebar */
     sys_drawtext(x + 12, y + (WIN_TITLEBAR_H - 8) / 2, title, 0xe6edf3);
 
-    /* Close button: rounded red rect with X, ToaruOS-style, right side */
+    /* Close button: rounded red rect with X at the right */
     int bx = x + w - WIN_CLOSE_W - 8;
     int by = y + (WIN_TITLEBAR_H - WIN_CLOSE_H) / 2;
     draw_rounded_rect(bx, by, WIN_CLOSE_W, WIN_CLOSE_H, 4, 0xf47067);

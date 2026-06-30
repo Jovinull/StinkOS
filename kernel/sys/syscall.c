@@ -1126,13 +1126,6 @@ void syscall_dispatch(struct regs *r)
 		 *       splits forkret/trapret; we collapse into one
 		 *       trap_return tail because StinkOS has no kernel-thread
 		 *       initialiser to run before the user resumes.
-		 *   - CONTRAST toaruos/kernel/sys/process.c:1392 (fork): uses
-		 *       arch_resume_user as the child's IP and clones via
-		 *       arch_save_context. Equivalent semantics; their PAL
-		 *       (process abstraction layer) makes the asm-coupled
-		 *       parts hide behind helpers. We keep it visible because
-		 *       it's only ~30 lines and one read-through explains the
-		 *       whole control-flow.
 		 */
 		struct proc *parent = proc_current();
 		if (!parent) { r->eax = (unsigned int)-1; break; }

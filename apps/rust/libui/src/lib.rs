@@ -398,7 +398,6 @@ pub fn draw_taskbar(screen_w: i32) {
 // ── Cursor ───────────────────────────────────────────────────────────────────
 
 /// Draw a cross-hair cursor centred at (cx, cy).
-/// Inspired by ToaruOS's 7-pixel cross cursor (mouse.c).
 pub fn draw_cursor(cx: i32, cy: i32) {
     const ARM: i32 = 6;
     /* Shadow (1px offset) */
@@ -412,7 +411,6 @@ pub fn draw_cursor(cx: i32, cy: i32) {
 // ── Button widget ────────────────────────────────────────────────────────────
 
 /// Interactive button with normal / hovered / pressed states.
-/// State model adapted from Makepad widgets/src/button.rs.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum BtnState { Normal, Hovered, Pressed }
 
@@ -449,11 +447,7 @@ impl Button {
 
 // ── Tile widget ──────────────────────────────────────────────────────────────
 
-/// An app-launcher tile.
-///
-/// State model: normal / hovered.  (No pressed state — click is instant.)
-/// Adapted from Makepad button.rs which mixes colour based on hover/down floats;
-/// we use a simple bool since we have no interpolation timer.
+/// An app-launcher tile. Normal / hovered states; click is instant.
 pub struct Tile {
     /// NUL-terminated display label, e.g. `b"Doom\0"`.
     pub label: &'static [u8],

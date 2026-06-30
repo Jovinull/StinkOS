@@ -1026,7 +1026,6 @@ void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb);
 void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb);
 
 /* Draw a titled window frame (titlebar + close button + border).
- * Based on ToaruOS decor-fancy style, adapted to the StinkOS dark palette.
  * Returns the Y coordinate of the inner content area start. */
 int draw_window_frame(int x, int y, int w, int h, const char *title);
 
