@@ -69,6 +69,8 @@ int win_create(int pid, unsigned int w, unsigned int h)
 {
     if (pid <= 0 || w == 0 || h == 0)
         return -1;
+    if (w > 4096 || h > 4096)
+        return -1;  /* cap to prevent u32 overflow in w*h*4 below */
     if (slot_for_pid(pid) >= 0)
         return -1;  /* process already has a window */
 
@@ -226,6 +228,27 @@ static void win_write_px(struct win_slot *s,
     *p = argb;
 }
 
+/* Fill n pixels with argb starting at window-buffer byte offset byte_off.
+ * Walks page boundaries without per-pixel division. */
+static void win_fill_span(struct win_slot *s,
+                          unsigned int byte_off, unsigned int n,
+                          unsigned int argb)
+{
+    unsigned int done = 0;
+    while (done < n) {
+        unsigned int fi  = byte_off / 4096;
+        unsigned int off = byte_off % 4096;
+        if ((int)fi >= s->n_frames) break;
+        unsigned int *p   = (unsigned int *)((char *)P2V(s->frames[fi]) + off);
+        unsigned int avail = (4096 - off) / 4;
+        unsigned int cnt   = n - done;
+        if (avail < cnt) cnt = avail;
+        for (unsigned int i = 0; i < cnt; i++) p[i] = argb;
+        done     += cnt;
+        byte_off += cnt * 4;
+    }
+}
+
 /* Put one pixel into the window buffer. Returns 1 if handled, 0 to fall through. */
 int win_redirect_putpixel(int pid, unsigned int x, unsigned int y, unsigned int rgb)
 {
@@ -244,11 +267,13 @@ int win_redirect_fillrect(int pid,
     int si = slot_for_pid(pid);
     if (si < 0) return 0;
     struct win_slot *s = &slots[si];
-    unsigned int argb = 0xFF000000u | rgb;
+    if (x >= s->w || y >= s->h || w == 0 || h == 0) return 1;
+    if (x + w > s->w) w = s->w - x;
+    if (y + h > s->h) h = s->h - y;
+    unsigned int argb     = 0xFF000000u | rgb;
+    unsigned int row_stride = s->w * 4;
     for (unsigned int row = 0; row < h; row++) {
-        for (unsigned int col = 0; col < w; col++) {
-            win_write_px(s, x + col, y + row, argb);
-        }
+        win_fill_span(s, (y + row) * row_stride + x * 4, w, argb);
     }
     return 1;
 }

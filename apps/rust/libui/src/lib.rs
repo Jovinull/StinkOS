@@ -12,14 +12,6 @@
 //! The colour constants mirror the StinkOS GitHub Pages dark theme so the
 //! OS shell looks coherent with the project website.
 //!
-//! ## References
-//!
-//! - Colour palette: mirrors StinkOS Pages dark theme (style.css).
-//! - Widget state model: adapted from Makepad widgets/src/button.rs
-//!   (hover/down/normal state pattern).
-//! - Window decorations: adapted from ToaruOS lib/decor-fancy.c
-//!   (TITLEBAR_HEIGHT=33, close button placement, active/inactive colours).
-//! - Compositor z-order pattern: adapted from Orbital src/window_order.rs.
 
 #![no_std]
 
