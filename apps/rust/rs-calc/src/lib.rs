@@ -19,7 +19,7 @@ use libui::*;
 const SCREEN_W: i32 = 1024;
 const SCREEN_H: i32 = 768;
 const WIN_W: i32 = 400;
-const WIN_H: i32 = 568;
+const WIN_H: i32 = 656;
 const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
 const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
@@ -35,7 +35,7 @@ const BTN_W:   i32 = 90;
 const BTN_H:   i32 = 82;
 const BTN_GAP: i32 = 6;
 const COLS:    usize = 4;
-const ROWS:    usize = 5;
+const ROWS:    usize = 6;
 
 fn btn_x(col: usize) -> i32 { WIN_X + 8 + col as i32 * (BTN_W + BTN_GAP) }
 fn btn_y(row: usize) -> i32 { GRID_Y + row as i32 * (BTN_H + BTN_GAP) }
@@ -43,13 +43,17 @@ fn btn_y(row: usize) -> i32 { GRID_Y + row as i32 * (BTN_H + BTN_GAP) }
 // ── Button table ─────────────────────────────────────────────────────────────
 
 // Action tags
-const ACT_DIGIT: u8 = 0;  // value = b'0'..b'9'
-const ACT_DOT:   u8 = 1;
-const ACT_CLEAR: u8 = 2;
-const ACT_BACK:  u8 = 3;
-const ACT_NEG:   u8 = 4;
-const ACT_OP:    u8 = 5;  // value = b'+'/b'-'/b'*'/b'/'
-const ACT_EQ:    u8 = 6;
+const ACT_DIGIT:   u8 = 0;
+const ACT_DOT:     u8 = 1;
+const ACT_CLEAR:   u8 = 2;
+const ACT_BACK:    u8 = 3;
+const ACT_NEG:     u8 = 4;
+const ACT_OP:      u8 = 5;
+const ACT_EQ:      u8 = 6;
+const ACT_MC:      u8 = 7;  // memory clear
+const ACT_MR:      u8 = 8;  // memory recall
+const ACT_MPLUS:   u8 = 9;  // memory add
+const ACT_MMINUS:  u8 = 10; // memory subtract
 
 struct BtnDef {
     label: &'static [u8],
@@ -58,7 +62,12 @@ struct BtnDef {
 }
 
 static BTNS: [BtnDef; ROWS * COLS] = [
-    // Row 0
+    // Row 0: memory
+    BtnDef { label: b"MC\0", act: ACT_MC,     val: 0     },
+    BtnDef { label: b"MR\0", act: ACT_MR,     val: 0     },
+    BtnDef { label: b"M+\0", act: ACT_MPLUS,  val: 0     },
+    BtnDef { label: b"M-\0", act: ACT_MMINUS, val: 0     },
+    // Row 1
     BtnDef { label: b"C\0",  act: ACT_CLEAR,  val: 0     },
     BtnDef { label: b"+/-\0",act: ACT_NEG,    val: 0     },
     BtnDef { label: b"%\0",  act: ACT_OP,     val: b'%'  },
@@ -98,12 +107,13 @@ fn make_button(idx: usize) -> Button {
 // ── Calculator state ──────────────────────────────────────────────────────────
 
 struct Calc {
-    entry:       [u8; 20],  // current number as typed string
+    entry:       [u8; 20],
     entry_len:   usize,
     has_dot:     bool,
     accum:       f64,
-    pending_op:  u8,        // 0 = none, else b'+'/b'-'/b'*'/b'/'
-    just_result: bool,      // true after = (next digit resets)
+    memory:      f64,
+    pending_op:  u8,
+    just_result: bool,
     error:       bool,
 }
 
@@ -116,6 +126,7 @@ impl Calc {
             entry_len: 1,
             has_dot: false,
             accum: 0.0,
+            memory: 0.0,
             pending_op: 0,
             just_result: false,
             error: false,
@@ -251,14 +262,18 @@ impl Calc {
     fn handle(&mut self, act: u8, val: u8) {
         if self.error && act != ACT_CLEAR { return; }
         match act {
-            ACT_DIGIT => self.push_digit(val),
-            ACT_DOT   => self.push_dot(),
-            ACT_CLEAR => self.clear(),
-            ACT_BACK  => self.backspace(),
-            ACT_NEG   => self.negate(),
-            ACT_OP    => self.op(val),
-            ACT_EQ    => self.equals(),
-            _         => {}
+            ACT_DIGIT  => self.push_digit(val),
+            ACT_DOT    => self.push_dot(),
+            ACT_CLEAR  => self.clear(),
+            ACT_BACK   => self.backspace(),
+            ACT_NEG    => self.negate(),
+            ACT_OP     => self.op(val),
+            ACT_EQ     => self.equals(),
+            ACT_MC     => { self.memory = 0.0; }
+            ACT_MR     => { self.set_entry_f64(self.memory); self.just_result = true; }
+            ACT_MPLUS  => { self.memory += self.entry_val(); }
+            ACT_MMINUS => { self.memory -= self.entry_val(); }
+            _          => {}
         }
     }
 
