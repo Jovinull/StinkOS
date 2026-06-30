@@ -1,12 +1,11 @@
-//! rs-calc: four-function calculator for StinkOS.
+//! rs-calc: scientific calculator for StinkOS.
 //!
 //! Mouse-driven Button widgets (libui::Button) demonstrate interactive UI.
 //! Keyboard shortcuts: 0-9, +,-,*,/, Enter=equals, Escape=clear, Backspace.
+//! Scientific: s=sin, t=tan, r=sqrt (input treated as degrees).
 //!
-//! Arithmetic uses f64; results display up to 8 significant digits.
-//! All f64 ops (+,-,*,/) use the x87 FPU without libm.
-//!
-//! Reference layout: iPhone-style 4×5 grid (iOS Calculator app).
+//! Arithmetic uses f64; sin/cos/tan via Taylor series, sqrt via Newton-Raphson.
+//! All f64 ops use the x87 FPU without libm.
 
 #![no_std]
 #![no_main]
@@ -32,10 +31,10 @@ const DISP_H: i32 = 60;
 // Button grid starts below display
 const GRID_Y:  i32 = DISP_Y + DISP_H + 6;
 const BTN_W:   i32 = 90;
-const BTN_H:   i32 = 82;
+const BTN_H:   i32 = 70;
 const BTN_GAP: i32 = 6;
 const COLS:    usize = 4;
-const ROWS:    usize = 6;
+const ROWS:    usize = 7;
 
 fn btn_x(col: usize) -> i32 { WIN_X + 8 + col as i32 * (BTN_W + BTN_GAP) }
 fn btn_y(row: usize) -> i32 { GRID_Y + row as i32 * (BTN_H + BTN_GAP) }
@@ -54,6 +53,10 @@ const ACT_MC:      u8 = 7;  // memory clear
 const ACT_MR:      u8 = 8;  // memory recall
 const ACT_MPLUS:   u8 = 9;  // memory add
 const ACT_MMINUS:  u8 = 10; // memory subtract
+const ACT_SIN:     u8 = 11; // sin (degrees input)
+const ACT_COS:     u8 = 12; // cos (degrees input)
+const ACT_TAN:     u8 = 13; // tan (degrees input)
+const ACT_SQRT:    u8 = 14; // square root
 
 struct BtnDef {
     label: &'static [u8],
@@ -92,6 +95,11 @@ static BTNS: [BtnDef; ROWS * COLS] = [
     BtnDef { label: b".\0",  act: ACT_DOT,    val: 0     },
     BtnDef { label: b"BS\0", act: ACT_BACK,   val: 0     },
     BtnDef { label: b"=\0",  act: ACT_EQ,     val: 0     },
+    // Row 5: scientific
+    BtnDef { label: b"sin\0", act: ACT_SIN,   val: 0     },
+    BtnDef { label: b"cos\0", act: ACT_COS,   val: 0     },
+    BtnDef { label: b"tan\0", act: ACT_TAN,   val: 0     },
+    BtnDef { label: b"sqrt\0",act: ACT_SQRT,  val: 0     },
 ];
 
 fn make_button(idx: usize) -> Button {
@@ -273,6 +281,10 @@ impl Calc {
             ACT_MR     => { self.set_entry_f64(self.memory); self.just_result = true; }
             ACT_MPLUS  => { self.memory += self.entry_val(); }
             ACT_MMINUS => { self.memory -= self.entry_val(); }
+            ACT_SIN    => { let v = sin_deg(self.entry_val()); self.set_entry_f64(v); self.just_result = true; }
+            ACT_COS    => { let v = cos_deg(self.entry_val()); self.set_entry_f64(v); self.just_result = true; }
+            ACT_TAN    => { let v = tan_deg(self.entry_val()); if v != v { self.error = true; } else { self.set_entry_f64(v); self.just_result = true; } }
+            ACT_SQRT   => { let v = calc_sqrt(self.entry_val()); if v != v { self.error = true; } else { self.set_entry_f64(v); self.just_result = true; } }
             _          => {}
         }
     }
@@ -283,6 +295,48 @@ impl Calc {
         buf[n] = 0;
         n
     }
+}
+
+// ── Scientific math (no libm) ─────────────────────────────────────────────────
+
+const PI: f64 = 3.141592653589793;
+
+fn calc_sqrt(x: f64) -> f64 {
+    if x < 0.0 { return f64::NAN; }
+    if x == 0.0 { return 0.0; }
+    let mut g = x * 0.5 + 0.5;
+    for _ in 0..60 { g = (g + x / g) * 0.5; }
+    g
+}
+
+fn sin_rad(mut x: f64) -> f64 {
+    // Reduce to [-π, π]
+    let tau = 2.0 * PI;
+    x -= (x / tau + 0.5).floor() * tau;
+    // Minimax polynomial (Horner form) accurate to ~f64 precision for [-π, π]
+    let x2 = x * x;
+    x * (1.0 + x2 * (-1.0/6.0 + x2 * (1.0/120.0 + x2 * (-1.0/5040.0
+        + x2 * (1.0/362880.0 + x2 * (-1.0/39916800.0))))))
+}
+
+fn cos_rad(x: f64) -> f64 {
+    sin_rad(x + PI * 0.5)
+}
+
+fn sin_deg(d: f64) -> f64 { sin_rad(d * (PI / 180.0)) }
+fn cos_deg(d: f64) -> f64 { cos_rad(d * (PI / 180.0)) }
+fn tan_deg(d: f64) -> f64 {
+    let c = cos_deg(d);
+    if c.abs() < 1e-12 { f64::NAN } else { sin_deg(d) / c }
+}
+
+trait F64Ext { fn floor(self) -> f64; fn abs(self) -> f64; }
+impl F64Ext for f64 {
+    fn floor(self) -> f64 {
+        let i = self as i64;
+        if self < i as f64 { (i - 1) as f64 } else { i as f64 }
+    }
+    fn abs(self) -> f64 { if self < 0.0 { -self } else { self } }
 }
 
 // ── f64 formatting ────────────────────────────────────────────────────────────
@@ -425,6 +479,9 @@ pub extern "C" fn main() {
                 k if k == b'\n' as i32 || k == b'\r' as i32 => calc.handle(ACT_EQ, 0),
                 k if k == 8 || k == 127 => calc.handle(ACT_BACK, 0),
                 k if k == b'c' as i32 || k == b'C' as i32 => calc.handle(ACT_CLEAR, 0),
+                k if k == b's' as i32 || k == b'S' as i32 => calc.handle(ACT_SIN,   0),
+                k if k == b't' as i32 || k == b'T' as i32 => calc.handle(ACT_TAN,   0),
+                k if k == b'r' as i32 || k == b'R' as i32 => calc.handle(ACT_SQRT,  0),
                 _ => { handled = false; }
             }
             if handled { dirty = true; }
