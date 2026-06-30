@@ -23,8 +23,8 @@ const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
 const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
 // Display panel
-const DISP_X: i32 = WIN_X + 8;
-const DISP_Y: i32 = WIN_Y + 38;   // just below titlebar
+const DISP_X: i32 = 8;
+const DISP_Y: i32 = 38;   // just below titlebar
 const DISP_W: i32 = WIN_W - 16;
 const DISP_H: i32 = 60;
 
@@ -36,7 +36,7 @@ const BTN_GAP: i32 = 6;
 const COLS:    usize = 4;
 const ROWS:    usize = 7;
 
-fn btn_x(col: usize) -> i32 { WIN_X + 8 + col as i32 * (BTN_W + BTN_GAP) }
+fn btn_x(col: usize) -> i32 { 8 + col as i32 * (BTN_W + BTN_GAP) }
 fn btn_y(row: usize) -> i32 { GRID_Y + row as i32 * (BTN_H + BTN_GAP) }
 
 // ── Button table ─────────────────────────────────────────────────────────────
@@ -370,8 +370,8 @@ fn fmt_f64(v: f64, buf: &mut [u8; 20]) -> usize {
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>) {
-    fill(0, 0, SCREEN_W, SCREEN_H, BG);
-    window_frame(WIN_X, WIN_Y, WIN_W, WIN_H, b"Calculator\0");
+    fill(0, 0, WIN_W, WIN_H, BG);
+    window_frame(0, 0, WIN_W, WIN_H, b"Calculator\0");
 
     // Display panel
     fill(DISP_X, DISP_Y, DISP_W, DISP_H, 0x090e14);
@@ -420,11 +420,11 @@ fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-calc: start");
-    win_init(b"Calculator ");
+    win_init_at(b"Calculator  ", WIN_W, WIN_H, WIN_X, WIN_Y);
 
     let mut calc = Calc::new();
-    let mut mx: i32 = SCREEN_W / 2;
-    let mut my: i32 = SCREEN_H / 2;
+    let mut mx: i32 = WIN_W / 2;
+    let mut my: i32 = WIN_H / 2;
     let mut left_held    = false;
     let mut pressed_idx: Option<usize> = None;
     let mut prev_k = 0i32;
@@ -433,8 +433,8 @@ pub extern "C" fn main() {
     loop {
         let (dx, dy, buttons) = poll_mouse();
         let old_mx = mx; let old_my = my;
-        mx = clamp(mx + dx, 0, SCREEN_W - 1);
-        my = clamp(my + dy, 0, SCREEN_H - 1);
+        mx = clamp(mx + dx, 0, WIN_W - 1);
+        my = clamp(my + dy, 0, WIN_H - 1);
 
         let left_now = buttons & 0x01 != 0;
 

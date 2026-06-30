@@ -17,7 +17,7 @@ const WIN_H: i32 = 380;
 const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
 const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
-const CX: i32 = WIN_X + 20;
+const CX: i32 = 20;
 const BW: i32 = 120;
 const BH: i32 = 36;
 const BTN_GAP: i32 = 10;
@@ -41,10 +41,10 @@ fn section_header(label: &[u8], y: i32) {
 }
 
 fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool) {
-    fill(0, 0, SCREEN_W, SCREEN_H, BG);
-    window_frame(WIN_X, WIN_Y, WIN_W, WIN_H, b"Settings\0");
+    fill(0, 0, WIN_W, WIN_H, BG);
+    window_frame(0, 0, WIN_W, WIN_H, b"Settings\0");
 
-    let content_y = WIN_Y + 44;
+    let content_y = 44;
     let kb_y      = content_y + 18;
     section_header(b"Keyboard Layout\0", content_y);
 
@@ -64,8 +64,8 @@ fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool) {
     let snd_row   = UiRow { items: snd_items, gap: BTN_GAP };
     snd_row.render(CX, snd_y, hov, if muted { 3 } else { 0xFF });
 
-    let hint_y = WIN_Y + WIN_H - 20;
-    fill(WIN_X + 8, hint_y - 4, WIN_W - 16, 1, BORDER);
+    let hint_y = WIN_H - 20;
+    fill(8, hint_y - 4, WIN_W - 16, 1, BORDER);
     text16(CX, hint_y + 4, b"Q  close\0", FG_DIM);
 
     draw_cursor(mx, my);
@@ -74,15 +74,15 @@ fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-settings: start");
-    win_init(b"Settings ");
+    win_init_at(b"Settings ", WIN_W, WIN_H, WIN_X, WIN_Y);
 
-    let content_y = WIN_Y + 44;
+    let content_y = 44;
     let kb_y      = content_y + 18;
     let snd_section_y = kb_y + BH + 28;
     let snd_y     = snd_section_y + 18;
 
-    let mut mx      = SCREEN_W / 2;
-    let mut my      = SCREEN_H / 2;
+    let mut mx      = WIN_W / 2;
+    let mut my      = WIN_H / 2;
     let mut left_held = false;
     let mut hov: u8 = 0xFF;
     let mut layout  = 0i32;
@@ -92,8 +92,8 @@ pub extern "C" fn main() {
 
     loop {
         let (dx, dy, buttons) = poll_mouse();
-        mx = clamp(mx + dx, 0, SCREEN_W - 1);
-        my = clamp(my + dy, 0, SCREEN_H - 1);
+        mx = clamp(mx + dx, 0, WIN_W - 1);
+        my = clamp(my + dy, 0, WIN_H - 1);
         let left_now = buttons & 0x01 != 0;
 
         let kb_row   = UiRow { items: KB_BTNS, gap: BTN_GAP };

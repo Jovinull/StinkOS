@@ -17,8 +17,8 @@ const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
 const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
 // Content area top after window frame
-const CONTENT_X: i32 = WIN_X + 24;
-const CONTENT_Y: i32 = WIN_Y + 52; // titlebar(34) + 18px pad
+const CONTENT_X: i32 = 24;
+const CONTENT_Y: i32 = 52; // titlebar(34) + 18px pad
 const LINE_H: i32 = 20;
 
 static LINES: &[(&[u8], u32)] = &[
@@ -41,8 +41,8 @@ static LINES: &[(&[u8], u32)] = &[
 ];
 
 fn draw(tick: u32) {
-    fill(0, 0, SCREEN_W, SCREEN_H, BG);
-    window_frame(WIN_X, WIN_Y, WIN_W, WIN_H, b"About StinkOS\0");
+    fill(0, 0, WIN_W, WIN_H, BG);
+    window_frame(0, 0, WIN_W, WIN_H, b"About StinkOS\0");
 
     // Accent bar under title area
     fill(CONTENT_X - 4, CONTENT_Y - 6, WIN_W - 32, 1, BORDER);
@@ -56,8 +56,8 @@ fn draw(tick: u32) {
     }
 
     // Live stats section
-    let stats_y = WIN_Y + WIN_H - 80;
-    fill(WIN_X + 8, stats_y - 4, WIN_W - 16, 1, BORDER);
+    let stats_y = WIN_H - 80;
+    fill(8, stats_y - 4, WIN_W - 16, 1, BORDER);
 
     // Uptime
     let uptime_sec = tick / 1000;
@@ -79,13 +79,13 @@ fn draw(tick: u32) {
     }
 
     // Dismiss hint
-    text16(WIN_X + WIN_W - 128, WIN_Y + WIN_H - 24, b"Q  close\0", FG_DIM);
+    text16(WIN_W - 128, WIN_H - 24, b"Q  close\0", FG_DIM);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-about: start");
-    win_init(b"About StinkOS\0");
+    win_init_at(b"About StinkOS\0", WIN_W, WIN_H, WIN_X, WIN_Y);
 
     loop {
         draw(ticks());

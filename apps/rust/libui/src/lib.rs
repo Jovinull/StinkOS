@@ -127,6 +127,13 @@ pub fn win_init(title: &[u8]) {
     }
 }
 
+pub fn win_init_at(title: &[u8], w: i32, h: i32, x: i32, y: i32) {
+    unsafe {
+        sys_win_create(w as u32, h as u32);
+        sys_win_show(x, y, title.as_ptr());
+    }
+}
+
 pub fn win_done() {
     unsafe { sys_win_destroy(); }
 }
