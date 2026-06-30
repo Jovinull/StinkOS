@@ -117,3 +117,57 @@ int memcmp(const void *a, const void *b, unsigned int n)
 	}
 	return 0;
 }
+
+/* ---- Additional non-inline wrappers needed by Rust callers ---- */
+
+static inline int __syscall4_syms(int n, int a, int b, int c, int d)
+{
+	int ret;
+	__asm__ volatile ("int $0x80"
+	                  : "=a"(ret)
+	                  : "a"(n), "b"(a), "c"(b), "d"(c), "S"(d)
+	                  : "memory");
+	return ret;
+}
+
+/* SYS_FILLRECT (22): packed ABI ebx=(x<<16|y), ecx=(w<<16|h), edx=rgb */
+void sys_fillrect(int x, int y, int w, int h, unsigned int rgb)
+{
+	__syscall(22, (x << 16) | (y & 0xFFFF), (w << 16) | (h & 0xFFFF), (int)rgb);
+}
+
+/* SYS_DRAWTEXT (21): ebx=x, ecx=y, edx=str, esi=rgb */
+int sys_drawtext(int x, int y, const char *s, unsigned int rgb)
+{
+	return __syscall4_syms(21, x, y, (int)s, (int)rgb);
+}
+
+/* SYS_GETMOUSE (27): ebx=*dx, ecx=*dy, edx=*buttons */
+int sys_get_mouse(int *dx, int *dy, int *buttons)
+{
+	return __syscall(27, (int)dx, (int)dy, (int)buttons);
+}
+
+/* SYS_EXEC (41): ebx=name */
+int sys_exec(const char *name)
+{
+	return __syscall(41, (int)name, 0, 0);
+}
+
+/* SYS_FORK (83) */
+int sys_fork(void)
+{
+	return __syscall(83, 0, 0, 0);
+}
+
+/* SYS_WAITPID (48): ebx=pid */
+int sys_waitpid(int pid)
+{
+	return __syscall(48, pid, 0, 0);
+}
+
+/* SYS_SLEEP_MS (23): ebx=ms */
+void sys_sleep_ms(unsigned int ms)
+{
+	__syscall(23, (int)ms, 0, 0);
+}

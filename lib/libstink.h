@@ -1017,4 +1017,17 @@ double cos(double x);
 /* --- libstink_gfx --- */
 void sys_drawline(int x0, int y0, int x1, int y1, unsigned int rgb);
 
+/* Filled rectangle with rounded corners (radius r pixels).
+ * r=0 falls back to sys_fillrect. Clips r to half of w/h automatically. */
+void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb);
+
+/* Draw a dark shadow rectangle offset by (depth,depth) behind a widget.
+ * Call before drawing the widget so the shadow appears behind it. */
+void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb);
+
+/* Draw a titled window frame (titlebar + close button + border).
+ * Based on ToaruOS decor-fancy style, adapted to the StinkOS dark palette.
+ * Returns the Y coordinate of the inner content area start. */
+int draw_window_frame(int x, int y, int w, int h, const char *title);
+
 #endif
