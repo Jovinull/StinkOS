@@ -196,6 +196,12 @@ int sys_proc_info(char *buf, int cap)
 	return __syscall(73, (int)buf, (int)cap, 0);
 }
 
+/* SYS_ARP_INFO (74): ebx=buf ecx=cap -> bytes written */
+int sys_arp_info(char *buf, int cap)
+{
+	return __syscall(74, (int)buf, (int)cap, 0);
+}
+
 /* SYS_KILL (46): ebx=pid -> 0 or -1 */
 int sys_kill(int pid)
 {
