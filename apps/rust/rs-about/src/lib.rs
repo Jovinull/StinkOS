@@ -18,8 +18,8 @@ const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
 // Content area top after window frame
 const CONTENT_X: i32 = WIN_X + 24;
-const CONTENT_Y: i32 = WIN_Y + 48; // titlebar(34) + 14px pad
-const LINE_H: i32 = 18;
+const CONTENT_Y: i32 = WIN_Y + 52; // titlebar(34) + 18px pad
+const LINE_H: i32 = 20;
 
 static LINES: &[(&[u8], u32)] = &[
     (b"StinkOS\0",                              0x57f287), // ACCENT
@@ -50,7 +50,7 @@ fn draw(tick: u32) {
     let mut y = CONTENT_Y;
     for (line, color) in LINES.iter() {
         if !line.is_empty() && line[0] != 0 {
-            text(CONTENT_X, y, line, *color);
+            text16(CONTENT_X, y, line, *color);
         }
         y += LINE_H;
     }
@@ -66,20 +66,20 @@ fn draw(tick: u32) {
     let us = uptime_sec % 60;
     let mut tbuf = [0u8; 9];
     fmt_hhmmss(uh, um, us, &mut tbuf);
-    text(CONTENT_X, stats_y + 4, b"Uptime  \0", FG_DIM);
-    text(CONTENT_X + 72, stats_y + 4, &tbuf, FG);
+    text16(CONTENT_X, stats_y + 4, b"Uptime  \0", FG_DIM);
+    text16(CONTENT_X + 72, stats_y + 4, &tbuf, FG);
 
     // Wall clock
     let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
     if read_clock(&mut rtc) == 0 {
         let mut cbuf = [0u8; 9];
         fmt_hhmmss(rtc.hour, rtc.minute, rtc.second, &mut cbuf);
-        text(CONTENT_X, stats_y + 22, b"Clock   \0", FG_DIM);
-        text(CONTENT_X + 72, stats_y + 22, &cbuf, FG);
+        text16(CONTENT_X, stats_y + 24, b"Clock   \0", FG_DIM);
+        text16(CONTENT_X + 72, stats_y + 24, &cbuf, FG);
     }
 
     // Dismiss hint
-    text(WIN_X + WIN_W - 120, WIN_Y + WIN_H - 22, b"Q  close\0", FG_DIM);
+    text16(WIN_X + WIN_W - 128, WIN_Y + WIN_H - 24, b"Q  close\0", FG_DIM);
 }
 
 #[unsafe(no_mangle)]

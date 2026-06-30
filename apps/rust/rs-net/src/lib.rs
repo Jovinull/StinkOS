@@ -18,7 +18,7 @@ const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
 const CONTENT_X: i32 = WIN_X + 16;
 const CONTENT_Y: i32 = WIN_Y + 48;
-const LINE_H: i32 = 16;
+const LINE_H: i32 = 20;
 
 fn draw_lines(buf: &[u8], n: i32) {
     let mut y = CONTENT_Y;
@@ -33,7 +33,7 @@ fn draw_lines(buf: &[u8], n: i32) {
                 tmp[..l].copy_from_slice(&buf[start..start + l]);
                 tmp[l] = 0;
                 let color = if is_header { FG_DIM } else { FG };
-                text(CONTENT_X, y, &tmp, color);
+                text16(CONTENT_X, y, &tmp, color);
                 is_header = false;
             }
             y += LINE_H;
@@ -47,20 +47,20 @@ fn render(arp: &[u8], arp_n: i32, proc_buf: &[u8], proc_n: i32) {
     window_frame(WIN_X, WIN_Y, WIN_W, WIN_H, b"Network Status\0");
 
     // Section: ARP cache
-    text(CONTENT_X, WIN_Y + 36, b"ARP Cache\0", ACCENT);
+    text16(CONTENT_X, WIN_Y + 36, b"ARP Cache\0", ACCENT);
     fill(CONTENT_X, WIN_Y + 45, WIN_W - 32, 1, BORDER);
 
     if arp_n <= 4 {
         // Only header, no entries
         let empty_y = CONTENT_Y + LINE_H;
-        text(CONTENT_X, empty_y, b"(no ARP entries -- no active network connections)\0", FG_DIM);
+        text16(CONTENT_X, empty_y, b"(no ARP entries -- no active network connections)\0", FG_DIM);
     } else {
         draw_lines(arp, arp_n);
     }
 
     // Section: process count (quick summary)
     let section2_y = CONTENT_Y + LINE_H * 6 + 10;
-    text(CONTENT_X, section2_y - 2, b"Processes\0", ACCENT);
+    text16(CONTENT_X, section2_y - 2, b"Processes\0", ACCENT);
     fill(CONTENT_X, section2_y + 7, WIN_W - 32, 1, BORDER);
 
     // Count procs from proc_info output
@@ -72,30 +72,30 @@ fn render(arp: &[u8], arp_n: i32, proc_buf: &[u8], proc_n: i32) {
 
     let mut pbuf = [0u8; 12];
     fmt_u32(pcount, &mut pbuf);
-    text(CONTENT_X, section2_y + 12, b"Running: \0", FG_DIM);
-    text(CONTENT_X + 72, section2_y + 12, &pbuf, FG);
+    text16(CONTENT_X, section2_y + 14, b"Running: \0", FG_DIM);
+    text16(CONTENT_X + 72, section2_y + 14, &pbuf, FG);
 
     // Uptime
     let tick = ticks();
     let sec = tick / 1000;
     let mut tbuf = [0u8; 9];
     fmt_hhmmss(sec / 3600, (sec % 3600) / 60, sec % 60, &mut tbuf);
-    text(CONTENT_X, section2_y + 28, b"Uptime:  \0", FG_DIM);
-    text(CONTENT_X + 72, section2_y + 28, &tbuf, FG);
+    text16(CONTENT_X, section2_y + 34, b"Uptime:  \0", FG_DIM);
+    text16(CONTENT_X + 72, section2_y + 34, &tbuf, FG);
 
     // Wall clock
     let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
     if read_clock(&mut rtc) == 0 {
         let mut cbuf = [0u8; 9];
         fmt_hhmmss(rtc.hour, rtc.minute, rtc.second, &mut cbuf);
-        text(CONTENT_X, section2_y + 44, b"Clock:   \0", FG_DIM);
-        text(CONTENT_X + 72, section2_y + 44, &cbuf, FG);
+        text16(CONTENT_X, section2_y + 54, b"Clock:   \0", FG_DIM);
+        text16(CONTENT_X + 72, section2_y + 54, &cbuf, FG);
     }
 
     // Hint
     let hint_y = WIN_Y + WIN_H - 18;
     fill(WIN_X + 8, hint_y - 2, WIN_W - 16, 1, BORDER);
-    text(CONTENT_X, hint_y + 2, b"R refresh    Q quit\0", FG_DIM);
+    text16(CONTENT_X, hint_y + 2, b"R refresh    Q quit\0", FG_DIM);
 }
 
 #[unsafe(no_mangle)]

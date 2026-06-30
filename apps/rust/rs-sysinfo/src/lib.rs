@@ -18,9 +18,9 @@ const WIN_H:    i32 = SCREEN_H - 120;
 
 /// Draw a labelled value row at (x, y).
 fn kv(x: i32, y: i32, label: &[u8], val: &[u8]) {
-    text(x, y, label, FG_DIM);
+    text16(x, y, label, FG_DIM);
     let lw = (nul_len(label) as i32) * 8;
-    text(x + lw, y, val, FG);
+    text16(x + lw, y, val, FG);
 }
 
 /// Split buf[0..len] into '\n'-delimited lines and draw them, returning the
@@ -30,7 +30,7 @@ fn draw_lines(buf: &[u8], len: usize, x: i32, start_y: i32, max_y: i32,
     let mut y = start_y;
     let mut line_start = 0usize;
     let mut first = true;
-    let row_h = 14i32;
+    let row_h = 18i32;
 
     for i in 0..=len {
         let at_end = i == len;
@@ -44,7 +44,7 @@ fn draw_lines(buf: &[u8], len: usize, x: i32, start_y: i32, max_y: i32,
                 for j in 0..cp { lbuf[j] = buf[line_start + j]; }
                 lbuf[cp] = 0;
                 let rgb = if first { header_rgb } else { body_rgb };
-                text(x, y, &lbuf, rgb);
+                text16(x, y, &lbuf, rgb);
                 y += row_h;
                 first = false;
             }
@@ -96,7 +96,7 @@ pub extern "C" fn main() {
         let mut pbuf = [0u8; 2048];
         let plen = proc_info(&mut pbuf);
         if plen > 0 {
-            text(cx, cy, b"Processes\0", FG_DIM);
+            text16(cx, cy, b"Processes\0", FG_DIM);
             cy += 14;
             fill(cx, cy, WIN_W - 32, 1, BORDER);
             cy += 6;
@@ -105,7 +105,7 @@ pub extern "C" fn main() {
 
         /* ── Footer ── */
         let footer_y = WIN_Y + WIN_H - 20;
-        text(cx, footer_y, b"Q - quit\0", FG_DIM);
+        text16(cx, footer_y, b"Q - quit\0", FG_DIM);
 
         let k = poll_key();
         if k != 0 && k != prev_k && (k == b'q' as i32 || k == 27) { break; }
