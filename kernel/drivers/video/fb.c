@@ -172,3 +172,21 @@ void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb)
 		x += 8;
 	}
 }
+
+void fb_char_big(unsigned int x, unsigned int y, char c, unsigned int rgb, unsigned int scale)
+{
+	if (scale == 0) return;
+	const unsigned char *glyph = font8x8[(unsigned char)c & 0x7F];
+	for (unsigned int row = 0; row < 8; row++)
+		for (unsigned int col = 0; col < 8; col++)
+			if (glyph[row] & (0x80 >> col))
+				fb_rect(x + col * scale, y + row * scale, scale, scale, rgb);
+}
+
+void fb_text_big(unsigned int x, unsigned int y, const char *s, unsigned int rgb, unsigned int scale)
+{
+	for (; *s != '\0'; s++) {
+		fb_char_big(x, y, *s, rgb, scale);
+		x += 8 * scale;
+	}
+}

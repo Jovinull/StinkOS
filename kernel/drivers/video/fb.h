@@ -26,5 +26,8 @@ void fb_blit_scaled(unsigned int x0, unsigned int y0,
                     unsigned int src_w, unsigned int src_h);
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb);
 void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
+/* Scaled text: each 8x8 glyph pixel becomes scale×scale solid block. */
+void fb_char_big(unsigned int x, unsigned int y, char c, unsigned int rgb, unsigned int scale);
+void fb_text_big(unsigned int x, unsigned int y, const char *s, unsigned int rgb, unsigned int scale);
 
 #endif

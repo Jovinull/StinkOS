@@ -24,9 +24,9 @@ static void copy_name(char *dst, const char *src)
 static const char *status_text(enum boot_status s)
 {
 	switch (s) {
-	case BOOT_OK:   return "OK";
+	case BOOT_OK:   return "ok";
 	case BOOT_FAIL: return "FAIL";
-	default:        return "ABSENT";
+	default:        return "absent";
 	}
 }
 
@@ -47,32 +47,54 @@ void bootdiag_add(const char *name, enum boot_status status)
 
 void bootdiag_show(void)
 {
-	fb_fill(0x000010);
-	fb_text(120, 80, "StinkOS POST", 0xFFFFFF);
-	fb_text(120, 100, "power-on self-test", 0x8080A0);
+	/* ── Background ─────────────────────────────────────────────────────── */
+	fb_fill(0x0d1117);   /* dark GitHub-style bg */
+
+	/* ── Logo: "StinkOS" at 4x scale ────────────────────────────────────── */
+	unsigned int logo_x = 128;
+	unsigned int logo_y =  80;
+	fb_text_big(logo_x, logo_y, "StinkOS", 0x57f287, 4);   /* accent green */
+
+	/* Accent underline bar */
+	fb_rect(logo_x, logo_y + 36, 7 * 8 * 4, 3, 0x57f287);
+
+	/* Tagline */
+	fb_text(logo_x + 2, logo_y + 48, "an original x86 32-bit hobby OS", 0x8b949e);
+
+	/* ── POST table (two columns) ────────────────────────────────────────── */
+	unsigned int col1_x = 160;
+	unsigned int col2_x = 500;
+	unsigned int row_y  = logo_y + 76;
+	unsigned int row_h  = 16;
+
+	/* Column headers */
+	fb_text(col1_x, row_y - 18, "component", 0x30363d);
+	fb_text(col2_x, row_y - 18, "status",    0x30363d);
+	fb_rect(col1_x, row_y - 4, 640, 1, 0x21262d);
 
 	int any_fail = 0;
 	for (int i = 0; i < entry_count; i++) {
-		int y = 130 + i * 16;
+		unsigned int y = row_y + (unsigned int)i * row_h;
 		unsigned int col;
 		switch (entries[i].status) {
-		case BOOT_OK:   col = 0x40D040; break;
-		case BOOT_FAIL: col = 0xE04040; any_fail = 1; break;
-		default:        col = 0x808080; break;   /* BOOT_ABSENT */
+		case BOOT_OK:   col = 0x57f287; break;
+		case BOOT_FAIL: col = 0xf47067; any_fail = 1; break;
+		default:        col = 0x4a5568; break;   /* BOOT_ABSENT: dim */
 		}
-		fb_text(140, y, entries[i].name, 0xC0C0C0);
-		fb_text(360, y, status_text(entries[i].status), col);
+		fb_text(col1_x, y, entries[i].name, 0xe6edf3);
+		fb_text(col2_x, y, status_text(entries[i].status), col);
 	}
 
-	int y = 130 + entry_count * 16 + 16;
+	/* Summary line */
+	unsigned int sum_y = row_y + (unsigned int)entry_count * row_h + 8;
+	fb_rect(col1_x, sum_y - 4, 640, 1, 0x21262d);
 	if (any_fail)
-		fb_text(140, y, "boot completed with errors", 0xE04040);
+		fb_text(col1_x, sum_y, "boot completed with errors", 0xf47067);
 	else
-		fb_text(140, y, "all systems nominal", 0x40D040);
+		fb_text(col1_x, sum_y, "all systems nominal", 0x57f287);
 
-	/* Hold ~1.2 s (120 PIT ticks at 100 Hz) so the panel is readable. Sleep on
-	 * hlt rather than spin so the timer IRQ keeps advancing the counter. */
+	/* ── Hold ~0.8 s so the panel is readable ───────────────────────────── */
 	unsigned int start = pit_ticks();
-	while ((unsigned int)(pit_ticks() - start) < 120)
+	while ((unsigned int)(pit_ticks() - start) < 80)
 		__asm__ volatile ("hlt");
 }
