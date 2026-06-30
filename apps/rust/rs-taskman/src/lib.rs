@@ -135,7 +135,7 @@ fn draw(procs: &[ProcEntry; MAX_PROCS], count: usize, sel: usize, my_pid: i32) {
     // Hint bar
     let hint_y = WIN_Y + WIN_H - 18;
     fill(WIN_X + 8, hint_y - 2, WIN_W - 16, 1, BORDER);
-    text(CONTENT_X, hint_y + 2, b"K kill  R refresh  Q quit  (yellow=self)\0", FG_DIM);
+    text(CONTENT_X, hint_y + 2, b"K kill  auto-refresh 2s  Q quit  (yellow=self)\0", FG_DIM);
 
     // Count
     let mut cbuf = [0u8; 12];
@@ -161,6 +161,7 @@ pub extern "C" fn main() {
     let mut sel   = 0usize;
     let mut dirty = true;
     let mut prev_k = 0i32;
+    let mut last_refresh: u32 = 0;
 
     // Refresh immediately
     let n = proc_info(&mut raw);
@@ -169,6 +170,21 @@ pub extern "C" fn main() {
     }
 
     loop {
+        // Auto-refresh every 2 seconds
+        let now = ticks();
+        if now.wrapping_sub(last_refresh) >= 2000 {
+            let n2 = proc_info(&mut raw);
+            if n2 > 0 {
+                let new_count = parse_procs(&raw[..n2 as usize], &mut procs);
+                if new_count != count {
+                    count = new_count;
+                    if sel >= count && count > 0 { sel = count - 1; }
+                    dirty = true;
+                }
+            }
+            last_refresh = now;
+        }
+
         if dirty {
             draw(&procs, count, sel, my_pid);
             dirty = false;

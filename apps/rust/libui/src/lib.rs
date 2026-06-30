@@ -83,6 +83,7 @@ extern "C" {
     fn sys_arp_info(buf: *mut u8, cap: i32) -> i32;
     fn sys_set_keymap(layout: i32) -> i32;
     fn sys_sound(freq: u32);
+    fn sys_drawline(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32);
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────
@@ -161,6 +162,10 @@ pub fn fwrite(name: &[u8], buf: &[u8]) -> i32 {
 }
 
 /// Set keyboard layout: 0=US, 1=BR. Returns previous layout.
+pub fn draw_line(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32) {
+    unsafe { sys_drawline(x0, y0, x1, y1, rgb); }
+}
+
 pub fn set_keymap(layout: i32) -> i32 {
     unsafe { sys_set_keymap(layout) }
 }
