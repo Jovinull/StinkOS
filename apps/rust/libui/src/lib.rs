@@ -84,12 +84,19 @@ extern "C" {
     fn sys_set_keymap(layout: i32) -> i32;
     fn sys_sound(freq: u32);
     fn sys_drawline(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32);
+    fn stink_font_str(x: i32, y: i32, s: *const u8, rgb: u32) -> i32;
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────
 
 pub fn fill(x: i32, y: i32, w: i32, h: i32, rgb: u32) {
     unsafe { sys_fillrect(x, y, w, h, rgb); }
+}
+
+/// Draw NUL-terminated text via 8×16 bitmap font. `s` must end with 0x00.
+/// Returns pixel width consumed. Transparent background — fill BG first.
+pub fn text16(x: i32, y: i32, s: &[u8], rgb: u32) -> i32 {
+    unsafe { stink_font_str(x, y, s.as_ptr(), rgb) }
 }
 
 /// Draw NUL-terminated text. `s` must end with a 0x00 byte.
