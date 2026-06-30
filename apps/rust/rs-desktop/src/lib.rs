@@ -44,6 +44,7 @@ static APPS: &[AppEntry] = &[
     AppEntry { label: b"Paint\0",      exec: b"rs-paint\0"   },
     AppEntry { label: b"Calc\0",       exec: b"rs-calc\0"    },
     AppEntry { label: b"Sysinfo\0",    exec: b"rs-sysinfo\0" },
+    AppEntry { label: b"Hex View\0",   exec: b"rs-hex\0"     },
     AppEntry { label: b"Vec Art\0",    exec: b"rs-vec\0"     },
     AppEntry { label: b"Settings\0",   exec: b"rs-settings\0"},
     AppEntry { label: b"Net\0",        exec: b"rs-net\0"     },
