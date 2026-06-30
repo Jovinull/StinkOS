@@ -59,7 +59,7 @@ fn swatch_x(idx: usize) -> i32 {
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 
-fn draw_toolbar(sel_colour: u32, brush: i32) {
+fn draw_toolbar(sel_colour: u32, brush: i32, line_mode: bool) {
     fill(0, TOOL_Y, SCREEN_W, TOOL_H, 0x090e14);
     fill(0, TOOL_Y, SCREEN_W, 1, BORDER);
 
@@ -75,14 +75,16 @@ fn draw_toolbar(sel_colour: u32, brush: i32) {
         }
     }
 
-    // Brush size indicator (right side)
-    let bx = SCREEN_W - 160;
-    text(bx, TOOL_Y + 6, b"Brush:\0", FG_DIM);
-    let mut bs = [0u8; 4];
-    bs[0] = b'0' + (brush % 10) as u8;
-    bs[1] = b' '; bs[2] = b'p'; bs[3] = 0;
-    text(bx + 6 * 8, TOOL_Y + 6, &bs, FG);
-    text(bx, TOOL_Y + 22, b"1/2/3  C:clear  Q:quit\0", FG_DIM);
+    // Tool status (right side)
+    let bx = SCREEN_W - 200;
+    let mode_label: &[u8] = if line_mode { b"Tool: Line  \0" } else { b"Tool: Brush \0" };
+    text(bx, TOOL_Y + 6, mode_label, if line_mode { ACCENT } else { FG });
+    let mut bs = [0u8; 16];
+    bs[0] = b'S'; bs[1] = b'z'; bs[2] = b':'; bs[3] = b' ';
+    bs[4] = b'0' + (brush % 10) as u8;
+    bs[5] = b' '; bs[6] = b'p'; bs[7] = b'x'; bs[8] = 0;
+    text(bx, TOOL_Y + 22, &bs, FG_DIM);
+    text(bx + 80, TOOL_Y + 22, b"1/2/3 L C Q\0", FG_DIM);
 }
 
 fn draw_brush(mx: i32, my: i32, colour: u32, brush: i32) {
@@ -118,16 +120,18 @@ pub extern "C" fn main() {
     fill(0, 0, SCREEN_W, SCREEN_H, BG);
     window_frame(0, 0, SCREEN_W, SCREEN_H, b"Paint\0");
     fill(0, CANVAS_Y, SCREEN_W, CANVAS_H, CANVAS_BG);
-    draw_toolbar(PALETTE[0], 6);
+    draw_toolbar(PALETTE[0], 6, false);
 
     let mut mx: i32 = SCREEN_W / 2;
     let mut my: i32 = SCREEN_H / 2;
-    let mut colour    = PALETTE[0]; // black
-    let mut erase_col = CANVAS_BG;
+    let mut colour     = PALETTE[0];
+    let mut erase_col  = CANVAS_BG;
     let mut brush: i32 = 6;
-    let mut left_held = false;
+    let mut left_held  = false;
     let mut right_held = false;
-    let mut prev_k = 0i32;
+    let mut line_mode  = false;
+    let mut line_start = (0i32, 0i32);
+    let mut prev_k     = 0i32;
 
     loop {
         let (dx, dy, buttons) = poll_mouse();
@@ -141,16 +145,28 @@ pub extern "C" fn main() {
         if left_now && !left_held && my >= TOOL_Y {
             if let Some(c) = pick_colour(mx, my) {
                 colour = c;
-                draw_toolbar(colour, brush);
+                draw_toolbar(colour, brush, line_mode);
             }
         }
 
-        // Draw / erase on canvas
-        if left_now && my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
-            draw_brush(mx, my, colour, brush);
-        }
-        if right_now && my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
-            draw_brush(mx, my, erase_col, brush);
+        if !line_mode {
+            // Brush draw / erase on canvas
+            if left_now && my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
+                draw_brush(mx, my, colour, brush);
+            }
+            if right_now && my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
+                draw_brush(mx, my, erase_col, brush);
+            }
+        } else {
+            // Line tool: record start on press, draw on release
+            if left_now && !left_held && my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
+                line_start = (mx, my);
+            }
+            if !left_now && left_held {
+                if my >= CANVAS_Y && my < CANVAS_Y + CANVAS_H {
+                    draw_line(line_start.0, line_start.1, mx, my, colour);
+                }
+            }
         }
 
         left_held  = left_now;
@@ -164,13 +180,18 @@ pub extern "C" fn main() {
                 k if k == b'c' as i32 || k == b'C' as i32 => {
                     fill(0, CANVAS_Y, SCREEN_W, CANVAS_H, CANVAS_BG);
                 }
-                k if k == b'1' as i32 => { brush = 2;  draw_toolbar(colour, brush); }
-                k if k == b'2' as i32 => { brush = 6;  draw_toolbar(colour, brush); }
-                k if k == b'3' as i32 => { brush = 12; draw_toolbar(colour, brush); }
+                k if k == b'l' as i32 || k == b'L' as i32 => {
+                    line_mode = !line_mode;
+                    draw_toolbar(colour, brush, line_mode);
+                }
+                k if k == b'1' as i32 => { brush = 2;  draw_toolbar(colour, brush, line_mode); }
+                k if k == b'2' as i32 => { brush = 6;  draw_toolbar(colour, brush, line_mode); }
+                k if k == b'3' as i32 => { brush = 12; draw_toolbar(colour, brush, line_mode); }
                 _ => {}
             }
         }
         prev_k = k;
+        let _ = right_held;
 
         // Cursor (on top of everything)
         draw_cursor(mx, my);
