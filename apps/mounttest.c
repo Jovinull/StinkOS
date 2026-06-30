@@ -14,12 +14,13 @@
  * (200514) and below the disk size used by the Makefile image. */
 #include "libstink.h"
 
-/* The Makefile pads os.bin out to DISK_END = FS_DATA_END * 512
- * (= LBA 200514). The primary StinkFS uses LBAs [128, 158553) today,
- * so [199000, 200000) is well past every committed file but still
- * inside the disk image. */
+/* The Makefile pads os.bin to DISK_END = FS_DATA_END * 512. Primary
+ * StinkFS data tops out below LBA 158700; [199000, 200000) is well
+ * past every committed file but still inside the disk image. Mount
+ * directory occupies FS_DIR_SECTORS (4) sectors starting at dir_lba,
+ * so data_lba must be at least dir_lba + 4 to avoid overlap. */
 #define B_DIR_LBA     199000u
-#define B_DATA_LBA    199002u
+#define B_DATA_LBA    199004u
 #define B_DATA_END    200000u
 #define MARKER        0xDEADBEEFu
 

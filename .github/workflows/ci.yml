@@ -63,6 +63,40 @@ jobs:
       - name: Run headless boot test
         run: make test-headless
 
+      # Dedicated smokes split out of test-headless: each spins its
+      # own QEMU instance + asserts a single feature end-to-end.
+      # Cheaper per-assertion than the menu sweep, less prone to
+      # timing flake on slow CI runners.
+      - name: Smoke -- multi-proc fork+exec
+        run: make smoke-multiproc
+
+      - name: Smoke -- ACPI S5 shutdown
+        run: make smoke-acpi
+
+      - name: Smoke -- COW fork
+        run: make smoke-cow
+
+      - name: Smoke -- VFS multi-mount
+        run: make smoke-vfs-mounts
+
+      - name: Smoke -- W^X .data execution blocked
+        run: make smoke-wxattack
+
+      - name: Smoke -- exit codes through sys_wait
+        run: make smoke-exitcode
+
+      - name: Smoke -- Rust hello (toolchain)
+        run: make smoke-rs-hello
+
+      - name: Smoke -- Rust alloc crate
+        run: make smoke-rs-alloc
+
+      - name: Smoke -- Rust stdio shim
+        run: make smoke-rs-stdio
+
+      - name: Smoke -- Rust JSON parser
+        run: make smoke-rs-json
+
       - name: Static-analysis sweep
         run: make audit
         continue-on-error: true   # surface findings without failing the build yet

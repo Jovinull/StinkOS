@@ -22,10 +22,10 @@
 
 #define STINKFS_MAGIC   0x4B4E5453u   /* 'S','T','N','K' little-endian */
 #define FS_DIR_LBA      512
-#define FS_DIR_SECTORS  2
-#define FS_DATA_LBA     514
-#define FS_DATA_END     200514
-#define FS_MAX_FILES    40            /* fits in 2 sectors */
+#define FS_DIR_SECTORS  4             /* 2 KiB directory area */
+#define FS_DATA_LBA     516
+#define FS_DATA_END     200516
+#define FS_MAX_FILES    80            /* (4*512 - 12) / 24 = 84 max; round to 80 */
 #define FS_MAX_MOUNTS   2             /* A:, B: */
 
 struct fs_file {

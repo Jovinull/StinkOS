@@ -135,8 +135,8 @@ DOOM_CORE_OBJS = $(filter-out $(BUILD)/doom/doomgeneric_stink.o, $(DOOM_OBJS))
 BOOTBLOCK_SECTORS = 16
 KERNEL_LBA        = 16
 FS_DIR_LBA        = 512
-FS_DATA_LBA       = 514
-FS_DATA_END       = 200514
+FS_DATA_LBA       = 516
+FS_DATA_END       = 200516
 IMG_MIN           = 262144      # FS_DIR_LBA * 512 -- floor before make-stinkfs
 DISK_END          = 102663168   # FS_DATA_END * 512
 
@@ -624,6 +624,14 @@ smoke-rs-alloc: all
 # fragment of the round-trip output appears in serial.
 smoke-rs-json: all
 	@python3 tools/smoke-rs-json.py
+
+# W^X adversarial smoke: split out of test-headless so CI runner slack
+# doesn't push the assertion past its window. Drives shell to run
+# wxattack ELF which writes 0xC3 to .data then function-pointer-calls
+# it; v0.5 W^X NX bit fires #PF on the instruction fetch and the
+# kernel kills the process.
+smoke-wxattack: all
+	@python3 tools/smoke-wxattack.py
 
 # Exit code smoke (Tier 2.3): asserts sys_exit_code(N) propagates to
 # parent's sys_wait() return value.
