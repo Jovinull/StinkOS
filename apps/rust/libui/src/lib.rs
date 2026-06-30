@@ -510,6 +510,7 @@ impl Tile {
 // ── Widget layout ─────────────────────────────────────────────────────────────
 
 /// A button item in a layout list. `id` is returned by hit_test on click.
+/// id=255 (u8::MAX) is reserved as the "nothing" sentinel — do not use it.
 pub struct UiBtn {
     pub id:    u8,
     pub label: &'static [u8],
@@ -525,10 +526,11 @@ pub struct UiColumn<'a> {
 
 impl<'a> UiColumn<'a> {
     /// Draw all buttons at (x, y), stacking downward.
+    /// Pass `hov=u8::MAX` / `pressed=u8::MAX` for "nothing hovered/pressed".
     pub fn render(&self, x: i32, mut y: i32, hov: u8, pressed: u8) {
         for item in self.items {
-            let state = if item.id == pressed { BtnState::Pressed }
-                        else if item.id == hov { BtnState::Hovered }
+            let state = if pressed != u8::MAX && item.id == pressed { BtnState::Pressed }
+                        else if hov != u8::MAX && item.id == hov    { BtnState::Hovered }
                         else { BtnState::Normal };
             Button { label: item.label, x, y, w: item.w, h: item.h }.draw(state);
             y += item.h + self.gap;
@@ -548,9 +550,8 @@ impl<'a> UiColumn<'a> {
 
     /// Total pixel height occupied by this column.
     pub fn total_height(&self) -> i32 {
-        if self.items.is_empty() { return 0; }
         let sum: i32 = self.items.iter().map(|b| b.h).sum();
-        sum + self.gap * (self.items.len() as i32 - 1)
+        sum + self.gap * self.items.len().saturating_sub(1) as i32
     }
 }
 
@@ -562,10 +563,11 @@ pub struct UiRow<'a> {
 
 impl<'a> UiRow<'a> {
     /// Draw all buttons at (x, y), advancing rightward.
+    /// Pass `hov=u8::MAX` / `pressed=u8::MAX` for "nothing hovered/pressed".
     pub fn render(&self, mut x: i32, y: i32, hov: u8, pressed: u8) {
         for item in self.items {
-            let state = if item.id == pressed { BtnState::Pressed }
-                        else if item.id == hov { BtnState::Hovered }
+            let state = if pressed != u8::MAX && item.id == pressed { BtnState::Pressed }
+                        else if hov != u8::MAX && item.id == hov    { BtnState::Hovered }
                         else { BtnState::Normal };
             Button { label: item.label, x, y, w: item.w, h: item.h }.draw(state);
             x += item.w + self.gap;
@@ -585,8 +587,7 @@ impl<'a> UiRow<'a> {
 
     /// Total pixel width occupied by this row.
     pub fn total_width(&self) -> i32 {
-        if self.items.is_empty() { return 0; }
         let sum: i32 = self.items.iter().map(|b| b.w).sum();
-        sum + self.gap * (self.items.len() as i32 - 1)
+        sum + self.gap * self.items.len().saturating_sub(1) as i32
     }
 }

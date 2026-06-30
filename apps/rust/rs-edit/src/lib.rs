@@ -133,6 +133,7 @@ impl Editor {
     }
 
     fn insert(&mut self, c: u8) {
+        if self.len >= BUF_CAP { return; }
         self.undo.push(UndoEntry { kind: 0, pos: self.cursor as u16, ch: c });
         self.insert_raw(c);
     }
@@ -477,8 +478,10 @@ pub extern "C" fn main() {
                 k if k == CTRL_C => { clip_write(&ed.buf[..ed.len]); }
                 k if k == CTRL_V => {
                     let mut cb = [0u8; 4096];
-                    let n = clip_read(&mut cb) as usize;
-                    for i in 0..n { ed.insert(cb[i]); }
+                    let n = clip_read(&mut cb);
+                    if n > 0 {
+                        for i in 0..n as usize { ed.insert(cb[i]); }
+                    }
                 }
                 k if k == CTRL_Z => ed.undo(),
                 k if k == KEY_UP    => ed.move_up(),

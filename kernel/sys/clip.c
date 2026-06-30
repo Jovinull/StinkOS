@@ -6,10 +6,8 @@ static unsigned int clip_len;
 
 int clip_write(const char *buf, unsigned int len)
 {
-	if (!buf || len == 0) {
-		clip_len = 0;
-		return 0;
-	}
+	if (!buf) return -1;
+	if (len == 0) { clip_len = 0; return 0; }
 	if (len > CLIP_MAX) len = CLIP_MAX;
 	for (unsigned int i = 0; i < len; i++)
 		clip_buf[i] = buf[i];

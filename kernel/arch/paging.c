@@ -797,7 +797,17 @@ int paging_user_range_ok(unsigned int addr, unsigned int len)
 		return 1;
 	if (addr >= USER_HEAP_LO && end <= user_heap_next)
 		return 1;
-	if (addr >= USER_WIN_BASE && end <= USER_WIN_BASE + USER_WIN_SIZE)
+	if (addr >= USER_WIN_BASE && end <= USER_WIN_BASE + USER_WIN_SIZE) {
+		/* Win buffer pages are only present for processes that called
+		 * win_create. Walk PTEs to confirm every page in the range is
+		 * actually mapped before letting the kernel dereference the ptr. */
+		unsigned int va;
+		for (va = addr & ~0xFFFu; va < end; va += PAGE_4KB) {
+			pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+			if (!pte || !(*pte & 1ULL))
+				return 0;
+		}
 		return 1;
+	}
 	return 0;
 }

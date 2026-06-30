@@ -19,6 +19,7 @@
 #include "../drivers/input/mouse.h"
 #include "../drivers/misc/rtc.h"
 #include "../drivers/misc/serial.h"
+#include "interrupts.h"
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 
@@ -370,10 +371,10 @@ static int taskbar_btn_to_slot(int bx_hit)
     for (int i = 0; i < WIN_MAX; i++) {
         if (!slots[i].pid || !slots[i].visible) continue;
         int bx = btn * (TASKBAR_BTN_W + TASKBAR_BTN_PAD) + TASKBAR_BTN_PAD;
+        if (bx + TASKBAR_BTN_W > SCREEN_W) break; /* same guard as draw_taskbar */
         if (bx_hit >= bx && bx_hit < bx + TASKBAR_BTN_W)
             return i;
         btn++;
-        if (bx + TASKBAR_BTN_W > SCREEN_W) break;
     }
     return -1;
 }
@@ -417,15 +418,20 @@ static void draw_taskbar(void)
         btn++;
     }
 
-    /* Clock: "HH:MM" at right edge of taskbar */
-    struct rtc_time t;
-    rtc_read(&t);
-    char clk[6];     /* "HH:MM\0" */
-    fmt2d(clk + 0, t.hour);
-    clk[2] = ':';
-    fmt2d(clk + 3, t.minute);
-    clk[5] = '\0';
-    /* 5 chars × 8px = 40px wide; right-align with 8px margin */
+    /* Clock: "HH:MM" at right edge of taskbar.
+     * RTC I/O only runs once per second (100 PIT ticks). */
+    static char clk[6] = "00:00";
+    static unsigned int last_rtc_tick = 0;
+    unsigned int now = pit_ticks();
+    if (now - last_rtc_tick >= 100) {
+        struct rtc_time t;
+        rtc_read(&t);
+        fmt2d(clk + 0, t.hour);
+        clk[2] = ':';
+        fmt2d(clk + 3, t.minute);
+        clk[5] = '\0';
+        last_rtc_tick = now;
+    }
     fb_text((unsigned int)(SCREEN_W - 48), (unsigned int)(ty + 8), clk, 0x8b949e);
 }
 
@@ -491,15 +497,15 @@ void win_composite(void)
     /* Erase cursor before (possibly) redrawing windows. */
     mouse_undraw_cursor();
 
-    /* Blit only dirty windows (back-to-front). */
+    /* Any dirty window requires a full back-to-front blit of all windows.
+     * Partial blitting corrupts the framebuffer when a dirty low-z window
+     * overwrites pixels that a clean high-z window is supposed to cover. */
     if (any_dirty) {
         sort_by_z(order, n);
         for (int i = 0; i < n; i++) {
             struct win_slot *s = &slots[order[i]];
-            if (s->dirty) {
-                blit_window(s);
-                s->dirty = 0;
-            }
+            blit_window(s);
+            s->dirty = 0;
         }
     }
 
