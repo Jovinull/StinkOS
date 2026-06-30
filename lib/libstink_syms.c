@@ -196,6 +196,12 @@ int sys_proc_info(char *buf, int cap)
 	return __syscall(73, (int)buf, (int)cap, 0);
 }
 
+/* SYS_SET_KEYMAP (76): ebx=layout(0=US,1=BR) -> previous layout */
+int sys_set_keymap(int layout)
+{
+	return __syscall(76, layout, 0, 0);
+}
+
 /* SYS_ARP_INFO (74): ebx=buf ecx=cap -> bytes written */
 int sys_arp_info(char *buf, int cap)
 {

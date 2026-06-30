@@ -81,6 +81,8 @@ extern "C" {
     fn sys_kill(pid: i32) -> i32;
     fn sys_getpid() -> i32;
     fn sys_arp_info(buf: *mut u8, cap: i32) -> i32;
+    fn sys_set_keymap(layout: i32) -> i32;
+    fn sys_sound(freq: u32);
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────
@@ -156,6 +158,15 @@ pub fn fread(name: &[u8], buf: &mut [u8]) -> i32 {
 /// Write buf to a StinkFS file. Returns bytes written or -1.
 pub fn fwrite(name: &[u8], buf: &[u8]) -> i32 {
     unsafe { sys_fwrite(name.as_ptr(), buf.as_ptr(), buf.len() as u32) }
+}
+
+/// Set keyboard layout: 0=US, 1=BR. Returns previous layout.
+pub fn set_keymap(layout: i32) -> i32 {
+    unsafe { sys_set_keymap(layout) }
+}
+
+pub fn sound(freq: u32) {
+    unsafe { sys_sound(freq); }
 }
 
 pub fn arp_info(buf: &mut [u8]) -> i32 {
