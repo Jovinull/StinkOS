@@ -69,36 +69,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF##*/}"
-          # Extract annotation body via `git cat-file tag` -- skips the
-          # tag header (object/type/tag/tagger lines + blank separator)
-          # and returns the actual message. More reliable than the
-          # `git tag -l --format='%(contents)'` path which has bitten
-          # us on older fetched-but-shallow checkouts.
-          RAW=$(git cat-file tag "$TAG")
-          BODY=$(echo "$RAW" | sed '1,/^$/d')
-          TITLE=$(echo "$BODY" | head -n 1)
-          NOTES_FILE=$(mktemp)
-          echo "$BODY" | tail -n +3 > "$NOTES_FILE"
-
-          # Debug: log what we extracted so a future regression is easy
-          # to spot from the workflow output without re-running locally.
-          echo "::group::extracted tag annotation"
-          echo "TAG=$TAG"
-          echo "TITLE='$TITLE'"
-          echo "BODY length=$(echo "$BODY" | wc -c)"
-          echo "--- notes-file ---"
-          cat "$NOTES_FILE"
-          echo "::endgroup::"
-
-          if [ ! -s "$NOTES_FILE" ]; then
-            echo "StinkOS $TAG -- see CHANGELOG / commits for details." > "$NOTES_FILE"
-          fi
-          if [ -z "$TITLE" ]; then TITLE="$TAG"; fi
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
-          else
-            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          # gh release create without --title or --notes pulls them
+          # straight from the annotated tag's message (first line ->
+          # title, rest -> body). Way more robust than parsing
+          # `git cat-file` or `git tag -l --format` output in shell,
+          # both of which have bitten us on shallow / partial fetches.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag
           fi
           gh release upload "$TAG" stinkos-install.iso stinkos-install.iso.sha256 \
             --clobber
