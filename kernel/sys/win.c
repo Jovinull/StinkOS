@@ -16,6 +16,7 @@
 #include "../arch/pmm.h"
 #include "../drivers/video/fb.h"
 #include "../drivers/input/mouse.h"
+#include "../drivers/misc/rtc.h"
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 
@@ -359,6 +360,13 @@ static int taskbar_btn_to_slot(int bx_hit)
     return -1;
 }
 
+/* Format unsigned int into exactly 2 ASCII digits at buf[0..1]. No NUL. */
+static void fmt2d(char *buf, unsigned int v)
+{
+    buf[0] = '0' + (char)((v / 10) % 10);
+    buf[1] = '0' + (char)(v % 10);
+}
+
 static void draw_taskbar(void)
 {
     int ty = SCREEN_H - TASKBAR_H;
@@ -390,6 +398,17 @@ static void draw_taskbar(void)
                 fg);
         btn++;
     }
+
+    /* Clock: "HH:MM" at right edge of taskbar */
+    struct rtc_time t;
+    rtc_read(&t);
+    char clk[6];     /* "HH:MM\0" */
+    fmt2d(clk + 0, t.hour);
+    clk[2] = ':';
+    fmt2d(clk + 3, t.minute);
+    clk[5] = '\0';
+    /* 5 chars × 8px = 40px wide; right-align with 8px margin */
+    fb_text((unsigned int)(SCREEN_W - 48), (unsigned int)(ty + 8), clk, 0x8b949e);
 }
 
 /* Route accumulated mouse delta to the focused window's event queue. */
