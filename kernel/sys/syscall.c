@@ -6,6 +6,7 @@
 #include "acpi.h"
 #include "fs.h"
 #include "win.h"
+#include "clip.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -1235,6 +1236,26 @@ void syscall_dispatch(struct regs *r)
 		win_move((int)proc_current()->pid, (int)r->ebx, (int)r->ecx);
 		r->eax = 0;
 		break;
+	case 92: {                               /* SYS_CLIP_WRITE: ebx=buf ecx=len */
+		unsigned int ulen = r->ecx;
+		if (ulen > 4096) ulen = 4096;
+		if (ulen > 0 && !paging_user_range_ok(r->ebx, ulen)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)clip_write((const char *)r->ebx, ulen);
+		break;
+	}
+	case 93: {                               /* SYS_CLIP_READ: ebx=buf ecx=max -> n */
+		unsigned int umax = r->ecx;
+		if (umax > 4096) umax = 4096;
+		if (umax > 0 && !paging_user_range_ok(r->ebx, umax)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)clip_read((char *)r->ebx, umax);
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;

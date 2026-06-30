@@ -33,8 +33,10 @@ const VISIBLE_LINES:  usize = ((CONTENT_BOT - CONTENT_TOP) / LINE_H) as usize;
 
 // ── Ctrl key codes ────────────────────────────────────────────────────────────
 
-const CTRL_S:   i32 = 19; // Ctrl+S
-const CTRL_Q:   i32 = 17; // Ctrl+Q
+const CTRL_C:   i32 =  3; // Ctrl+C = copy all
+const CTRL_S:   i32 = 19; // Ctrl+S = save
+const CTRL_Q:   i32 = 17; // Ctrl+Q = quit
+const CTRL_V:   i32 = 22; // Ctrl+V = paste
 const CTRL_Z:   i32 = 26; // Ctrl+Z = undo
 const KEY_ESC:  i32 = 27;
 const KEY_BS:   i32 = 8;
@@ -413,7 +415,7 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
     posbuf[pi] = 0;
 
     text16(WIN_X + 12, st_y, &posbuf, FG_DIM);
-    text16(WIN_X + 80, st_y, b"Ctrl+S save  Ctrl+Z undo  Ctrl+Q quit\0", FG_DIM);
+    text16(WIN_X + 80, st_y, b"Ctrl+S save  Ctrl+Z undo  Ctrl+C copy  Ctrl+V paste  Ctrl+Q quit\0", FG_DIM);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -471,6 +473,12 @@ pub extern "C" fn main() {
                 k if k == CTRL_S => {
                     fwrite(&fname, &ed.buf[..ed.len]);
                     ed.dirty = false;
+                }
+                k if k == CTRL_C => { clip_write(&ed.buf[..ed.len]); }
+                k if k == CTRL_V => {
+                    let mut cb = [0u8; 4096];
+                    let n = clip_read(&mut cb) as usize;
+                    for i in 0..n { ed.insert(cb[i]); }
                 }
                 k if k == CTRL_Z => ed.undo(),
                 k if k == KEY_UP    => ed.move_up(),

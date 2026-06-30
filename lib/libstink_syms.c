@@ -266,3 +266,15 @@ void sys_win_move(int x, int y)
 {
 	__syscall(91, x, y, 0);
 }
+
+/* SYS_CLIP_WRITE (92): ebx=buf ecx=len -> bytes stored */
+int sys_clip_write(const void *buf, unsigned int len)
+{
+	return __syscall(92, (int)buf, (int)len, 0);
+}
+
+/* SYS_CLIP_READ (93): ebx=buf ecx=max -> bytes copied */
+int sys_clip_read(void *buf, unsigned int max)
+{
+	return __syscall(93, (int)buf, (int)max, 0);
+}

@@ -93,6 +93,9 @@ extern "C" {
     fn sys_win_get_event(ev: *mut WinEvent) -> i32;
     fn sys_win_raise();
     fn sys_win_move(x: i32, y: i32);
+    // clipboard
+    fn sys_clip_write(buf: *const u8, len: u32) -> i32;
+    fn sys_clip_read(buf: *mut u8, max: u32) -> i32;
 }
 
 // ── Window event ─────────────────────────────────────────────────────────────
@@ -269,6 +272,16 @@ pub fn fwrite(name: &[u8], buf: &[u8]) -> i32 {
 /// Delete a StinkFS file. Returns 0 on success, -1 if not found.
 pub fn fdelete(name: &[u8]) -> i32 {
     unsafe { sys_fdelete(name.as_ptr()) }
+}
+
+/// Write data to the kernel clipboard. Returns bytes stored or -1.
+pub fn clip_write(data: &[u8]) -> i32 {
+    unsafe { sys_clip_write(data.as_ptr(), data.len() as u32) }
+}
+
+/// Read up to buf.len() bytes from the kernel clipboard. Returns bytes copied.
+pub fn clip_read(buf: &mut [u8]) -> i32 {
+    unsafe { sys_clip_read(buf.as_mut_ptr(), buf.len() as u32) }
 }
 
 /// Set keyboard layout: 0=US, 1=BR. Returns previous layout.

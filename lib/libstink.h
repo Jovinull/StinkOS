@@ -1075,4 +1075,14 @@ static inline void sys_win_move(int x, int y)
     __syscall(91, x, y, 0);
 }
 
+/* Clipboard: one shared kernel buffer (4096 bytes) for cross-app copy-paste. */
+static inline int sys_clip_write(const void *buf, unsigned int len)
+{
+    return __syscall(92, (int)buf, (int)len, 0);
+}
+static inline int sys_clip_read(void *buf, unsigned int max)
+{
+    return __syscall(93, (int)buf, (int)max, 0);
+}
+
 #endif
