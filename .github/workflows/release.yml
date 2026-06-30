@@ -69,13 +69,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF##*/}"
-          # gh release create without --title or --notes pulls them
-          # straight from the annotated tag's message (first line ->
-          # title, rest -> body). Way more robust than parsing
-          # `git cat-file` or `git tag -l --format` output in shell,
-          # both of which have bitten us on shallow / partial fetches.
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag
+          # `for-each-ref` is the robust way to pull an annotated tag's
+          # message in CI; `git cat-file tag` mis-parses the tag name
+          # as a path under some checkout versions ("bad file" error
+          # we hit on v0.10.0).
+          BODY=$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')
+          TITLE=$(echo "$BODY" | head -n 1)
+          NOTES_FILE=$(mktemp)
+          echo "$BODY" | tail -n +3 > "$NOTES_FILE"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "StinkOS $TAG -- see CHANGELOG / commits for details." > "$NOTES_FILE"
+          fi
+          if [ -z "$TITLE" ]; then TITLE="$TAG"; fi
+
+          echo "::group::extracted tag annotation"
+          echo "TAG=$TAG"
+          echo "TITLE='$TITLE'"
+          echo "BODY length=$(echo "$BODY" | wc -c)"
+          echo "::endgroup::"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
           fi
           gh release upload "$TAG" stinkos-install.iso stinkos-install.iso.sha256 \
             --clobber
