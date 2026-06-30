@@ -91,7 +91,7 @@ pub extern "C" fn main() {
             cy += 14;
             fill(cx, cy, cw - 32, 1, BORDER);
             cy += 6;
-            cy = draw_lines(&pbuf, plen as usize, cx, cy, max_y, BORDER, FG);
+            draw_lines(&pbuf, plen as usize, cx, cy, max_y, BORDER, FG);
         }
 
         let footer_y = ch - 20;

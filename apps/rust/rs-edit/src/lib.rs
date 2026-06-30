@@ -25,7 +25,6 @@ const WIN_H:    i32 = SCREEN_H - 60;
 // Titlebar height is 33px (from draw_window_frame) + 1px separator = 34
 const CONTENT_TOP: i32 = WIN_Y + 34;
 const CONTENT_BOT: i32 = WIN_Y + WIN_H - 22; // leave 22px for status bar
-const TEXT_X:      i32 = WIN_X + 12;
 const TEXT_W:      i32 = WIN_W - 24;
 const LINE_H:      i32 = 18;
 const CHARS_PER_LINE: usize = (TEXT_W / 8) as usize;

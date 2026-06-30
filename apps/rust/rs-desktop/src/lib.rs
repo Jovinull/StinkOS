@@ -175,7 +175,6 @@ pub extern "C" fn main() {
     let mut prev_my      = my - 1;
     let mut prev_hov: Option<usize> = None;
     let mut left_held    = false;
-    let mut frame: u32   = 0;
     let mut prev_frame   = !0u32;
 
     loop {
@@ -201,7 +200,7 @@ pub extern "C" fn main() {
         left_held = left_now;
 
         /* Advance starfield animation frame every ~300ms (16ms * 18 ticks) */
-        frame = ticks() / 30;
+        let frame = ticks() / 30;
 
         /* Redraw when mouse/hover/animation changed */
         let hov = hovered_idx(mx, my);

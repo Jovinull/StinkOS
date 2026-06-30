@@ -330,13 +330,12 @@ fn tan_deg(d: f64) -> f64 {
     if c.abs() < 1e-12 { f64::NAN } else { sin_deg(d) / c }
 }
 
-trait F64Ext { fn floor(self) -> f64; fn abs(self) -> f64; }
+trait F64Ext { fn floor(self) -> f64; }
 impl F64Ext for f64 {
     fn floor(self) -> f64 {
         let i = self as i64;
         if self < i as f64 { (i - 1) as f64 } else { i as f64 }
     }
-    fn abs(self) -> f64 { if self < 0.0 { -self } else { self } }
 }
 
 // ── f64 formatting ────────────────────────────────────────────────────────────
