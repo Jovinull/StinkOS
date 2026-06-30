@@ -37,6 +37,7 @@ static APPS: &[AppEntry] = &[
     AppEntry { label: b"Asteroids\0",  exec: b"asteroids\0"  },
     AppEntry { label: b"Snake\0",      exec: b"snake\0"      },
     AppEntry { label: b"Pong\0",       exec: b"pong\0"       },
+    AppEntry { label: b"Breakout\0",   exec: b"breakout\0"   },
     AppEntry { label: b"Animation\0",  exec: b"anim\0"       },
     AppEntry { label: b"Life (RS)\0",  exec: b"rs-life\0"    },
     AppEntry { label: b"Files\0",      exec: b"rs-files\0"   },
