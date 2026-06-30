@@ -34,6 +34,7 @@ pub const KEY_UP:    i32 = 28;
 pub const KEY_DOWN:  i32 = 29;
 pub const KEY_LEFT:  i32 = 30;
 pub const KEY_RIGHT: i32 = 31;
+pub const KEY_F11:   i32 = 0x57;  /* scancode set 1, extended */
 
 // ── RTC time ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ extern "C" {
     fn sys_win_get_event(ev: *mut WinEvent) -> i32;
     fn sys_win_raise();
     fn sys_win_move(x: i32, y: i32);
+    fn sys_win_resize(w: u32, h: u32) -> i32;
     // clipboard
     fn sys_clip_write(buf: *const u8, len: u32) -> i32;
     fn sys_clip_read(buf: *mut u8, max: u32) -> i32;
@@ -109,10 +111,14 @@ pub struct WinEvent {
     pub key:     i32,
 }
 
-pub const WIN_EV_NONE:  i32 = 0;
-pub const WIN_EV_MOUSE: i32 = 1;
-pub const WIN_EV_KEY:   i32 = 2;
-pub const WIN_EV_CLOSE: i32 = 3;
+pub const WIN_EV_NONE:   i32 = 0;
+pub const WIN_EV_MOUSE:  i32 = 1;
+pub const WIN_EV_KEY:    i32 = 2;
+pub const WIN_EV_CLOSE:  i32 = 3;
+pub const WIN_EV_RESIZE: i32 = 4;  /* x=new_w, y=new_h */
+
+pub const SCREEN_W_FULL: i32 = 1024;
+pub const SCREEN_H_FULL: i32 = 768 - 24; /* 768 minus taskbar */
 
 // ── Window buffer ─────────────────────────────────────────────────────────────
 
@@ -132,6 +138,12 @@ pub fn win_init_at(title: &[u8], w: i32, h: i32, x: i32, y: i32) {
         sys_win_create(w as u32, h as u32);
         sys_win_show(x, y, title.as_ptr());
     }
+}
+
+/// Resize the window buffer to w×h. Reallocates PMM frames and pushes
+/// WIN_EV_RESIZE to the event queue. Returns true on success.
+pub fn win_resize(w: i32, h: i32) -> bool {
+    unsafe { sys_win_resize(w as u32, h as u32) == 0 }
 }
 
 pub fn win_done() {

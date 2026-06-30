@@ -40,9 +40,9 @@ fn section_header(label: &[u8], y: i32) {
     fill(CX, y + 11, WIN_W - 40, 1, BORDER);
 }
 
-fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool) {
-    fill(0, 0, WIN_W, WIN_H, BG);
-    window_frame(0, 0, WIN_W, WIN_H, b"Settings\0");
+fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool, cw: i32, ch: i32) {
+    fill(0, 0, cw, ch, BG);
+    window_frame(0, 0, cw, ch, b"Settings\0");
 
     let content_y = 44;
     let kb_y      = content_y + 18;
@@ -64,8 +64,8 @@ fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool) {
     let snd_row   = UiRow { items: snd_items, gap: BTN_GAP };
     snd_row.render(CX, snd_y, hov, if muted { 3 } else { 0xFF });
 
-    let hint_y = WIN_H - 20;
-    fill(8, hint_y - 4, WIN_W - 16, 1, BORDER);
+    let hint_y = ch - 20;
+    fill(8, hint_y - 4, cw - 16, 1, BORDER);
     text16(CX, hint_y + 4, b"Q  close\0", FG_DIM);
 
     draw_cursor(mx, my);
@@ -76,6 +76,9 @@ pub extern "C" fn main() {
     println!("rs-settings: start");
     win_init_at(b"Settings ", WIN_W, WIN_H, WIN_X, WIN_Y);
 
+    let mut cw = WIN_W;
+    let mut ch = WIN_H;
+    let mut maximized = false;
     let content_y = 44;
     let kb_y      = content_y + 18;
     let snd_section_y = kb_y + BH + 28;
@@ -119,11 +122,21 @@ pub extern "C" fn main() {
         left_held = left_now;
 
         let k = poll_key();
-        if k != 0 && k != prev_k && (k == b'q' as i32 || k == 27) { break; }
+        if k != 0 && k != prev_k {
+            match k {
+                k if k == b'q' as i32 || k == 27 => break,
+                KEY_F11 => {
+                    maximized = !maximized;
+                    let (nw, nh) = if maximized { (SCREEN_W_FULL, SCREEN_H_FULL) } else { (WIN_W, WIN_H) };
+                    if win_resize(nw, nh) { cw = nw; ch = nh; dirty = true; }
+                }
+                _ => {}
+            }
+        }
         prev_k = k;
 
         if dirty {
-            render(mx, my, hov, layout, muted);
+            render(mx, my, hov, layout, muted, cw, ch);
             dirty = false;
         }
         win_flush();

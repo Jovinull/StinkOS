@@ -369,9 +369,9 @@ fn fmt_f64(v: f64, buf: &mut [u8; 20]) -> usize {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>) {
-    fill(0, 0, WIN_W, WIN_H, BG);
-    window_frame(0, 0, WIN_W, WIN_H, b"Calculator\0");
+fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>, cw: i32, ch: i32) {
+    fill(0, 0, cw, ch, BG);
+    window_frame(0, 0, cw, ch, b"Calculator\0");
 
     // Display panel
     fill(DISP_X, DISP_Y, DISP_W, DISP_H, 0x090e14);
@@ -420,6 +420,8 @@ fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-calc: start");
+    let mut cw = WIN_W; let mut ch = WIN_H;
+    let mut maximized = false;
     win_init_at(b"Calculator  ", WIN_W, WIN_H, WIN_X, WIN_Y);
 
     let mut calc = Calc::new();
@@ -468,6 +470,11 @@ pub extern "C" fn main() {
             let mut handled = true;
             match k {
                 k if k == b'q' as i32 || k == 27 => break,
+                KEY_F11 => {
+                    maximized = !maximized;
+                    let (nw, nh) = if maximized { (SCREEN_W_FULL, SCREEN_H_FULL) } else { (WIN_W, WIN_H) };
+                    if win_resize(nw, nh) { cw = nw; ch = nh; dirty = true; }
+                }
                 k if k >= b'0' as i32 && k <= b'9' as i32 => {
                     calc.handle(ACT_DIGIT, k as u8);
                 }
@@ -489,7 +496,7 @@ pub extern "C" fn main() {
         prev_k = k;
 
         if dirty {
-            render(&calc, mx, my, pressed_idx);
+            render(&calc, mx, my, pressed_idx, cw, ch);
             dirty = false;
         }
 

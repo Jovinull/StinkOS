@@ -2,6 +2,7 @@
 //!
 //! Shows OS version, architecture, kernel info, and a brief feature list.
 //! Reads live uptime + wall clock from the kernel. Press Q or Esc to exit.
+//! Press F11 to toggle maximize / restore.
 
 #![no_std]
 #![no_main]
@@ -16,13 +17,12 @@ const WIN_H: i32 = 480;
 const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
 const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
 
-// Content area top after window frame
 const CONTENT_X: i32 = 24;
-const CONTENT_Y: i32 = 52; // titlebar(34) + 18px pad
+const CONTENT_Y: i32 = 52;
 const LINE_H: i32 = 20;
 
 static LINES: &[(&[u8], u32)] = &[
-    (b"StinkOS\0",                              0x57f287), // ACCENT
+    (b"StinkOS\0",                              0x57f287),
     (b"An original x86 32-bit hobby OS\0",      0xe6edf3),
     (b"\0",                                     0x000000),
     (b"Architecture   x86 (i686), 32-bit protected mode\0",   0x8b949e),
@@ -40,12 +40,11 @@ static LINES: &[(&[u8], u32)] = &[
     (b"               Sysinfo, Snake, Pong, Asteroids, Doom\0",0x8b949e),
 ];
 
-fn draw(tick: u32) {
-    fill(0, 0, WIN_W, WIN_H, BG);
-    window_frame(0, 0, WIN_W, WIN_H, b"About StinkOS\0");
+fn draw(tick: u32, cw: i32, ch: i32) {
+    fill(0, 0, cw, ch, BG);
+    window_frame(0, 0, cw, ch, b"About StinkOS\0");
 
-    // Accent bar under title area
-    fill(CONTENT_X - 4, CONTENT_Y - 6, WIN_W - 32, 1, BORDER);
+    fill(CONTENT_X - 4, CONTENT_Y - 6, cw - 32, 1, BORDER);
 
     let mut y = CONTENT_Y;
     for (line, color) in LINES.iter() {
@@ -55,21 +54,15 @@ fn draw(tick: u32) {
         y += LINE_H;
     }
 
-    // Live stats section
-    let stats_y = WIN_H - 80;
-    fill(8, stats_y - 4, WIN_W - 16, 1, BORDER);
+    let stats_y = ch - 80;
+    fill(8, stats_y - 4, cw - 16, 1, BORDER);
 
-    // Uptime
     let uptime_sec = tick / 1000;
-    let uh = uptime_sec / 3600;
-    let um = (uptime_sec % 3600) / 60;
-    let us = uptime_sec % 60;
     let mut tbuf = [0u8; 9];
-    fmt_hhmmss(uh, um, us, &mut tbuf);
+    fmt_hhmmss(uptime_sec / 3600, (uptime_sec % 3600) / 60, uptime_sec % 60, &mut tbuf);
     text16(CONTENT_X, stats_y + 4, b"Uptime  \0", FG_DIM);
     text16(CONTENT_X + 72, stats_y + 4, &tbuf, FG);
 
-    // Wall clock
     let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
     if read_clock(&mut rtc) == 0 {
         let mut cbuf = [0u8; 9];
@@ -78,8 +71,7 @@ fn draw(tick: u32) {
         text16(CONTENT_X + 72, stats_y + 24, &cbuf, FG);
     }
 
-    // Dismiss hint
-    text16(WIN_W - 128, WIN_H - 24, b"Q  close\0", FG_DIM);
+    text16(cw - 128, ch - 24, b"Q close F11 max\0", FG_DIM);
 }
 
 #[unsafe(no_mangle)]
@@ -87,12 +79,32 @@ pub extern "C" fn main() {
     println!("rs-about: start");
     win_init_at(b"About StinkOS\0", WIN_W, WIN_H, WIN_X, WIN_Y);
 
+    let mut cw = WIN_W;
+    let mut ch = WIN_H;
+    let mut maximized = false;
+    let mut prev_k = 0i32;
+
     loop {
-        draw(ticks());
+        draw(ticks(), cw, ch);
         win_flush();
 
         let k = poll_key();
-        if k == b'q' as i32 || k == b'Q' as i32 || k == 27 { break; }
+        if k != 0 && k != prev_k {
+            match k {
+                k if k == b'q' as i32 || k == b'Q' as i32 || k == 27 => break,
+                KEY_F11 => {
+                    maximized = !maximized;
+                    let (nw, nh) = if maximized {
+                        (SCREEN_W_FULL, SCREEN_H_FULL)
+                    } else {
+                        (WIN_W, WIN_H)
+                    };
+                    if win_resize(nw, nh) { cw = nw; ch = nh; }
+                }
+                _ => {}
+            }
+        }
+        prev_k = k;
 
         sleep_ms(500);
     }

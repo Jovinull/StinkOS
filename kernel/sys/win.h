@@ -24,6 +24,7 @@
 #define WIN_EV_MOUSE   1
 #define WIN_EV_KEY     2
 #define WIN_EV_CLOSE   3
+#define WIN_EV_RESIZE  4  /* x=new_w y=new_h — sent after win_resize() succeeds */
 
 /* Per-event capacity per window (circular queue). */
 #define WIN_EV_CAP     16
@@ -80,6 +81,11 @@ void win_raise(int pid);
 
 /* Move window to new screen position. */
 void win_move(int pid, int x, int y);
+
+/* Resize window buffer to w×h pixels: reallocates PMM frames, remaps
+ * USER_WIN_BASE in the owner's VAS, pushes WIN_EV_RESIZE to the event queue.
+ * Returns 0 on success, -1 on failure (invalid size / OOM / no such window). */
+int win_resize(int pid, unsigned int w, unsigned int h);
 
 /* Force a full composite of all visible windows to the framebuffer. */
 void win_composite(void);

@@ -1040,7 +1040,7 @@ int draw_window_frame(int x, int y, int w, int h, const char *title);
  * buffer is mapped at USER_WIN_BASE (0x12000000) in the caller's VAS.
  * Write ARGB32 pixels there then call sys_win_flush() to repaint.
  *
- * Event types: 0=none 1=mouse 2=key 3=close.
+ * Event types: 0=none 1=mouse 2=key 3=close 4=resize (x=new_w y=new_h).
  */
 struct stink_win_event {
     int type;
@@ -1078,6 +1078,10 @@ static inline void sys_win_raise(void)
 static inline void sys_win_move(int x, int y)
 {
     __syscall(91, x, y, 0);
+}
+static inline int sys_win_resize(unsigned int w, unsigned int h)
+{
+    return __syscall(94, (int)w, (int)h, 0);
 }
 
 /* Clipboard: one shared kernel buffer (4096 bytes) for cross-app copy-paste. */

@@ -1256,6 +1256,11 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)clip_read((char *)r->ebx, umax);
 		break;
 	}
+	case 94: {                               /* SYS_WIN_RESIZE: ebx=w ecx=h -> 0/-1 */
+		r->eax = (unsigned int)win_resize((int)proc_current()->pid,
+		                                  r->ebx, r->ecx);
+		break;
+	}
 	default:
 		r->eax = (unsigned int)-1;
 		break;

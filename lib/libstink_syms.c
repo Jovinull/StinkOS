@@ -278,3 +278,9 @@ int sys_clip_read(void *buf, unsigned int max)
 {
 	return __syscall(93, (int)buf, (int)max, 0);
 }
+
+/* SYS_WIN_RESIZE (94): ebx=w ecx=h -> 0 ok / -1 fail */
+int sys_win_resize(unsigned int w, unsigned int h)
+{
+	return __syscall(94, (int)w, (int)h, 0);
+}

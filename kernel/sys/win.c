@@ -241,6 +241,49 @@ void win_move(int pid, int x, int y)
     slots[si].dirty = 1;
 }
 
+int win_resize(int pid, unsigned int w, unsigned int h)
+{
+    if (w == 0 || h == 0 || w > 1024 || h > 768) return -1;
+
+    int si = slot_for_pid(pid);
+    if (si < 0) return -1;
+    struct win_slot *s = &slots[si];
+
+    unsigned int need = (w * h * 4 + 4095) / 4096;
+    if (need > WIN_MAX_FRAMES) return -1;
+
+    /* Allocate new frames first; roll back on OOM so the old buffer survives. */
+    unsigned int nf[WIN_MAX_FRAMES];
+    for (unsigned int i = 0; i < need; i++) {
+        unsigned int fr = pmm_alloc();
+        if (!fr) {
+            for (unsigned int j = 0; j < i; j++) pmm_free(nf[j]);
+            return -1;
+        }
+        unsigned int *kp = (unsigned int *)P2V(fr);
+        for (unsigned int k = 0; k < 4096 / 4; k++) kp[k] = 0;
+        nf[i] = fr;
+    }
+
+    /* Unmap old buffer from process VAS, then free old frames. */
+    paging_unmap_win_buf(USER_WIN_BASE, s->n_frames);
+    for (int i = 0; i < s->n_frames; i++) pmm_free(s->frames[i]);
+
+    /* Map new frames and update slot. */
+    paging_map_win_buf(USER_WIN_BASE, nf, (int)need);
+    for (unsigned int i = 0; i < need; i++) s->frames[i] = nf[i];
+    s->n_frames = (int)need;
+    s->w = w;
+    s->h = h;
+    s->dirty = 1;
+
+    /* Notify the app of the new dimensions. */
+    struct win_event ev = { WIN_EV_RESIZE, (int)w, (int)h, 0, 0 };
+    ev_push(s, &ev);
+
+    return 0;
+}
+
 /* ── Syscall routing (redirect drawing calls to window buffer) ───────────── */
 
 /* Write an ARGB pixel to the window buffer at (x, y). */
