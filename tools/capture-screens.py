@@ -116,7 +116,14 @@ def shot(name, pause_before=0.0):
 
 def key(k, pause=0.25): send(f"sendkey {k}", pause=pause)
 def keys(s, p=0.08):
-    for c in s: key(c, pause=p)
+    # QEMU monitor sendkey aliases: literal space + hyphen aren't valid
+    # keynames. Translate so the shell sees the right characters; without
+    # this `keys("run rs-life")` lost the space + dash and the shell got
+    # "runrslife" → ended up in the stink-pkg "package not installed"
+    # branch instead of dispatching `run rs-life`.
+    aliases = {" ": "spc", "-": "minus", ".": "dot", "_": "underscore"}
+    for c in s:
+        key(aliases.get(c, c.lower()), pause=p)
 
 # --- 1. menu --------------------------------------------------------
 print(">>> waiting for menu (boot + DHCP)")
@@ -169,6 +176,23 @@ shot("doom_e1m1", pause_before=0.5)
 keys("ww", p=0.4)
 key("rgt", pause=0.3)
 shot("doom_walking", pause_before=0.5)
+
+# --- 5. rs-life (Rust Conway's Game of Life) ------------------------
+# After Doom quits we're back at the menu. Cursor is wherever Doom left
+# it; rs-life sits past it in the menu so walk down by a generous
+# margin then locate it. Simpler: type into the SHELL once it lands.
+# We already exited shell above, so navigate back to SHELL (slot 14)
+# and `run rs-life`. After a few seconds of the glider gun running,
+# capture the framebuffer with multiple gliders visibly streaming
+# diagonally.
+print(">>> rs-life (Rust Conway's Game of Life)")
+# Back to menu, find SHELL again (cursor on DOOM1 -> walk to SHELL).
+for _ in range(7): key("w", pause=0.04)
+key("ret", pause=0.0); time.sleep(2.0)
+keys("run rs-life"); key("ret", pause=0.6)
+time.sleep(8.0)                                   # let glider gun emit a few gliders
+shot("rs_life", pause_before=0.5)
+key("q"); time.sleep(1.5)
 
 print(">>> quitting qemu")
 send("quit"); time.sleep(0.5)
