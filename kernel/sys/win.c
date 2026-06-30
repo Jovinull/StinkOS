@@ -69,8 +69,8 @@ int win_create(int pid, unsigned int w, unsigned int h)
 {
     if (pid <= 0 || w == 0 || h == 0)
         return -1;
-    if (w > 4096 || h > 4096)
-        return -1;  /* cap to prevent u32 overflow in w*h*4 below */
+    if (w > 1024 || h > 768)
+        return -1;  /* cap to screen resolution; also prevents u32 overflow */
     if (slot_for_pid(pid) >= 0)
         return -1;  /* process already has a window */
 

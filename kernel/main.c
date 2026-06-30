@@ -29,7 +29,7 @@ void kmain(void)
 	serial_write("gdt: kernel+user segments and tss loaded\n");
 	bootdiag_add("cpu: gdt+tss", BOOT_OK);
 
-	pmm_init(V2P((unsigned int)__bss_end), 0x2000000);   /* kernel-end .. 32 MiB */
+	pmm_init(V2P((unsigned int)__bss_end), 0x4000000);   /* kernel-end .. 64 MiB */
 	paging_init();
 	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");

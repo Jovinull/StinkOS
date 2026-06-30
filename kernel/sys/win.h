@@ -13,8 +13,8 @@
 #define WIN_MAX        8
 
 /* Maximum 4KiB frames per window buffer.
- * 300 × 4096 = 1,228,800 bytes → supports up to ~640×480 at 32bpp. */
-#define WIN_MAX_FRAMES 300
+ * 768 × 4096 = 3,145,728 bytes → supports 1024×768 at 32bpp. */
+#define WIN_MAX_FRAMES 768
 
 /* Input event types */
 #define WIN_EV_NONE    0
