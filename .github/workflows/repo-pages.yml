@@ -58,6 +58,16 @@ jobs:
       - name: Add toolchain to PATH
         run: echo "$HOME/opt/cross/bin" >> $GITHUB_PATH
 
+      # Rust nightly + rust-src for the v0.9 userland (cargo build-std
+      # needs core/alloc compiled from source for the i686-stinkos
+      # bare-metal target). `make sample-packages` builds every app
+      # including the Rust ones, so the workflow needs the same Rust
+      # toolchain ci.yml installs for the headless boot path.
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
       - name: Build sample packages
         run: make sample-packages
 
