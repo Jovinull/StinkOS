@@ -66,6 +66,15 @@ static int gfx_isqrt(int n)
     return x;
 }
 
+/* Rectangle outline — 1 px border, no fill. */
+void draw_rect_outline(int x, int y, int w, int h, unsigned int rgb)
+{
+    sys_fillrect(x,         y,         w, 1, rgb); /* top */
+    sys_fillrect(x,         y + h - 1, w, 1, rgb); /* bottom */
+    sys_fillrect(x,         y,         1, h, rgb); /* left */
+    sys_fillrect(x + w - 1, y,         1, h, rgb); /* right */
+}
+
 /* Filled rounded rectangle.
  *
  * Uses two overlapping fillrects for the interior cross, then fills each

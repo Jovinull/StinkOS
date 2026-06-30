@@ -61,6 +61,7 @@ extern "C" {
     fn sys_fillrect(x: i32, y: i32, w: i32, h: i32, rgb: u32);
     fn sys_drawtext(x: i32, y: i32, s: *const u8, rgb: u32) -> i32;
     fn sys_draw(x: i32, y: i32, rgb: u32);
+    fn draw_rect_outline(x: i32, y: i32, w: i32, h: i32, rgb: u32);
     fn draw_rounded_rect(x: i32, y: i32, w: i32, h: i32, r: i32, rgb: u32);
     fn draw_shadow(x: i32, y: i32, w: i32, h: i32, depth: i32, rgb: u32);
     fn draw_window_frame(x: i32, y: i32, w: i32, h: i32, title: *const u8) -> i32;
@@ -106,6 +107,10 @@ pub fn text(x: i32, y: i32, s: &[u8], rgb: u32) {
 
 pub fn pixel(x: i32, y: i32, rgb: u32) {
     unsafe { sys_draw(x, y, rgb); }
+}
+
+pub fn rect_outline(x: i32, y: i32, w: i32, h: i32, rgb: u32) {
+    unsafe { draw_rect_outline(x, y, w, h, rgb); }
 }
 
 pub fn rounded(x: i32, y: i32, w: i32, h: i32, r: i32, rgb: u32) {
