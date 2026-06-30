@@ -4,6 +4,7 @@
 #include "memlayout.h"
 #include "cpuid.h"
 #include "acpi.h"
+#include "win.h"
 
 /* Linker-script symbol pointing at the END of the kernel image. With the
  * higher-half link, __bss_end is a VIRT address (~0x801XXXXX); the PMM
@@ -83,6 +84,8 @@ void kmain(void)
 	audio_init();                              /* probes SB16; no-op if -device sb16 absent */
 	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
 	bootdiag_add("audio: sb16", audio_present() ? BOOT_OK : BOOT_ABSENT);
+	win_init();
+	bootdiag_add("compositor", BOOT_OK);
 	pci_scan();                                /* log every PCI device for visibility */
 	bootdiag_add("bus: pci", BOOT_OK);
 	ata_dma_init();                            /* enable PIIX Bus Master DMA if present */

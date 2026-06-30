@@ -5,6 +5,7 @@
 #include "memlayout.h"
 #include "acpi.h"
 #include "fs.h"
+#include "win.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -1194,6 +1195,45 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)child->pid;     /* parent return */
 		break;
 	}
+	/* ── Window / compositor syscalls ──────────────────────────────────── */
+	case 85: {                                /* SYS_WIN_CREATE: ebx=w ecx=h */
+		int pid = (int)proc_current()->pid;
+		r->eax = (unsigned int)win_create(pid, r->ebx, r->ecx);
+		break;
+	}
+	case 86: {                                /* SYS_WIN_SHOW: ebx=x ecx=y edx=*title */
+		int pid = (int)proc_current()->pid;
+		const char *title = 0;
+		if (r->edx && paging_user_range_ok(r->edx, 64))
+			title = (const char *)r->edx;
+		r->eax = (unsigned int)win_show(pid, (int)r->ebx, (int)r->ecx, title);
+		break;
+	}
+	case 87:                                  /* SYS_WIN_FLUSH */
+		win_flush((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 88:                                  /* SYS_WIN_DESTROY */
+		win_destroy((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 89: {                                /* SYS_WIN_GET_EVENT: ebx=*win_event */
+		if (!r->ebx || !paging_user_range_ok(r->ebx, sizeof(struct win_event))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)win_get_event((int)proc_current()->pid,
+		                                      (struct win_event *)r->ebx);
+		break;
+	}
+	case 90:                                  /* SYS_WIN_RAISE */
+		win_raise((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 91:                                  /* SYS_WIN_MOVE: ebx=x ecx=y */
+		win_move((int)proc_current()->pid, (int)r->ebx, (int)r->ecx);
+		r->eax = 0;
+		break;
 	default:
 		r->eax = (unsigned int)-1;
 		break;

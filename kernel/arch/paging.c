@@ -401,6 +401,32 @@ static void unmap_user_page(unsigned int vaddr)
 	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
+/* Map caller-allocated frames contiguously in user VAS starting at base_va.
+ * Does NOT take ownership of the frames — caller frees them after unmap. */
+void paging_map_win_buf(unsigned int base_va, unsigned int *frames, int n)
+{
+    for (int i = 0; i < n; i++) {
+        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
+        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 1);
+        if (!pte) continue;
+        *pte = (pae_entry_t)(frames[i] & 0xFFFFF000u) | user_pte_flags(0, 1);
+        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+    }
+}
+
+/* Unmap window buffer pages from user VAS WITHOUT freeing the physical frames.
+ * Caller is responsible for pmm_free on each frame after this returns. */
+void paging_unmap_win_buf(unsigned int base_va, int n)
+{
+    for (int i = 0; i < n; i++) {
+        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
+        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+        if (!pte || !(*pte & 1ULL)) continue;
+        *pte = 0;
+        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+    }
+}
+
 /* Lay out a fresh user address space into the given PDPT:
  *   - allocate a PD0 (slot 0 of PDPT)
  *   - allocate one PT per USER PDE (8 PTs covering [USER_BASE, USER_END))

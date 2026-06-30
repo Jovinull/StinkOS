@@ -3,6 +3,7 @@
  * (int 0x80) lives in syscall.c; this file just routes there. */
 #include "defs.h"
 #include "paging.h"
+#include "win.h"
 
 /* ---- assembly stubs ---- */
 extern void idt_load(unsigned int idt_ptr_addr);
@@ -195,6 +196,7 @@ void irq_handler(struct regs *r)
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
 		timer_tick();                       /* fire any expired one-shots */
+		win_tick();                         /* compositor: ~30fps */
 		preempt = 1;                        /* let the scheduler reshuffle */
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();

@@ -50,6 +50,7 @@
 #define USER_STACK_TOP   0x00540000u   /* user stack (grows down)   */
 #define USER_HEAP_BASE   0x00540000u   /* sbrk/mmap start           */
 #define USER_FB_BASE     0x10000000u   /* SYS_MAP_FB target         */
+#define USER_WIN_BASE    0x12000000u   /* sys_win_create buffer     */
 
 /* Higher-half kernel direct map (xv6-style).
  *
