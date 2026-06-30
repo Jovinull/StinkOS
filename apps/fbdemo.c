@@ -7,7 +7,7 @@
 #define W   SYS_FB_W
 #define H   SYS_FB_H
 #define S   SYS_FB_STRIDE
-#define OY  34u
+#define OY  ((unsigned int)WIN_TITLEBAR_H)
 #define GH  (H - OY)
 
 static const unsigned int BARS[8] = {

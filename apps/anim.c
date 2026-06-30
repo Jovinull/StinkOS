@@ -3,7 +3,7 @@
  * the kernel exposes time to userland. Press any key to return to the menu. */
 #include "libstink.h"
 
-#define OY 34
+#define OY WIN_TITLEBAR_H
 
 void main(void)
 {

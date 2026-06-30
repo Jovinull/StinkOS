@@ -5,7 +5,7 @@
 
 #define W           1024
 #define H           768
-#define OY          34                  /* titlebar height + separator */
+#define OY          WIN_TITLEBAR_H
 #define GH          (H - OY)           /* game field height */
 #define BG          0x001022
 #define FG          0xFFFFFF

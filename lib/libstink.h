@@ -1025,6 +1025,11 @@ void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb);
  * Call before drawing the widget so the shadow appears behind it. */
 void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb);
 
+/* Height of the titlebar drawn by draw_window_frame().
+ * Content must start at y + WIN_TITLEBAR_H to avoid painting over the frame.
+ * Matches OY in C apps and DRAG_TITLEBAR_H in the kernel compositor. */
+#define WIN_TITLEBAR_H 34
+
 /* Draw a titled window frame (titlebar + close button + border).
  * Returns the Y coordinate of the inner content area start. */
 int draw_window_frame(int x, int y, int w, int h, const char *title);

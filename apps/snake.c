@@ -7,7 +7,7 @@
 #define CELL        16
 #define CELLS_W     64           /* 1024 / CELL */
 #define CELLS_H     45           /* (768 - OY) / CELL = 734/16, floored */
-#define OY          34           /* titlebar height + separator */
+#define OY          WIN_TITLEBAR_H
 #define MAX_LEN     200
 #define MOVE_TICKS  8            /* initial ticks per step (decreases with score) */
 #define BG          0x001022

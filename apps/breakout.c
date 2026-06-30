@@ -4,7 +4,7 @@
 
 #define W           1024
 #define H           768
-#define OY          34
+#define OY          WIN_TITLEBAR_H
 #define GH          (H - OY)
 
 /* Colors */

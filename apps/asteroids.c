@@ -11,7 +11,7 @@
 
 #define SCREEN_W 1024
 #define SCREEN_H  768
-#define OY         34           /* titlebar height + separator */
+#define OY         WIN_TITLEBAR_H
 #define GH        (SCREEN_H - OY)  /* game field height */
 
 #define MAX_BULLETS 10
