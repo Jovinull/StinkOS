@@ -36,6 +36,23 @@ pub const RED:         u32 = 0xf47067;
 pub const YELLOW:      u32 = 0xfee75c;
 pub const SHADOW:      u32 = 0x050810;
 
+// ── Key codes ────────────────────────────────────────────────────────────────
+
+pub const KEY_UP:   i32 = 28;
+pub const KEY_DOWN: i32 = 29;
+
+// ── RTC time ─────────────────────────────────────────────────────────────────
+
+#[repr(C)]
+pub struct RtcTime {
+    pub year:   u32,
+    pub month:  u32,
+    pub day:    u32,
+    pub hour:   u32,
+    pub minute: u32,
+    pub second: u32,
+}
+
 // ── FFI ─────────────────────────────────────────────────────────────────────
 
 extern "C" {
@@ -53,6 +70,10 @@ extern "C" {
     fn sys_waitpid(pid: i32) -> i32;
     fn sys_sleep_ms(ms: u32);
     fn sys_exit_code(code: i32) -> !;
+    fn sys_rtc_read(out: *mut RtcTime) -> i32;
+    fn sys_fcount() -> i32;
+    fn sys_finfo(index: i32, name: *mut u8) -> i32;
+    fn sys_proc_info(buf: *mut u8, cap: i32) -> i32;
 }
 
 // ── Safe drawing wrappers ────────────────────────────────────────────────────
@@ -102,6 +123,67 @@ pub fn ticks() -> u32 {
     unsafe { sys_ticks() }
 }
 
+pub fn read_clock(out: &mut RtcTime) -> i32 {
+    unsafe { sys_rtc_read(out as *mut RtcTime) }
+}
+
+pub fn fcount() -> i32 {
+    unsafe { sys_fcount() }
+}
+
+/// Fill name[0..16] with filename; returns file size or -1.
+pub fn finfo(index: i32, name: &mut [u8; 16]) -> i32 {
+    unsafe { sys_finfo(index, name.as_mut_ptr()) }
+}
+
+/// Returns bytes written into buf.
+pub fn proc_info(buf: &mut [u8]) -> i32 {
+    unsafe { sys_proc_info(buf.as_mut_ptr(), buf.len() as i32) }
+}
+
+// ── Number formatting ────────────────────────────────────────────────────────
+
+fn digit2(n: u32, buf: &mut [u8], pos: usize) {
+    buf[pos]     = b'0' + ((n / 10) % 10) as u8;
+    buf[pos + 1] = b'0' + (n % 10) as u8;
+}
+
+/// "HH:MM\0" into a 6-byte buffer.
+pub fn fmt_hhmm(hour: u32, min: u32, buf: &mut [u8; 6]) {
+    digit2(hour, buf, 0);
+    buf[2] = b':';
+    digit2(min, buf, 3);
+    buf[5] = 0;
+}
+
+/// "HH:MM:SS\0" into a 9-byte buffer.
+pub fn fmt_hhmmss(hour: u32, min: u32, sec: u32, buf: &mut [u8; 9]) {
+    digit2(hour, buf, 0);
+    buf[2] = b':';
+    digit2(min, buf, 3);
+    buf[5] = b':';
+    digit2(sec, buf, 6);
+    buf[8] = 0;
+}
+
+/// Write decimal of n into buf; NUL-terminates. Returns char count.
+pub fn fmt_u32(mut n: u32, buf: &mut [u8; 12]) -> usize {
+    if n == 0 {
+        buf[0] = b'0'; buf[1] = 0;
+        return 1;
+    }
+    let mut tmp = [0u8; 10];
+    let mut len = 0usize;
+    while n > 0 && len < 10 {
+        tmp[len] = b'0' + (n % 10) as u8;
+        n /= 10;
+        len += 1;
+    }
+    for i in 0..len { buf[i] = tmp[len - 1 - i]; }
+    buf[len] = 0;
+    len
+}
+
 // ── Process helpers ──────────────────────────────────────────────────────────
 
 /// Fork; returns child PID in parent, 0 in child, -1 on error.
@@ -143,11 +225,19 @@ pub fn clamp(x: i32, lo: i32, hi: i32) -> i32 {
 pub const TASKBAR_H:  i32 = 40;
 pub const TASKBAR_BG: u32 = 0x090e14;
 
-/// Draw the top taskbar strip.
+/// Draw the top taskbar strip with live clock on the right.
 pub fn draw_taskbar(screen_w: i32) {
     fill(0, 0, screen_w, TASKBAR_H, TASKBAR_BG);
     fill(0, TASKBAR_H - 1, screen_w, 1, BORDER);
     text(16, (TASKBAR_H - 8) / 2, b"StinkOS\0", ACCENT);
+
+    let mut t = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
+    if read_clock(&mut t) == 0 {
+        let mut buf = [0u8; 6];
+        fmt_hhmm(t.hour, t.minute, &mut buf);
+        let tw = 5 * 8; // "HH:MM" = 5 chars × 8 px each
+        text(screen_w - tw - 16, (TASKBAR_H - 8) / 2, &buf, FG_DIM);
+    }
 }
 
 // ── Cursor ───────────────────────────────────────────────────────────────────

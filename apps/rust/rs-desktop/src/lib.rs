@@ -33,16 +33,16 @@ struct AppEntry {
 }
 
 static APPS: &[AppEntry] = &[
-    AppEntry { label: b"Doom\0",      exec: b"doom1\0"     },
-    AppEntry { label: b"Asteroids\0", exec: b"asteroids\0" },
-    AppEntry { label: b"Snake\0",     exec: b"snake\0"     },
-    AppEntry { label: b"Pong\0",      exec: b"pong\0"      },
-    AppEntry { label: b"Animation\0", exec: b"anim\0"      },
-    AppEntry { label: b"Life (RS)\0", exec: b"rs-life\0"   },
-    AppEntry { label: b"JSON (RS)\0", exec: b"rs-json\0"   },
-    AppEntry { label: b"Stdio (RS)\0",exec: b"rs-stdio\0"  },
-    AppEntry { label: b"FBDemo\0",    exec: b"fbdemo\0"    },
-    AppEntry { label: b"Shell\0",     exec: b"shell\0"     },
+    AppEntry { label: b"Doom\0",       exec: b"doom1\0"      },
+    AppEntry { label: b"Asteroids\0",  exec: b"asteroids\0"  },
+    AppEntry { label: b"Snake\0",      exec: b"snake\0"      },
+    AppEntry { label: b"Pong\0",       exec: b"pong\0"       },
+    AppEntry { label: b"Animation\0",  exec: b"anim\0"       },
+    AppEntry { label: b"Life (RS)\0",  exec: b"rs-life\0"    },
+    AppEntry { label: b"Files\0",      exec: b"rs-files\0"   },
+    AppEntry { label: b"Sysinfo\0",    exec: b"rs-sysinfo\0" },
+    AppEntry { label: b"Shell\0",      exec: b"shell\0"      },
+    AppEntry { label: b"FBDemo\0",     exec: b"fbdemo\0"     },
 ];
 
 // ── Layout constants ──────────────────────────────────────────────────────────

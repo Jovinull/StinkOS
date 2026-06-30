@@ -171,3 +171,27 @@ void sys_sleep_ms(unsigned int ms)
 {
 	__syscall(23, (int)ms, 0, 0);
 }
+
+/* SYS_FCOUNT (10): -> number of files in StinkFS */
+int sys_fcount(void)
+{
+	return __syscall(10, 0, 0, 0);
+}
+
+/* SYS_FINFO (11): ebx=index ecx=name_buf(16) -> size or -1 */
+int sys_finfo(int index, char *name)
+{
+	return __syscall(11, index, (int)name, 0);
+}
+
+/* SYS_RTC_READ (64): ebx=*sys_rtc_time -> 0 or -1 */
+int sys_rtc_read(void *out)
+{
+	return __syscall(64, (int)out, 0, 0);
+}
+
+/* SYS_PROC_INFO (73): ebx=buf ecx=cap -> bytes written */
+int sys_proc_info(char *buf, int cap)
+{
+	return __syscall(73, (int)buf, (int)cap, 0);
+}
