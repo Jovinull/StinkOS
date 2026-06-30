@@ -268,6 +268,44 @@ pub fn draw_cursor(cx: i32, cy: i32) {
     fill(cx,       cy - ARM, 1, ARM * 2 + 1, 0xffffff);
 }
 
+// ── Button widget ────────────────────────────────────────────────────────────
+
+/// Interactive button with normal / hovered / pressed states.
+/// State model adapted from Makepad widgets/src/button.rs.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum BtnState { Normal, Hovered, Pressed }
+
+pub struct Button {
+    pub label: &'static [u8],
+    pub x: i32, pub y: i32,
+    pub w: i32, pub h: i32,
+}
+
+impl Button {
+    pub fn draw(&self, state: BtnState) {
+        let (bg, fg, bdr) = match state {
+            BtnState::Normal  => (SURFACE,     FG,     BORDER),
+            BtnState::Hovered => (SURFACE_ALT, FG,     ACCENT),
+            BtnState::Pressed => (ACCENT,      BG,     ACCENT),
+        };
+        shadow(self.x, self.y, self.w, self.h, 3, SHADOW);
+        rounded(self.x, self.y, self.w, self.h, 6, bg);
+        fill(self.x,              self.y,              self.w, 1, bdr);
+        fill(self.x,              self.y + self.h - 1, self.w, 1, bdr);
+        fill(self.x,              self.y,              1, self.h, bdr);
+        fill(self.x + self.w - 1, self.y,              1, self.h, bdr);
+        let lw = nul_len(self.label) as i32 * 8;
+        let lx = self.x + (self.w - lw) / 2;
+        let ly = self.y + (self.h - 8) / 2;
+        text(lx, ly, self.label, fg);
+    }
+
+    pub fn contains(&self, px: i32, py: i32) -> bool {
+        px >= self.x && px < self.x + self.w &&
+        py >= self.y && py < self.y + self.h
+    }
+}
+
 // ── Tile widget ──────────────────────────────────────────────────────────────
 
 /// An app-launcher tile.

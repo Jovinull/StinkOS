@@ -42,8 +42,8 @@ static APPS: &[AppEntry] = &[
     AppEntry { label: b"Files\0",      exec: b"rs-files\0"   },
     AppEntry { label: b"Edit\0",       exec: b"rs-edit\0"    },
     AppEntry { label: b"Paint\0",      exec: b"rs-paint\0"   },
+    AppEntry { label: b"Calc\0",       exec: b"rs-calc\0"    },
     AppEntry { label: b"Sysinfo\0",    exec: b"rs-sysinfo\0" },
-    AppEntry { label: b"Shell\0",      exec: b"shell\0"      },
 ];
 
 // ── Layout constants ──────────────────────────────────────────────────────────
