@@ -26,6 +26,13 @@
 static struct win_slot slots[WIN_MAX];
 static int focused_slot = -1;    /* index into slots[], -1 = none */
 
+/* Drag state: set when user holds button 1 on a window titlebar. */
+#define DRAG_TITLEBAR_H 34       /* must match OY used by apps */
+static int drag_slot  = -1;
+static int drag_off_x =  0;
+static int drag_off_y =  0;
+static int prev_btn   =  0;
+
 /* ── Init ───────────────────────────────────────────────────────────────── */
 
 void win_init(void)
@@ -168,6 +175,7 @@ int win_hide(int pid)
     if (si < 0) return -1;
     slots[si].visible = 0;
     if (focused_slot == si) focused_slot = -1;
+    if (drag_slot == si)    drag_slot    = -1;
     return 0;
 }
 
@@ -184,8 +192,8 @@ void win_destroy(int pid)
     if (si < 0) return;
     struct win_slot *s = &slots[si];
 
-    if (focused_slot == si)
-        focused_slot = -1;
+    if (focused_slot == si) focused_slot = -1;
+    if (drag_slot    == si) drag_slot    = -1;
 
     /* Unmap from user VAS. */
     paging_unmap_win_buf(USER_WIN_BASE, s->n_frames);
@@ -441,18 +449,49 @@ static void route_mouse_events(void)
     int mx, my;
     unsigned char mb;
     mouse_get_state(&mx, &my, &mb);
+    int btn1      = mb & 1;
+    int btn1_down = btn1 && !(prev_btn & 1);   /* leading edge */
+    int btn1_up   = !btn1 && (prev_btn & 1);   /* trailing edge */
 
-    /* Taskbar area: handle click to raise window, don't route to windows. */
+    /* ── Drag in progress ───────────────────────────────────────────────── */
+    if (drag_slot >= 0) {
+        if (btn1) {
+            /* Move window: clamp so at least DRAG_TITLEBAR_H px stay on screen */
+            struct win_slot *ds = &slots[drag_slot];
+            int nx = mx - drag_off_x;
+            int ny = my - drag_off_y;
+            int max_y = SCREEN_H - TASKBAR_H - DRAG_TITLEBAR_H;
+            if (nx < -(int)ds->w + 32)     nx = -(int)ds->w + 32;
+            if (nx > SCREEN_W - 32)         nx = SCREEN_W - 32;
+            if (ny < 0)                     ny = 0;
+            if (ny > max_y)                 ny = max_y;
+            if (nx != ds->x || ny != ds->y) {
+                ds->x = nx;
+                ds->y = ny;
+                /* Force full re-composite to paint the moved window. */
+                for (int i = 0; i < WIN_MAX; i++)
+                    if (slots[i].pid && slots[i].visible)
+                        slots[i].dirty = 1;
+            }
+        }
+        if (btn1_up)
+            drag_slot = -1;
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Taskbar area ────────────────────────────────────────────────────── */
     if (my >= SCREEN_H - TASKBAR_H) {
-        if (mb & 1) {
+        if (btn1_down) {
             int si = taskbar_btn_to_slot(mx);
             if (si >= 0)
                 win_raise(slots[si].pid);
         }
+        prev_btn = (int)mb;
         return;
     }
 
-    /* Find topmost visible window at mouse position. */
+    /* ── Find topmost visible window under cursor ────────────────────────── */
     int top_si = -1;
     int top_z  = -1;
     for (int i = 0; i < WIN_MAX; i++) {
@@ -463,9 +502,22 @@ static void route_mouse_events(void)
         if (s->z > top_z) { top_z = s->z; top_si = i; }
     }
 
-    if (top_si < 0) return;
+    if (top_si < 0) { prev_btn = (int)mb; return; }
 
     struct win_slot *s = &slots[top_si];
+
+    /* ── Titlebar drag: intercept button-1 down in top DRAG_TITLEBAR_H px ── */
+    if (btn1_down && (my - s->y) < DRAG_TITLEBAR_H) {
+        drag_slot  = top_si;
+        drag_off_x = mx - s->x;
+        drag_off_y = my - s->y;
+        if (focused_slot != top_si)
+            focused_slot = top_si;
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Normal event routing ────────────────────────────────────────────── */
     struct win_event ev;
     ev.type    = WIN_EV_MOUSE;
     ev.x       = mx - s->x;
@@ -474,9 +526,10 @@ static void route_mouse_events(void)
     ev.key     = 0;
     ev_push(s, &ev);
 
-    /* Click focuses the window */
-    if (mb && focused_slot != top_si)
+    if (btn1 && focused_slot != top_si)
         focused_slot = top_si;
+
+    prev_btn = (int)mb;
 }
 
 void win_composite(void)
