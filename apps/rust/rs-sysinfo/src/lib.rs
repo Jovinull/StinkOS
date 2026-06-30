@@ -62,6 +62,7 @@ pub extern "C" fn main() {
 
     let cx     = WIN_X + 16;
     let max_y  = WIN_Y + WIN_H - 16;
+    let mut prev_k = 0i32;
 
     loop {
         /* Redraw full window */
@@ -106,7 +107,9 @@ pub extern "C" fn main() {
         let footer_y = WIN_Y + WIN_H - 20;
         text(cx, footer_y, b"Q - quit\0", FG_DIM);
 
-        if poll_key() == b'q' as i32 { break; }
+        let k = poll_key();
+        if k != 0 && k != prev_k && (k == b'q' as i32 || k == 27) { break; }
+        prev_k = k;
         sleep_ms(500);
     }
 

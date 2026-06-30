@@ -35,11 +35,50 @@ const VISIBLE_LINES:  usize = ((CONTENT_BOT - CONTENT_TOP) / LINE_H) as usize;
 
 // ── Ctrl key codes ────────────────────────────────────────────────────────────
 
-const CTRL_S:   i32 = 19; // Ctrl+S = 's' - 'a' + 1
+const CTRL_S:   i32 = 19; // Ctrl+S
 const CTRL_Q:   i32 = 17; // Ctrl+Q
-const KEY_ESC:  i32 = 27; // Escape (same as Ctrl+[)
-const KEY_BS:   i32 = 8;  // Backspace
+const CTRL_Z:   i32 = 26; // Ctrl+Z = undo
+const KEY_ESC:  i32 = 27;
+const KEY_BS:   i32 = 8;
 const KEY_DEL:  i32 = 127;
+
+// ── Undo stack ────────────────────────────────────────────────────────────────
+
+const UNDO_CAP: usize = 128;
+
+#[derive(Clone, Copy)]
+struct UndoEntry {
+    kind: u8,   // 0 = insert (undo: delete at pos), 1 = delete (undo: insert ch at pos)
+    pos:  u16,
+    ch:   u8,
+}
+
+struct UndoStack {
+    buf:   [UndoEntry; UNDO_CAP],
+    head:  usize, // next write slot
+    count: usize, // valid entries
+}
+
+impl UndoStack {
+    const fn new() -> Self {
+        UndoStack {
+            buf:   [UndoEntry { kind: 0, pos: 0, ch: 0 }; UNDO_CAP],
+            head:  0,
+            count: 0,
+        }
+    }
+    fn push(&mut self, e: UndoEntry) {
+        self.buf[self.head] = e;
+        self.head = (self.head + 1) % UNDO_CAP;
+        if self.count < UNDO_CAP { self.count += 1; }
+    }
+    fn pop(&mut self) -> Option<UndoEntry> {
+        if self.count == 0 { return None; }
+        self.count -= 1;
+        self.head = if self.head == 0 { UNDO_CAP - 1 } else { self.head - 1 };
+        Some(self.buf[self.head])
+    }
+}
 
 // ── Buffer ────────────────────────────────────────────────────────────────────
 
@@ -47,15 +86,20 @@ const BUF_CAP: usize = 4096;
 
 struct Editor {
     buf:     [u8; BUF_CAP],
-    len:     usize,           // bytes used
-    cursor:  usize,           // byte offset (0..=len)
-    vp_line: usize,           // first visible line (scroll offset)
+    len:     usize,
+    cursor:  usize,
+    vp_line: usize,
     dirty:   bool,
+    undo:    UndoStack,
 }
 
 impl Editor {
     const fn new() -> Self {
-        Editor { buf: [0u8; BUF_CAP], len: 0, cursor: 0, vp_line: 0, dirty: false }
+        Editor {
+            buf: [0u8; BUF_CAP], len: 0, cursor: 0,
+            vp_line: 0, dirty: false,
+            undo: UndoStack::new(),
+        }
     }
 
     /// Load bytes into buffer (truncates to BUF_CAP).
@@ -68,8 +112,7 @@ impl Editor {
         self.dirty  = false;
     }
 
-    /// Insert one byte at cursor.
-    fn insert(&mut self, c: u8) {
+    fn insert_raw(&mut self, c: u8) {
         if self.len >= BUF_CAP { return; }
         let pos = self.cursor;
         let mut i = self.len;
@@ -80,14 +123,39 @@ impl Editor {
         self.dirty   = true;
     }
 
-    /// Delete the byte before cursor (Backspace).
-    fn backspace(&mut self) {
+    fn backspace_raw(&mut self) {
         if self.cursor == 0 { return; }
         self.cursor -= 1;
         let pos = self.cursor;
         for i in pos..self.len - 1 { self.buf[i] = self.buf[i + 1]; }
         self.len   -= 1;
         self.dirty  = true;
+    }
+
+    fn insert(&mut self, c: u8) {
+        self.undo.push(UndoEntry { kind: 0, pos: self.cursor as u16, ch: c });
+        self.insert_raw(c);
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor == 0 { return; }
+        let ch = self.buf[self.cursor - 1];
+        self.undo.push(UndoEntry { kind: 1, pos: (self.cursor - 1) as u16, ch });
+        self.backspace_raw();
+    }
+
+    fn undo(&mut self) {
+        let Some(e) = self.undo.pop() else { return };
+        if e.kind == 0 {
+            // Was an insert at pos → undo: set cursor to pos+1, delete
+            self.cursor = (e.pos as usize + 1).min(self.len);
+            self.backspace_raw();
+        } else {
+            // Was a delete of ch at pos → undo: set cursor to pos, insert
+            self.cursor = (e.pos as usize).min(self.len);
+            self.insert_raw(e.ch);
+            // After raw insert cursor is at pos+1; move back so user sees it right
+        }
     }
 
     /// (line, col) of the cursor.
@@ -346,7 +414,7 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
     posbuf[pi] = 0;
 
     text(WIN_X + 12, st_y, &posbuf, FG_DIM);
-    text(WIN_X + 80, st_y, b"Ctrl+S save   Ctrl+Q quit\0", FG_DIM);
+    text(WIN_X + 80, st_y, b"Ctrl+S save  Ctrl+Z undo  Ctrl+Q quit\0", FG_DIM);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -391,6 +459,7 @@ pub extern "C" fn main() {
                     fwrite(&fname, &ed.buf[..ed.len]);
                     ed.dirty = false;
                 }
+                k if k == CTRL_Z => ed.undo(),
                 k if k == KEY_UP    => ed.move_up(),
                 k if k == KEY_DOWN  => ed.move_down(),
                 k if k == KEY_LEFT  => ed.move_left(),
