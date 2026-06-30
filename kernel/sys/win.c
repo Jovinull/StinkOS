@@ -381,15 +381,24 @@ void win_composite(void)
             order[n++] = i;
     if (n == 0) return;
 
-    /* Erase cursor before drawing (saves region under cursor). */
+    /* Check if any window needs a repaint. */
+    int any_dirty = 0;
+    for (int i = 0; i < n; i++)
+        if (slots[order[i]].dirty) { any_dirty = 1; break; }
+
+    /* Erase cursor before (possibly) redrawing windows. */
     mouse_undraw_cursor();
 
-    /* Sort back-to-front and blit each window. */
-    sort_by_z(order, n);
-    for (int i = 0; i < n; i++) {
-        struct win_slot *s = &slots[order[i]];
-        blit_window(s);
-        s->dirty = 0;
+    /* Blit only dirty windows (back-to-front). */
+    if (any_dirty) {
+        sort_by_z(order, n);
+        for (int i = 0; i < n; i++) {
+            struct win_slot *s = &slots[order[i]];
+            if (s->dirty) {
+                blit_window(s);
+                s->dirty = 0;
+            }
+        }
     }
 
     /* Route mouse events to the window under the cursor. */
