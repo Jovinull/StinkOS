@@ -366,6 +366,7 @@ fn render(calc: &Calc, mx: i32, my: i32, pressed_idx: Option<usize>) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-calc: start");
+    win_init(b"Calculator ");
 
     let mut calc = Calc::new();
     let mut mx: i32 = SCREEN_W / 2;
@@ -435,8 +436,10 @@ pub extern "C" fn main() {
             dirty = false;
         }
 
+        win_flush();
         sleep_ms(16);
     }
 
+    win_done();
     println!("rs-calc: exit");
 }

@@ -211,6 +211,7 @@ fn read_line(items: &[Item; MAX_ITEMS], count: usize, sel: usize,
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-todo: start");
+    win_init(b"TODO List ");
 
     let mut items: [Item; MAX_ITEMS] = core::array::from_fn(|_| Item::empty());
     let mut count = load(&mut items);
@@ -291,8 +292,10 @@ pub extern "C" fn main() {
             }
         }
         prev_k = k;
+        win_flush();
         sleep_ms(16);
     }
 
+    win_done();
     println!("rs-todo: exit");
 }

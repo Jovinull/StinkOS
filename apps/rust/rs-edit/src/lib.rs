@@ -332,6 +332,7 @@ fn file_picker() -> PickResult {
             }
         }
         prev_k = k;
+        win_flush();
         sleep_ms(16);
     }
 }
@@ -422,12 +423,14 @@ fn render(ed: &Editor, fname: &[u8; 16]) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-edit: start");
+    win_init(b"Text Editor\0");
 
     let mut fname = [0u8; 16];
     let mut ed    = Editor::new();
 
     match file_picker() {
         PickResult::Cancel => {
+            win_done();
             println!("rs-edit: cancelled");
             return;
         }
@@ -471,8 +474,10 @@ pub extern "C" fn main() {
             }
         }
         prev_k = k;
+        win_flush();
         sleep_ms(16);
     }
 
+    win_done();
     println!("rs-edit: exit");
 }
