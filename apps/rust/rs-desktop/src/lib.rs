@@ -49,6 +49,38 @@ static APPS: &[AppEntry] = &[
     AppEntry { label: b"Shell\0",      exec: b"shell\0"       },
 ];
 
+// ── Starfield ────────────────────────────────────────────────────────────────
+
+const N_STARS: u32 = 180;
+
+fn star_pos(idx: u32) -> (i32, i32) {
+    // Deterministic pseudo-random position from index alone (LCG chain)
+    let h1 = idx.wrapping_mul(1664525).wrapping_add(1013904223);
+    let h2 = h1.wrapping_mul(22695477).wrapping_add(1);
+    let x = (h1 >> 1) % 1024;
+    let y = (h2 >> 1) % (768 - TASKBAR_H as u32) + TASKBAR_H as u32;
+    (x as i32, y as i32)
+}
+
+fn star_color(idx: u32, frame: u32) -> Option<u32> {
+    // Each star has an independent twinkle phase; ~1/7 bright at any time
+    let phase = idx.wrapping_mul(2654435761).wrapping_add(frame >> 2) % 7;
+    match phase {
+        0 => Some(SURFACE_ALT),
+        1 => Some(0x3a4050),
+        _ => None,
+    }
+}
+
+fn draw_stars(frame: u32) {
+    for i in 0..N_STARS {
+        let (x, y) = star_pos(i);
+        if let Some(c) = star_color(i, frame) {
+            pixel(x, y, c);
+        }
+    }
+}
+
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 const SCREEN_W:   i32 = 1024;
@@ -88,22 +120,12 @@ fn hovered_idx(mx: i32, my: i32) -> Option<usize> {
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-fn redraw(mx: i32, my: i32) {
+fn redraw(mx: i32, my: i32, frame: u32) {
     /* Background fill */
     fill(0, 0, SCREEN_W, SCREEN_H, BG);
 
-    /* Dot grid backdrop (every 32px, above the taskbar) */
-    {
-        let mut gx: i32 = 32;
-        while gx < SCREEN_W {
-            let mut gy: i32 = TASKBAR_H + 8;
-            while gy < SCREEN_H {
-                pixel(gx, gy, SURFACE);
-                gy += 32;
-            }
-            gx += 32;
-        }
-    }
+    /* Animated starfield */
+    draw_stars(frame);
 
     /* Taskbar */
     draw_taskbar(SCREEN_W);
@@ -147,10 +169,12 @@ pub extern "C" fn main() {
 
     let mut mx: i32 = SCREEN_W / 2;
     let mut my: i32 = SCREEN_H / 2;
-    let mut prev_mx   = mx - 1; /* ensure first draw */
-    let mut prev_my   = my - 1;
+    let mut prev_mx      = mx - 1; /* ensure first draw */
+    let mut prev_my      = my - 1;
     let mut prev_hov: Option<usize> = None;
-    let mut left_held = false;
+    let mut left_held    = false;
+    let mut frame: u32   = 0;
+    let mut prev_frame   = !0u32;
 
     loop {
         /* Mouse */
@@ -169,17 +193,22 @@ pub extern "C" fn main() {
                 launch(APPS[idx].exec);
                 /* After launch, force full redraw */
                 prev_mx = mx - 1;
+                prev_frame = !0;
             }
         }
         left_held = left_now;
 
-        /* Redraw only when something visible changed */
+        /* Advance starfield animation frame every ~300ms (16ms * 18 ticks) */
+        frame = ticks() / 30;
+
+        /* Redraw when mouse/hover/animation changed */
         let hov = hovered_idx(mx, my);
-        if mx != prev_mx || my != prev_my || hov != prev_hov {
-            redraw(mx, my);
-            prev_mx  = mx;
-            prev_my  = my;
-            prev_hov = hov;
+        if mx != prev_mx || my != prev_my || hov != prev_hov || frame != prev_frame {
+            redraw(mx, my, frame);
+            prev_mx    = mx;
+            prev_my    = my;
+            prev_hov   = hov;
+            prev_frame = frame;
         }
 
         sleep_ms(16); /* cap at ~60 fps */
