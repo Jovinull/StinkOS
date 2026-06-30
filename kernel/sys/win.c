@@ -10,6 +10,7 @@
  * physical FB via fb_blit_row(), then redraws the mouse cursor on top.
  */
 #include "win.h"
+#include "clip.h"
 #include "defs.h"
 #include "../arch/memlayout.h"
 #include "../arch/paging.h"
@@ -17,6 +18,7 @@
 #include "../drivers/video/fb.h"
 #include "../drivers/input/mouse.h"
 #include "../drivers/misc/rtc.h"
+#include "../drivers/misc/serial.h"
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 
@@ -35,6 +37,22 @@ void win_init(void)
         slots[i].ev_r = slots[i].ev_w = 0;
     }
     focused_slot = -1;
+
+    /* Sanity-check guard clauses and clipboard round-trip at boot. */
+    int ok = 1;
+    /* win_create rejects bad arguments without touching paging/pmm */
+    if (win_create(0, 100, 100) != -1) ok = 0;   /* bad pid */
+    if (win_create(1,   0, 100) != -1) ok = 0;   /* zero width */
+    if (win_create(1, 100,   0) != -1) ok = 0;   /* zero height */
+    if (win_create(1, 1025, 100) != -1) ok = 0;  /* w > 1024 */
+    if (win_create(1, 100,  769) != -1) ok = 0;  /* h > 768 */
+    /* clipboard round-trip */
+    char cb[8];
+    clip_write("stink", 5);
+    int n = clip_read(cb, 8);
+    if (n != 5 || cb[0] != 's' || cb[4] != 'k') ok = 0;
+    serial_write(ok ? "compositor: self-test ok\n"
+                    : "compositor: self-test FAIL\n");
 }
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */

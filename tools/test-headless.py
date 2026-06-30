@@ -273,6 +273,7 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
+    "compositor":      "compositor: self-test ok" in out,
     # wx attack blocked: see tools/smoke-wxattack.py
     # multi-proc fork+exec: see tools/smoke-multiproc.py
 }
@@ -283,4 +284,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu; compositor self-test ok")
