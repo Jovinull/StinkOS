@@ -195,3 +195,15 @@ int sys_proc_info(char *buf, int cap)
 {
 	return __syscall(73, (int)buf, (int)cap, 0);
 }
+
+/* SYS_KILL (46): ebx=pid -> 0 or -1 */
+int sys_kill(int pid)
+{
+	return __syscall(46, pid, 0, 0);
+}
+
+/* SYS_GETPID (43): -> current pid */
+int sys_getpid(void)
+{
+	return __syscall(43, 0, 0, 0);
+}
