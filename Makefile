@@ -767,7 +767,8 @@ run: all
 	qemu-system-i386 -drive format=raw,file=os.bin \
 	  -audiodev $(QEMU_AUDIO),id=snd0 \
 	  -device sb16,audiodev=snd0 \
-	  -netdev user,id=net0 -device e1000,netdev=net0
+	  -netdev user,id=net0 -device e1000,netdev=net0 \
+	  -display sdl,gl=off
 
 # Blank target disk for the installer app to clone the boot media onto.
 # Created on demand; ignored by git (*.bin in .gitignore). 64 MiB is enough
