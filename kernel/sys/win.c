@@ -218,6 +218,8 @@ void win_destroy(int pid)
     s->visible  = 0;
     s->dirty    = 0;
     s->n_frames = 0;
+    s->ev_r     = 0;
+    s->ev_w     = 0;
 }
 
 int win_get_event(int pid, struct win_event *ev)
@@ -288,10 +290,6 @@ int win_resize(int pid, unsigned int w, unsigned int h)
     s->w = w;
     s->h = h;
     s->dirty = 1;
-
-    /* Notify the app of the new dimensions. */
-    struct win_event ev = { WIN_EV_RESIZE, (int)w, (int)h, 0, 0 };
-    ev_push(s, &ev);
 
     return 0;
 }
