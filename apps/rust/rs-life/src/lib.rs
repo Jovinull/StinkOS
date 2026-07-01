@@ -29,6 +29,11 @@ extern "C" {
     fn sys_draw(x: i32, y: i32, rgb: u32);
     fn sys_getkey() -> i32;
     fn sys_ticks() -> u32;
+    fn draw_window_frame(x: i32, y: i32, w: i32, h: i32, title: *const u8) -> i32;
+    fn sys_win_create(w: u32, h: u32) -> i32;
+    fn sys_win_show(x: i32, y: i32, title: *const u8) -> i32;
+    fn sys_win_flush();
+    fn sys_win_destroy();
 }
 
 struct LibStinkAllocator;
@@ -47,8 +52,9 @@ static ALLOC: LibStinkAllocator = LibStinkAllocator;
 // ---- Grid ----
 
 const COLS: usize = 128;
-const ROWS: usize = 96;
-const CELL: i32 = 8;          // pixels per cell side
+const ROWS: usize = 91;        // 91*8=728 ≤ 768-34 (fits below titlebar)
+const CELL: i32 = 8;           // pixels per cell side
+const OY:   i32 = 34;          // titlebar height offset
 const BG:   u32 = 0x001022;   // dark blue-grey
 const FG:   u32 = 0x00FF80;   // bright green
 // Tick budget: ~10 generations/sec at 100 Hz PIT.
@@ -145,7 +151,7 @@ impl Grid {
 
 fn paint_cell(c: usize, r: usize, on: bool) {
     let x0 = c as i32 * CELL;
-    let y0 = r as i32 * CELL;
+    let y0 = r as i32 * CELL + OY;
     let color = if on { FG } else { BG };
     // Solid CELL x CELL block. Each sys_draw is one pixel; a 1024x768
     // fb has 786k pixels, so a full refresh of 128*96*64 = 786k calls
@@ -191,7 +197,10 @@ fn wait_ticks(start: u32, n: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("life: start");
+    unsafe { sys_win_create(1024, 768); sys_win_show(0, 0, b"Game of Life\0".as_ptr()); }
 
+    unsafe { draw_window_frame(0, 0, 1024, 768,
+        b"Conway's Game of Life  --  r: reset  space: pause  q: quit\0".as_ptr()); }
     let mut g = Grid::new();
     g.seed_gun(5, 5);
     paint_full(&g);
@@ -208,7 +217,7 @@ pub extern "C" fn main() {
         if k != 0 {
             let c = (k & 0xFF) as u8;
             match c {
-                b'q' | b'Q' => { println!("life: bye"); exit(0); }
+                b'q' | b'Q' => { unsafe { sys_win_destroy(); } println!("life: bye"); exit(0); }
                 b'r' | b'R' => {
                     g.clear();
                     g.seed_gun(5, 5);
@@ -228,6 +237,7 @@ pub extern "C" fn main() {
         paint_diff(&g, &prev);
         prev.copy_from_slice(&g.cells);
         gen += 1;
+        unsafe { sys_win_flush(); }
 
         if gen % 50 == 0 {
             println!("life: gen={} alive={}", gen, alive);

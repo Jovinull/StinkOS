@@ -100,6 +100,24 @@ void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
 	}
 }
 
+/* Blit n pixels from src at screen position (x, y). Used by the compositor
+ * to copy page-aligned segments of a window buffer row by row. */
+void fb_blit_row(unsigned int x, unsigned int y, unsigned int n,
+                 const unsigned int *src)
+{
+	if (!src || x >= width || y >= height) return;
+	if (x + n > width) n = width - x;
+	volatile unsigned char *p = fb + y * pitch + x * bytes_pp;
+	for (unsigned int i = 0; i < n; i++) {
+		unsigned int rgb = src[i];
+		p[0] =  rgb        & 0xFF;
+		p[1] = (rgb >> 8)  & 0xFF;
+		p[2] = (rgb >> 16) & 0xFF;
+		if (bytes_pp == 4) p[3] = 0;
+		p += bytes_pp;
+	}
+}
+
 /* Nearest-neighbour upscale / downscale of an ARGB source onto the
  * framebuffer. Computes the source pixel via integer ratio per dst pixel.
  * No interpolation -- the goal is "fast enough to scale Doom's 640x400 to
@@ -152,5 +170,23 @@ void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb)
 	for (; *s != '\0'; s++) {
 		fb_char(x, y, *s, rgb);
 		x += 8;
+	}
+}
+
+void fb_char_big(unsigned int x, unsigned int y, char c, unsigned int rgb, unsigned int scale)
+{
+	if (scale == 0) return;
+	const unsigned char *glyph = font8x8[(unsigned char)c & 0x7F];
+	for (unsigned int row = 0; row < 8; row++)
+		for (unsigned int col = 0; col < 8; col++)
+			if (glyph[row] & (0x80 >> col))
+				fb_rect(x + col * scale, y + row * scale, scale, scale, rgb);
+}
+
+void fb_text_big(unsigned int x, unsigned int y, const char *s, unsigned int rgb, unsigned int scale)
+{
+	for (; *s != '\0'; s++) {
+		fb_char_big(x, y, *s, rgb, scale);
+		x += 8 * scale;
 	}
 }

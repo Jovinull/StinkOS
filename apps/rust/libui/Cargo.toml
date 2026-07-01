@@ -1,0 +1,26 @@
+[package]
+name = "libui"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+path = "src/lib.rs"
+
+# No Rust dependencies: all drawing primitives resolve to C symbols provided
+# at link time by libstink_syms.o and libstink_gfx.o (LIBSTINK_OBJS).
+
+[profile.dev]
+panic = "abort"
+opt-level = "s"
+debug = false
+lto = false
+codegen-units = 1
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+debug = false
+lto = true
+codegen-units = 1
+strip = "symbols"

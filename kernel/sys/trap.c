@@ -4,6 +4,7 @@
 #include "defs.h"
 #include "paging.h"
 #include "memlayout.h"
+#include "win.h"
 
 /* ---- assembly stubs ---- */
 extern void idt_load(unsigned int idt_ptr_addr);
@@ -229,6 +230,7 @@ void irq_handler(struct regs *r)
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
 		timer_tick();                       /* fire any expired one-shots */
+		win_tick();                         /* compositor: ~30fps */
 		proc_tick(ticks);                   /* wake sleepers that are due */
 		if (ticks % 50 == 0)
 			proc_kstack_audit();        /* canary + high-water mark */

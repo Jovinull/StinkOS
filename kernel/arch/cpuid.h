@@ -4,8 +4,7 @@
  * Refs:
  *   - Intel SDM Vol 2A "CPUID -- CPU Identification" + Vol 3A Table
  *     3-8 (basic feature flags) and §3.1.2 (extended function 0x80000001).
- *   - serenity Kernel/Arch/x86_64/CPUID.cpp -- same feature-bit table
- *     read pattern, just wrapped in C++. */
+ */
 #ifndef KERNEL_ARCH_CPUID_H
 #define KERNEL_ARCH_CPUID_H
 

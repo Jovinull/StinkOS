@@ -14,6 +14,8 @@ void fb_rect(unsigned int x0, unsigned int y0,
              unsigned int w, unsigned int h, unsigned int rgb);
 void fb_blit(unsigned int x0, unsigned int y0, unsigned int w, unsigned int h,
              const unsigned int *src);
+void fb_blit_row(unsigned int x, unsigned int y, unsigned int n,
+                 const unsigned int *src);
 
 /* Nearest-neighbour scaler. Copies a src_w x src_h ARGB row-major buffer
  * onto a dst_w x dst_h destination area at (x0, y0). Upscale or downscale;
@@ -24,5 +26,8 @@ void fb_blit_scaled(unsigned int x0, unsigned int y0,
                     unsigned int src_w, unsigned int src_h);
 void fb_char(unsigned int x, unsigned int y, char c, unsigned int rgb);
 void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
+/* Scaled text: each 8x8 glyph pixel becomes scale×scale solid block. */
+void fb_char_big(unsigned int x, unsigned int y, char c, unsigned int rgb, unsigned int scale);
+void fb_text_big(unsigned int x, unsigned int y, const char *s, unsigned int rgb, unsigned int scale);
 
 #endif
