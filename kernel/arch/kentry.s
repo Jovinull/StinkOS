@@ -22,8 +22,6 @@
 #       same single-PSE bootstrap pgdir, same indirect call to main()
 #       to force the assembler to emit an absolute address instead of
 #       PC-relative (which would stay in low phys).
-#   CONTRAST toaruos/kernel/arch/x86_64/boot.S: 64-bit higher-half with
-#       4-level paging built statically. Same concept, different tables.
 
 .equ KERNBASE,        0x80000000
 .equ STACK_TOP_PHYS,  0x00090000
@@ -52,10 +50,6 @@ _phys_entry:
 	# its very first PTE.
 	#
 	# Refs:
-	#   serenity/Kernel/Arch/x86_64/Boot/ap_setup.S:62-74 -- same
-	#       MSR/bit pattern in asm, copy-paste semantics across
-	#       PAE i386 and long mode (their CPUID guard lives in C
-	#       at Processor.cpp:537-541; we keep it asm-side for boot).
 	#   Intel SDM Vol 2A "CPUID" (extended leaf 0x80000001 EDX bit 20)
 	#       + Vol 3A §4.6.2 (IA32_EFER.NXE) + Vol 4 §2.2.1
 	#       (MSR_IA32_EFER = 0xC0000080).

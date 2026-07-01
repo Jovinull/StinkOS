@@ -12,8 +12,7 @@
  * Refs:
  *   - Intel SDM Vol 2A "CPUID -- CPU Identification" Table 3-8 + Vol 3A
  *     §4.1 (CR4.PAE) + §4.6 (IA32_EFER.NXE)
- *   - serenity Kernel/Arch/x86_64/CPUID.cpp -- same per-leaf cpuid() call
- *     pattern; their bitfield names map 1:1 to our EDX_* defines. */
+ */
 #include "cpuid.h"
 #include "serial.h"
 

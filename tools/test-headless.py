@@ -77,15 +77,15 @@ def pixel_at(width, px, x, y):
     return (px[o], px[o + 1], px[o + 2]) if o + 2 < len(px) else (0, 0, 0)
 
 
-# Wait for the start menu to be drawn and ready for input.
-for _ in range(60):
-    if "menu: ready" in serial():
+# Wait for either the graphical desktop or the text menu to be ready.
+for _ in range(80):
+    if "rs-desktop: start" in serial() or "menu: ready" in serial():
         break
     time.sleep(0.1)
 else:
-    fail("kernel did not reach 'menu: ready'")
+    fail("kernel did not reach desktop or menu")
 
-# Drive the monitor: inject keystrokes, then dump the screen.
+# Open the QEMU monitor socket and consume its banner — needed for all key injection.
 sock = socket.socket(socket.AF_UNIX)
 for _ in range(50):
     try:
@@ -101,6 +101,18 @@ try:
     sock.recv(4096)        # consume the monitor banner
 except OSError:
     pass
+
+# Normal boot: rs-desktop auto-launches first; send 'q' to close it so the
+# text menu becomes active for the rest of the test.
+if "rs-desktop: start" in serial() and "menu: ready" not in serial():
+    time.sleep(0.5)        # let rs-desktop reach its event loop
+    sock.sendall(b'sendkey q\n')
+    for _ in range(80):
+        if "menu: ready" in serial():
+            break
+        time.sleep(0.1)
+    else:
+        fail("menu did not appear after closing rs-desktop")
 # a,b,c: exercise the keyboard IRQ.  s,w: move the menu cursor and back.
 # ret: launch the highlighted app (HELLO), which draws and waits for a key.
 for key in ("a", "b", "c", "s", "w", "ret"):
@@ -248,7 +260,7 @@ checks = {
     "VBE mode":        "vbe: 1024x768" in out,
     "framebuffer draw": drawn > 100000,
     "text render":     title_drawn,
-    "menu ready":      "menu: ready" in out,
+    "menu ready":      "menu: ready" in out or "rs-desktop: start" in out,
     "menu drawn":      menu_drawn,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
@@ -273,6 +285,7 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
+    "compositor":      "compositor: self-test ok" in out,
     # wx attack blocked: see tools/smoke-wxattack.py
     # multi-proc fork+exec: see tools/smoke-multiproc.py
 }
@@ -283,4 +296,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu; compositor self-test ok")

@@ -9,9 +9,9 @@
 
 #define FRAME_SIZE   4096u
 #define FREE_MAX     1024
-/* Sized to cover the PMM upper bound (32 MiB today; main.c clamps `end` at
- * 0x2000000). 32 MiB / 4 KiB = 8192 possible frames in the managed range. */
-#define MAX_FRAMES   8192
+/* Sized to cover the PMM upper bound (64 MiB; main.c passes end=0x4000000).
+ * 64 MiB / 4 KiB = 16384 possible frames in the managed range. */
+#define MAX_FRAMES   16384
 
 static unsigned int start_frame;
 static unsigned int next_frame;

@@ -1,0 +1,220 @@
+//! rs-desktop: graphical app launcher for StinkOS.
+//!
+//! Displays a grid of application tiles on the framebuffer with mouse cursor
+//! support. Click a tile to launch the app via fork+exec; the desktop resumes
+//! once the child exits. Press Q to quit back to the shell.
+//!
+//! ## Architecture
+//!
+//! - No window compositor required: the desktop owns the full framebuffer.
+//! - App launch: fork() → child exec()s the app; parent waitpid()s.
+//! - Redraw strategy: full-screen repaint on any mouse or hover change.
+//!   Each repaint is fast because it uses sys_fillrect (kernel fills memory
+//!   directly) and avoids per-pixel syscalls for the background.
+//!
+
+#![no_std]
+#![no_main]
+
+use libstink::println;
+use libui::*;
+
+// ── App catalogue ─────────────────────────────────────────────────────────────
+
+struct AppEntry {
+    label: &'static [u8],
+    exec:  &'static [u8],
+}
+
+static APPS: &[AppEntry] = &[
+    AppEntry { label: b"Doom\0",       exec: b"doom1\0"      },
+    AppEntry { label: b"Asteroids\0",  exec: b"asteroids\0"  },
+    AppEntry { label: b"Snake\0",      exec: b"snake\0"      },
+    AppEntry { label: b"Pong\0",       exec: b"pong\0"       },
+    AppEntry { label: b"Breakout\0",   exec: b"breakout\0"   },
+    AppEntry { label: b"Animation\0",  exec: b"anim\0"       },
+    AppEntry { label: b"Life (RS)\0",  exec: b"rs-life\0"    },
+    AppEntry { label: b"Files\0",      exec: b"rs-files\0"   },
+    AppEntry { label: b"Edit\0",       exec: b"rs-edit\0"    },
+    AppEntry { label: b"Paint\0",      exec: b"rs-paint\0"   },
+    AppEntry { label: b"Calc\0",       exec: b"rs-calc\0"    },
+    AppEntry { label: b"Sysinfo\0",    exec: b"rs-sysinfo\0" },
+    AppEntry { label: b"Hex View\0",   exec: b"rs-hex\0"     },
+    AppEntry { label: b"Vec Art\0",    exec: b"rs-vec\0"     },
+    AppEntry { label: b"Settings\0",   exec: b"rs-settings\0"},
+    AppEntry { label: b"Net\0",        exec: b"rs-net\0"     },
+    AppEntry { label: b"Taskman\0",    exec: b"rs-taskman\0" },
+    AppEntry { label: b"Clock\0",      exec: b"rs-clock\0"   },
+    AppEntry { label: b"TODO\0",        exec: b"rs-todo\0"    },
+    AppEntry { label: b"Calendar\0",   exec: b"rs-cal\0"     },
+    AppEntry { label: b"About\0",      exec: b"rs-about\0"   },
+    AppEntry { label: b"Shell\0",      exec: b"shell\0"       },
+];
+
+// ── Starfield ────────────────────────────────────────────────────────────────
+
+const N_STARS: u32 = 180;
+
+fn star_pos(idx: u32) -> (i32, i32) {
+    // Deterministic pseudo-random position from index alone (LCG chain)
+    let h1 = idx.wrapping_mul(1664525).wrapping_add(1013904223);
+    let h2 = h1.wrapping_mul(22695477).wrapping_add(1);
+    let x = (h1 >> 1) % 1024;
+    let y = (h2 >> 1) % (768 - TASKBAR_H as u32) + TASKBAR_H as u32;
+    (x as i32, y as i32)
+}
+
+fn star_color(idx: u32, frame: u32) -> Option<u32> {
+    // Each star has an independent twinkle phase; ~1/7 bright at any time
+    let phase = idx.wrapping_mul(2654435761).wrapping_add(frame >> 2) % 7;
+    match phase {
+        0 => Some(SURFACE_ALT),
+        1 => Some(0x3a4050),
+        _ => None,
+    }
+}
+
+fn draw_stars(frame: u32) {
+    for i in 0..N_STARS {
+        let (x, y) = star_pos(i);
+        if let Some(c) = star_color(i, frame) {
+            pixel(x, y, c);
+        }
+    }
+}
+
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+const SCREEN_W:   i32 = 1024;
+const SCREEN_H:   i32 = 768;
+
+const TILE_W:     i32 = 160;
+const TILE_H:     i32 = 90;
+const TILE_COLS:  i32 = 5;
+const TILE_GAP_H: i32 = 20;
+const TILE_GAP_V: i32 = 20;
+
+const GRID_W:     i32 = TILE_COLS * TILE_W + (TILE_COLS - 1) * TILE_GAP_H;
+const GRID_X:     i32 = (SCREEN_W - GRID_W) / 2;
+const GRID_Y:     i32 = TASKBAR_H + 28;
+
+// ── Tile helpers ──────────────────────────────────────────────────────────────
+
+fn tile_at(idx: usize) -> Tile {
+    let col = (idx as i32) % TILE_COLS;
+    let row = (idx as i32) / TILE_COLS;
+    Tile {
+        label: APPS[idx].label,
+        exec:  APPS[idx].exec,
+        x: GRID_X + col * (TILE_W + TILE_GAP_H),
+        y: GRID_Y + row * (TILE_H + TILE_GAP_V),
+        w: TILE_W,
+        h: TILE_H,
+    }
+}
+
+fn hovered_idx(mx: i32, my: i32) -> Option<usize> {
+    for i in 0..APPS.len() {
+        if tile_at(i).contains(mx, my) { return Some(i); }
+    }
+    None
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+
+fn redraw(mx: i32, my: i32, frame: u32) {
+    /* Background fill */
+    fill(0, 0, SCREEN_W, SCREEN_H, BG);
+
+    /* Animated starfield */
+    draw_stars(frame);
+
+    /* Taskbar */
+    draw_taskbar(SCREEN_W);
+
+    /* Subtitle */
+    text16(16, TASKBAR_H + 10, b"Choose an app\0", FG_DIM);
+
+    /* Section label */
+    text16(GRID_X, GRID_Y - 20, b"Applications\0", FG_DIM);
+
+    /* App tiles */
+    let hov = hovered_idx(mx, my);
+    for i in 0..APPS.len() {
+        tile_at(i).draw(hov == Some(i));
+    }
+
+}
+
+// ── App launch ────────────────────────────────────────────────────────────────
+
+fn launch(exec_name: &'static [u8]) {
+    let pid = fork();
+    if pid == 0 {
+        /* child: replace with the target app */
+        exec(exec_name);
+        quit(1); /* exec failed */
+    } else if pid > 0 {
+        /* parent: block until child exits, then resume desktop */
+        wait_for(pid);
+    }
+    /* pid < 0 (fork failed): silently ignore */
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+#[unsafe(no_mangle)]
+pub extern "C" fn main() {
+    println!("rs-desktop: start");
+    win_init(b"Desktop\0");
+
+    let mut mx: i32 = SCREEN_W / 2;
+    let mut my: i32 = SCREEN_H / 2;
+    let mut prev_mx      = mx - 1; /* ensure first draw */
+    let mut prev_my      = my - 1;
+    let mut prev_hov: Option<usize> = None;
+    let mut left_held    = false;
+    let mut prev_frame   = !0u32;
+
+    loop {
+        /* Mouse */
+        let (dx, dy, buttons) = poll_mouse();
+        mx = clamp(mx + dx, 0, SCREEN_W - 1);
+        my = clamp(my + dy, 0, SCREEN_H - 1);
+
+        /* Keyboard */
+        let k = poll_key();
+        if k == b'q' as i32 { break; }
+
+        /* Click: rising edge of left button */
+        let left_now = buttons & 0x01 != 0;
+        if left_now && !left_held {
+            if let Some(idx) = hovered_idx(mx, my) {
+                launch(APPS[idx].exec);
+                /* After launch, force full redraw */
+                prev_mx = mx - 1;
+                prev_frame = !0;
+            }
+        }
+        left_held = left_now;
+
+        /* Advance starfield animation frame every ~300ms (16ms * 18 ticks) */
+        let frame = ticks() / 30;
+
+        /* Redraw when mouse/hover/animation changed */
+        let hov = hovered_idx(mx, my);
+        if mx != prev_mx || my != prev_my || hov != prev_hov || frame != prev_frame {
+            redraw(mx, my, frame);
+            prev_mx    = mx;
+            prev_my    = my;
+            prev_hov   = hov;
+            prev_frame = frame;
+        }
+
+        win_flush();
+        sleep_ms(16); /* cap at ~60 fps */
+    }
+
+    win_done();
+    println!("rs-desktop: exit");
+}

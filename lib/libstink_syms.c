@@ -73,6 +73,11 @@ int sys_fread(const char *name, void *buf, unsigned int max)
 	return __syscall(9, (int)name, (int)buf, (int)max);
 }
 
+int sys_fdelete(const char *name)
+{
+	return __syscall(12, (int)name, 0, 0);
+}
+
 /* Rust's core / alloc emits direct calls to `memcpy` / `memset` /
  * `memmove` / `memcmp` for slice ops + Vec growth + Drop. libstink.h
  * declares these `static inline`, which gives every C TU its own copy
@@ -116,4 +121,166 @@ int memcmp(const void *a, const void *b, unsigned int n)
 		if (x[i] != y[i]) return (int)x[i] - (int)y[i];
 	}
 	return 0;
+}
+
+/* ---- Additional non-inline wrappers needed by Rust callers ---- */
+
+static inline int __syscall4_syms(int n, int a, int b, int c, int d)
+{
+	int ret;
+	__asm__ volatile ("int $0x80"
+	                  : "=a"(ret)
+	                  : "a"(n), "b"(a), "c"(b), "d"(c), "S"(d)
+	                  : "memory");
+	return ret;
+}
+
+/* SYS_FILLRECT (22): packed ABI ebx=(x<<16|y), ecx=(w<<16|h), edx=rgb */
+void sys_fillrect(int x, int y, int w, int h, unsigned int rgb)
+{
+	__syscall(22, (x << 16) | (y & 0xFFFF), (w << 16) | (h & 0xFFFF), (int)rgb);
+}
+
+/* SYS_DRAWTEXT (21): ebx=x, ecx=y, edx=str, esi=rgb */
+int sys_drawtext(int x, int y, const char *s, unsigned int rgb)
+{
+	return __syscall4_syms(21, x, y, (int)s, (int)rgb);
+}
+
+/* SYS_GETMOUSE (27): ebx=*dx, ecx=*dy, edx=*buttons */
+int sys_get_mouse(int *dx, int *dy, int *buttons)
+{
+	return __syscall(27, (int)dx, (int)dy, (int)buttons);
+}
+
+/* SYS_EXEC (41): ebx=name */
+int sys_exec(const char *name)
+{
+	return __syscall(41, (int)name, 0, 0);
+}
+
+/* SYS_FORK (83) */
+int sys_fork(void)
+{
+	return __syscall(83, 0, 0, 0);
+}
+
+/* SYS_WAITPID (48): ebx=pid */
+int sys_waitpid(int pid)
+{
+	return __syscall(48, pid, 0, 0);
+}
+
+/* SYS_SLEEP_MS (23): ebx=ms */
+void sys_sleep_ms(unsigned int ms)
+{
+	__syscall(23, (int)ms, 0, 0);
+}
+
+/* SYS_FCOUNT (10): -> number of files in StinkFS */
+int sys_fcount(void)
+{
+	return __syscall(10, 0, 0, 0);
+}
+
+/* SYS_FINFO (11): ebx=index ecx=name_buf(16) -> size or -1 */
+int sys_finfo(int index, char *name)
+{
+	return __syscall(11, index, (int)name, 0);
+}
+
+/* SYS_RTC_READ (64): ebx=*sys_rtc_time -> 0 or -1 */
+int sys_rtc_read(void *out)
+{
+	return __syscall(64, (int)out, 0, 0);
+}
+
+/* SYS_PROC_INFO (73): ebx=buf ecx=cap -> bytes written */
+int sys_proc_info(char *buf, int cap)
+{
+	return __syscall(73, (int)buf, (int)cap, 0);
+}
+
+/* SYS_SET_KEYMAP (76): ebx=layout(0=US,1=BR) -> previous layout */
+int sys_set_keymap(int layout)
+{
+	return __syscall(76, layout, 0, 0);
+}
+
+/* SYS_ARP_INFO (74): ebx=buf ecx=cap -> bytes written */
+int sys_arp_info(char *buf, int cap)
+{
+	return __syscall(74, (int)buf, (int)cap, 0);
+}
+
+/* SYS_KILL (46): ebx=pid -> 0 or -1 */
+int sys_kill(int pid)
+{
+	return __syscall(46, pid, 0, 0);
+}
+
+/* SYS_GETPID (43): -> current pid */
+int sys_getpid(void)
+{
+	return __syscall(43, 0, 0, 0);
+}
+
+/* SYS_WIN_CREATE (85): ebx=w ecx=h -> 0 or -1 */
+int sys_win_create(unsigned int w, unsigned int h)
+{
+	return __syscall(85, (int)w, (int)h, 0);
+}
+
+/* SYS_WIN_SHOW (86): ebx=x ecx=y edx=*title -> 0 or -1 */
+int sys_win_show(int x, int y, const char *title)
+{
+	return __syscall(86, x, y, (int)title);
+}
+
+/* SYS_WIN_FLUSH (87) */
+void sys_win_flush(void)
+{
+	__syscall(87, 0, 0, 0);
+}
+
+/* SYS_WIN_DESTROY (88) */
+void sys_win_destroy(void)
+{
+	__syscall(88, 0, 0, 0);
+}
+
+/* SYS_WIN_GET_EVENT (89): ebx=*event -> 0 or -1 */
+int sys_win_get_event(void *ev)
+{
+	return __syscall(89, (int)ev, 0, 0);
+}
+
+/* SYS_WIN_RAISE (90) */
+void sys_win_raise(void)
+{
+	__syscall(90, 0, 0, 0);
+}
+
+/* SYS_WIN_MOVE (91): ebx=x ecx=y */
+void sys_win_move(int x, int y)
+{
+	__syscall(91, x, y, 0);
+}
+
+/* SYS_CLIP_WRITE (92): ebx=buf ecx=len -> bytes stored */
+int sys_clip_write(const void *buf, unsigned int len)
+{
+	return __syscall(92, (int)buf, (int)len, 0);
+}
+
+/* SYS_CLIP_READ (93): ebx=buf ecx=max -> bytes copied */
+int sys_clip_read(void *buf, unsigned int max)
+{
+	return __syscall(93, (int)buf, (int)max, 0);
+}
+
+/* SYS_WIN_RESIZE (94): ebx=w ecx=h -> 0 ok / -1 fail */
+int sys_win_resize(unsigned int w, unsigned int h)
+{
+	return __syscall(94, (int)w, (int)h, 0);
 }

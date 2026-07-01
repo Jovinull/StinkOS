@@ -11,6 +11,8 @@
 
 #define SCREEN_W 1024
 #define SCREEN_H  768
+#define OY         WIN_TITLEBAR_H
+#define GH        (SCREEN_H - OY)  /* game field height */
 
 #define MAX_BULLETS 10
 #define MAX_ASTEROIDS 20
@@ -57,7 +59,9 @@ static double rand_double(void) {
 
 static void clear_screen(void)
 {
-    sys_fillrect(0, 0, 1024, 768, BG);
+    draw_window_frame(0, 0, SCREEN_W, SCREEN_H,
+        "Asteroids  --  Arrows: steer/thrust  Space: shoot  q: quit  r: restart");
+    sys_fillrect(0, OY, SCREEN_W, GH, BG);
 }
 
 static void spawn_asteroid(double x, double y, int size)
@@ -84,7 +88,7 @@ static void spawn_wave(int count)
     for (int i = 0; i < count; i++) {
         /* Spawn at edges */
         double ax = rand_double() > 0.5 ? 0 : 1024;
-        double ay = rand_double() * 768;
+        double ay = rand_double() * GH;
         spawn_asteroid(ax, ay, 3);
     }
 }
@@ -92,7 +96,7 @@ static void spawn_wave(int count)
 static void init_game(void)
 {
     ship.x = 1024.0 / 2.0;
-    ship.y = 768.0 / 2.0;
+    ship.y = (double)GH / 2.0;
     ship.vx = 0;
     ship.vy = 0;
     ship.angle = -M_PI / 2.0; /* pointing up */
@@ -127,9 +131,9 @@ static void draw_ship(void)
     int x3 = (int)(ship.x + cos(p3_ang) * scale);
     int y3 = (int)(ship.y + sin(p3_ang) * scale);
     
-    sys_drawline(x1, y1, x2, y2, FG);
-    sys_drawline(x2, y2, x3, y3, FG);
-    sys_drawline(x3, y3, x1, y1, FG);
+    sys_drawline(x1, y1 + OY, x2, y2 + OY, FG);
+    sys_drawline(x2, y2 + OY, x3, y3 + OY, FG);
+    sys_drawline(x3, y3 + OY, x1, y1 + OY, FG);
 }
 
 static void draw_asteroid(struct Asteroid *a)
@@ -149,7 +153,7 @@ static void draw_asteroid(struct Asteroid *a)
     }
     
     for (int i = 0; i < pts; i++) {
-        sys_drawline(px[i], py[i], px[(i+1)%pts], py[(i+1)%pts], FG);
+        sys_drawline(px[i], py[i] + OY, px[(i+1)%pts], py[(i+1)%pts] + OY, FG);
     }
 }
 
@@ -161,16 +165,16 @@ static void draw_bullet(struct Bullet *b)
     if (bx < 0) bx = 0;
     if (bx > SCREEN_W - 2) bx = SCREEN_W - 2;
     if (by < 0) by = 0;
-    if (by > SCREEN_H - 2) by = SCREEN_H - 2;
-    sys_fillrect(bx, by, 2, 2, FG);
+    if (by > GH - 2) by = GH - 2;
+    sys_fillrect(bx, by + OY, 2, 2, FG);
 }
 
 static void wrap(double *x, double *y)
 {
     if (*x < 0) *x += 1024;
     if (*x >= 1024) *x -= 1024;
-    if (*y < 0) *y += 768;
-    if (*y >= 768) *y -= 768;
+    if (*y < 0) *y += GH;
+    if (*y >= GH) *y -= GH;
 }
 
 static int check_collision(double x1, double y1, double x2, double y2, double r)
@@ -295,8 +299,8 @@ void main(void)
             if (ex < 0) ex = 0;
             if (ey < 0) ey = 0;
             if (ex > SCREEN_W - 20) ex = SCREEN_W - 20;
-            if (ey > SCREEN_H - 20) ey = SCREEN_H - 20;
-            sys_fillrect(ex, ey, 20, 20, 0xFF0000);
+            if (ey > GH - 20) ey = GH - 20;
+            sys_fillrect(ex, ey + OY, 20, 20, 0xFF0000);
         } else {
             draw_ship();
         }

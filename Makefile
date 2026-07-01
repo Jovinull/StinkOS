@@ -72,7 +72,8 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_setjmp.o $(BUILD)/libstink_http.o \
                 $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o \
                 $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o \
-                $(BUILD)/libstink_syms.o
+                $(BUILD)/libstink_font.o $(BUILD)/libstink_syms.o \
+                $(BUILD)/libstink_winbuf.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -147,7 +148,7 @@ FREEDOOM1_WAD ?= wads/freedoom1.wad
 FREEDOOM2_WAD ?= wads/freedoom2.wad
 FREEDM_WAD    ?= wads/freedm.wad
 
-C_SRCS  = main.c serial.c trap.c syscall.c proc.c pipe.c timer.c klog.c bootdiag.c keyboard.c vbe.c fb.c font.c pmm.c paging.c cpuid.c acpi.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c audio.c dma.c pci.c e1000.c net.c ethernet.c arp.c ipv4.c icmp.c udp.c dhcp.c dns.c tcp.c mbr.c
+C_SRCS  = main.c serial.c trap.c syscall.c proc.c pipe.c timer.c klog.c bootdiag.c clip.c keyboard.c vbe.c fb.c font.c pmm.c paging.c cpuid.c acpi.c gdt.c ata.c elf.c speaker.c fs.c vfs.c menu.c mouse.c rtc.c audio.c dma.c pci.c e1000.c net.c ethernet.c arp.c ipv4.c icmp.c udp.c dhcp.c dns.c tcp.c mbr.c win.c
 C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 
 # Bootblock: boot.s + bootmain.o, linked at 0x7C00 as a flat binary.
@@ -210,6 +211,12 @@ $(BUILD)/libstink_math.o: lib/libstink_math.c lib/libstink.h | $(BUILD)
 
 $(BUILD)/libstink_gfx.o: lib/libstink_gfx.c lib/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_gfx.c -o $(BUILD)/libstink_gfx.o
+
+$(BUILD)/libstink_font.o: lib/libstink_font.c lib/libstink_font.h lib/libstink.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_font.c -o $(BUILD)/libstink_font.o
+
+$(BUILD)/libstink_winbuf.o: lib/libstink_winbuf.c lib/libstink_winbuf.h lib/libstink_font.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_winbuf.c -o $(BUILD)/libstink_winbuf.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
@@ -329,6 +336,186 @@ $(BUILD)/rs-life.elf: apps/crt0.s apps/rust/rs-life/Cargo.toml \
 	      --no-whole-archive \
 	      $(LIBSTINK_OBJS) $(LIBGCC)
 
+$(BUILD)/rs-desktop.elf: apps/crt0.s apps/rust/rs-desktop/Cargo.toml \
+                         apps/rust/rs-desktop/src/lib.rs \
+                         apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                         apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                         $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-desktop/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-desktop.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_desktop.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-sysinfo.elf: apps/crt0.s apps/rust/rs-sysinfo/Cargo.toml \
+                          apps/rust/rs-sysinfo/src/lib.rs \
+                          apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                          apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                          $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-sysinfo/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-sysinfo.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_sysinfo.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-files.elf: apps/crt0.s apps/rust/rs-files/Cargo.toml \
+                        apps/rust/rs-files/src/lib.rs \
+                        apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                        apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                        $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-files/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-files.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_files.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-calc.elf: apps/crt0.s apps/rust/rs-calc/Cargo.toml \
+                       apps/rust/rs-calc/src/lib.rs \
+                       apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                       apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                       $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-calc/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-calc.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_calc.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-settings.elf: apps/crt0.s apps/rust/rs-settings/Cargo.toml \
+                           apps/rust/rs-settings/src/lib.rs \
+                           apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                           apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                           $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-settings/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-settings.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_settings.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-net.elf: apps/crt0.s apps/rust/rs-net/Cargo.toml \
+                      apps/rust/rs-net/src/lib.rs \
+                      apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                      apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                      $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-net/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-net.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_net.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-taskman.elf: apps/crt0.s apps/rust/rs-taskman/Cargo.toml \
+                          apps/rust/rs-taskman/src/lib.rs \
+                          apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                          apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                          $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-taskman/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-taskman.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_taskman.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-clock.elf: apps/crt0.s apps/rust/rs-clock/Cargo.toml \
+                        apps/rust/rs-clock/src/lib.rs \
+                        apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                        apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                        $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-clock/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-clock.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_clock.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-todo.elf: apps/crt0.s apps/rust/rs-todo/Cargo.toml \
+                       apps/rust/rs-todo/src/lib.rs \
+                       apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                       apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                       $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-todo/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-todo.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_todo.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-cal.elf: apps/crt0.s apps/rust/rs-cal/Cargo.toml \
+                      apps/rust/rs-cal/src/lib.rs \
+                      apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                      apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                      $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-cal/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-cal.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_cal.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-hex.elf: apps/crt0.s apps/rust/rs-hex/Cargo.toml \
+                      apps/rust/rs-hex/src/lib.rs \
+                      apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                      apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                      $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-hex/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-hex.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_hex.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-vec.elf: apps/crt0.s apps/rust/rs-vec/Cargo.toml \
+                      apps/rust/rs-vec/src/lib.rs \
+                      apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                      apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                      $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-vec/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-vec.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_vec.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-about.elf: apps/crt0.s apps/rust/rs-about/Cargo.toml \
+                        apps/rust/rs-about/src/lib.rs \
+                        apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                        apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                        $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-about/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-about.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_about.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-paint.elf: apps/crt0.s apps/rust/rs-paint/Cargo.toml \
+                        apps/rust/rs-paint/src/lib.rs \
+                        apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                        apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                        $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-paint/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-paint.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_paint.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
+$(BUILD)/rs-edit.elf: apps/crt0.s apps/rust/rs-edit/Cargo.toml \
+                       apps/rust/rs-edit/src/lib.rs \
+                       apps/rust/libstink/Cargo.toml apps/rust/libstink/src/lib.rs \
+                       apps/rust/libui/Cargo.toml apps/rust/libui/src/lib.rs \
+                       $(RUST_TARGET_JSON) apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CARGO) $(CARGO_FLAGS) --manifest-path apps/rust/rs-edit/Cargo.toml
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/rs-edit.elf $(BUILD)/crt0.o \
+	      --whole-archive $(BUILD)/rust/i686-stinkos/release/librs_edit.a \
+	      --no-whole-archive \
+	      $(LIBSTINK_OBJS) $(LIBGCC)
+
 $(BUILD)/anim.elf: apps/crt0.s apps/anim.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/anim.c -o $(BUILD)/anim_app.o
@@ -394,6 +581,11 @@ $(BUILD)/pong.elf: apps/crt0.s apps/pong.c lib/libstink.h apps/app.ld $(LIBSTINK
 	$(CC) $(CFLAGS) -c apps/pong.c -o $(BUILD)/pong_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/pong.elf $(BUILD)/crt0.o $(BUILD)/pong_app.o $(LIBSTINK_OBJS)
 
+$(BUILD)/breakout.elf: apps/crt0.s apps/breakout.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/breakout.c -o $(BUILD)/breakout_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/breakout.elf $(BUILD)/crt0.o $(BUILD)/breakout_app.o $(LIBSTINK_OBJS)
+
 $(BUILD)/asteroids.elf: apps/crt0.s apps/asteroids.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/asteroids.c -o $(BUILD)/asteroids_app.o
@@ -454,7 +646,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/exitcode.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/breakout.elf $(BUILD)/exitcode.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -506,6 +698,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  ARROWS.ELF=$(BUILD)/arrows.elf \
 	  SNAKE.ELF=$(BUILD)/snake.elf \
 	  PONG.ELF=$(BUILD)/pong.elf \
+	  BREAKOUT.ELF=$(BUILD)/breakout.elf \
 	  ASTEROIDS.ELF=$(BUILD)/asteroids.elf \
 	  INSTALLER.ELF=$(BUILD)/installer.elf \
 	  EDIT.ELF=$(BUILD)/edit.elf \
@@ -523,6 +716,21 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  RS-JSON.ELF=$(BUILD)/rs-json.elf \
 	  TEST.JSON=apps/rust/rs-json/test.json \
 	  RS-LIFE.ELF=$(BUILD)/rs-life.elf \
+	  RS-DESKTOP.ELF=$(BUILD)/rs-desktop.elf \
+	  RS-SYSINFO.ELF=$(BUILD)/rs-sysinfo.elf \
+	  RS-FILES.ELF=$(BUILD)/rs-files.elf \
+	  RS-CALC.ELF=$(BUILD)/rs-calc.elf \
+	  RS-TODO.ELF=$(BUILD)/rs-todo.elf \
+	  RS-CAL.ELF=$(BUILD)/rs-cal.elf \
+	  RS-HEX.ELF=$(BUILD)/rs-hex.elf \
+	  RS-VEC.ELF=$(BUILD)/rs-vec.elf \
+	  RS-SETTINGS.ELF=$(BUILD)/rs-settings.elf \
+	  RS-NET.ELF=$(BUILD)/rs-net.elf \
+	  RS-TASKMAN.ELF=$(BUILD)/rs-taskman.elf \
+	  RS-CLOCK.ELF=$(BUILD)/rs-clock.elf \
+	  RS-ABOUT.ELF=$(BUILD)/rs-about.elf \
+	  RS-PAINT.ELF=$(BUILD)/rs-paint.elf \
+	  RS-EDIT.ELF=$(BUILD)/rs-edit.elf \
 	  EXITCODE.ELF=$(BUILD)/exitcode.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
@@ -559,7 +767,8 @@ run: all
 	qemu-system-i386 -drive format=raw,file=os.bin \
 	  -audiodev $(QEMU_AUDIO),id=snd0 \
 	  -device sb16,audiodev=snd0 \
-	  -netdev user,id=net0 -device e1000,netdev=net0
+	  -netdev user,id=net0 -device e1000,netdev=net0 \
+	  -display sdl,gl=off
 
 # Blank target disk for the installer app to clone the boot media onto.
 # Created on demand; ignored by git (*.bin in .gitignore). 64 MiB is enough

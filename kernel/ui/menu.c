@@ -382,6 +382,15 @@ void menu_run(void)
 	}
 
 	load_app_list();
+
+	/* Auto-launch the graphical desktop; fall back to text menu if it exits. */
+	for (int i = 0; i < app_count; i++) {
+		const char *want = "RS-DESKTOP";
+		int j;
+		for (j = 0; want[j] && app_names[i][j] == want[j]; j++) {}
+		if (!want[j]) { launch(i); __asm__ volatile ("sti"); break; }
+	}
+
 	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
 	redraw();
 	serial_write("menu: ready\n");

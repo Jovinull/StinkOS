@@ -5,6 +5,8 @@
 #include "memlayout.h"
 #include "acpi.h"
 #include "fs.h"
+#include "win.h"
+#include "clip.h"
 
 /* Copy a userland filename into a NUL-padded 16-byte kernel buffer, validating
  * that the source pointer lies in the app's mapped memory first. */
@@ -272,6 +274,7 @@ void app_return(void)
 	int pid = cur ? cur->pid : 0;
 	audio_mix_silence_pid(pid);
 	tcp_close_pid(pid);
+	win_destroy(pid);
 
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
 	 * process menu launched. menu_exit's klongjmp would crash the
@@ -334,7 +337,8 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 2:                                    /* SYS_DRAW: ebx=x ecx=y edx=rgb */
-		fb_putpixel(r->ebx, r->ecx, r->edx);
+		if (!win_redirect_putpixel((int)proc_current()->pid, r->ebx, r->ecx, r->edx))
+			fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
 		break;
 	case 3:                                    /* SYS_GETKEY: -> char or 0 */
@@ -749,6 +753,7 @@ void syscall_dispatch(struct regs *r)
 		target->exit_code = 137;           /* SIGKILL exit-code convention */
 		audio_mix_silence_pid(pid);        /* hush its mixer channels */
 		tcp_close_pid(pid);                /* reap any sockets it left open */
+		win_destroy(pid);                  /* release any compositor window */
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
@@ -873,11 +878,14 @@ void syscall_dispatch(struct regs *r)
 		r->eax = 0;
 		break;
 	}
-	case 22:                                   /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
-		fb_rect(r->ebx >> 16, r->ebx & 0xFFFF,
-		        r->ecx >> 16, r->ecx & 0xFFFF, r->edx);
+	case 22: {                                 /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
+		unsigned int rx = r->ebx >> 16, ry = r->ebx & 0xFFFF;
+		unsigned int rw = r->ecx >> 16, rh = r->ecx & 0xFFFF;
+		if (!win_redirect_fillrect((int)proc_current()->pid, rx, ry, rw, rh, r->edx))
+			fb_rect(rx, ry, rw, rh, r->edx);
 		r->eax = 0;
 		break;
+	}
 	case 23: {                                 /* SYS_SLEEP_MS: ebx = milliseconds */
 		/* PIT runs at 100 Hz, so one tick is 10 ms. Round up so a request
 		 * for any non-zero number of ms always waits at least one tick.
@@ -1088,7 +1096,9 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
+		if (!win_redirect_blit((int)proc_current()->pid, x, y, w, h,
+		                       (const unsigned int *)r->ebx))
+			fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
 		r->eax = 0;
 		break;
 	}
@@ -1117,13 +1127,6 @@ void syscall_dispatch(struct regs *r)
 		 *       splits forkret/trapret; we collapse into one
 		 *       trap_return tail because StinkOS has no kernel-thread
 		 *       initialiser to run before the user resumes.
-		 *   - CONTRAST toaruos/kernel/sys/process.c:1392 (fork): uses
-		 *       arch_resume_user as the child's IP and clones via
-		 *       arch_save_context. Equivalent semantics; their PAL
-		 *       (process abstraction layer) makes the asm-coupled
-		 *       parts hide behind helpers. We keep it visible because
-		 *       it's only ~30 lines and one read-through explains the
-		 *       whole control-flow.
 		 */
 		struct proc *parent = proc_current();
 		if (!parent) { r->eax = (unsigned int)-1; break; }
@@ -1192,6 +1195,70 @@ void syscall_dispatch(struct regs *r)
 
 		child->state = PROC_READY;
 		r->eax = (unsigned int)child->pid;     /* parent return */
+		break;
+	}
+	/* ── Window / compositor syscalls ──────────────────────────────────── */
+	case 85: {                                /* SYS_WIN_CREATE: ebx=w ecx=h */
+		int pid = (int)proc_current()->pid;
+		r->eax = (unsigned int)win_create(pid, r->ebx, r->ecx);
+		break;
+	}
+	case 86: {                                /* SYS_WIN_SHOW: ebx=x ecx=y edx=*title */
+		int pid = (int)proc_current()->pid;
+		const char *title = 0;
+		if (r->edx && paging_user_range_ok(r->edx, 64))
+			title = (const char *)r->edx;
+		r->eax = (unsigned int)win_show(pid, (int)r->ebx, (int)r->ecx, title);
+		break;
+	}
+	case 87:                                  /* SYS_WIN_FLUSH */
+		win_flush((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 88:                                  /* SYS_WIN_DESTROY */
+		win_destroy((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 89: {                                /* SYS_WIN_GET_EVENT: ebx=*win_event */
+		if (!r->ebx || !paging_user_range_ok(r->ebx, sizeof(struct win_event))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)win_get_event((int)proc_current()->pid,
+		                                      (struct win_event *)r->ebx);
+		break;
+	}
+	case 90:                                  /* SYS_WIN_RAISE */
+		win_raise((int)proc_current()->pid);
+		r->eax = 0;
+		break;
+	case 91:                                  /* SYS_WIN_MOVE: ebx=x ecx=y */
+		win_move((int)proc_current()->pid, (int)r->ebx, (int)r->ecx);
+		r->eax = 0;
+		break;
+	case 92: {                               /* SYS_CLIP_WRITE: ebx=buf ecx=len */
+		unsigned int ulen = r->ecx;
+		if (ulen > 4096) ulen = 4096;
+		if (ulen > 0 && !paging_user_range_ok(r->ebx, ulen)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)clip_write((const char *)r->ebx, ulen);
+		break;
+	}
+	case 93: {                               /* SYS_CLIP_READ: ebx=buf ecx=max -> n */
+		unsigned int umax = r->ecx;
+		if (umax > 4096) umax = 4096;
+		if (umax > 0 && !paging_user_range_ok(r->ebx, umax)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		r->eax = (unsigned int)clip_read((char *)r->ebx, umax);
+		break;
+	}
+	case 94: {                               /* SYS_WIN_RESIZE: ebx=w ecx=h -> 0/-1 */
+		r->eax = (unsigned int)win_resize((int)proc_current()->pid,
+		                                  r->ebx, r->ecx);
 		break;
 	}
 	default:

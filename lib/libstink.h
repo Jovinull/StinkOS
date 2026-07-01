@@ -1017,4 +1017,81 @@ double cos(double x);
 /* --- libstink_gfx --- */
 void sys_drawline(int x0, int y0, int x1, int y1, unsigned int rgb);
 
+/* Filled rectangle with rounded corners (radius r pixels).
+ * r=0 falls back to sys_fillrect. Clips r to half of w/h automatically. */
+void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb);
+
+/* Draw a dark shadow rectangle offset by (depth,depth) behind a widget.
+ * Call before drawing the widget so the shadow appears behind it. */
+void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb);
+
+/* Height of the titlebar drawn by draw_window_frame().
+ * Content must start at y + WIN_TITLEBAR_H to avoid painting over the frame.
+ * Matches OY in C apps and DRAG_TITLEBAR_H in the kernel compositor. */
+#define WIN_TITLEBAR_H 34
+
+/* Draw a titled window frame (titlebar + close button + border).
+ * Returns the Y coordinate of the inner content area start. */
+int draw_window_frame(int x, int y, int w, int h, const char *title);
+
+/* --- Compositor / Window syscalls ---
+ *
+ * Each process owns at most one window. After sys_win_create(), the pixel
+ * buffer is mapped at USER_WIN_BASE (0x12000000) in the caller's VAS.
+ * Write ARGB32 pixels there then call sys_win_flush() to repaint.
+ *
+ * Event types: 0=none 1=mouse 2=key 3=close 4=resize (x=new_w y=new_h).
+ */
+struct stink_win_event {
+    int type;
+    int x, y;      /* mouse: window-relative */
+    int buttons;   /* mouse button bitmask */
+    int key;       /* key scancode (type==2) */
+};
+
+#define USER_WIN_BASE 0x12000000u
+
+static inline int sys_win_create(unsigned int w, unsigned int h)
+{
+    return __syscall(85, (int)w, (int)h, 0);
+}
+static inline int sys_win_show(int x, int y, const char *title)
+{
+    return __syscall(86, x, y, (int)title);
+}
+static inline void sys_win_flush(void)
+{
+    __syscall(87, 0, 0, 0);
+}
+static inline void sys_win_destroy(void)
+{
+    __syscall(88, 0, 0, 0);
+}
+static inline int sys_win_get_event(struct stink_win_event *ev)
+{
+    return __syscall(89, (int)ev, 0, 0);
+}
+static inline void sys_win_raise(void)
+{
+    __syscall(90, 0, 0, 0);
+}
+static inline void sys_win_move(int x, int y)
+{
+    __syscall(91, x, y, 0);
+}
+static inline int sys_win_resize(unsigned int w, unsigned int h)
+{
+    return __syscall(94, (int)w, (int)h, 0);
+}
+
+/* Clipboard: one shared kernel buffer (4096 bytes) for cross-app copy-paste. */
+static inline int sys_clip_write(const void *buf, unsigned int len)
+{
+    return __syscall(92, (int)buf, (int)len, 0);
+}
+static inline int sys_clip_read(void *buf, unsigned int max)
+{
+    return __syscall(93, (int)buf, (int)max, 0);
+}
+
 #endif

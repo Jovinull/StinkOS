@@ -22,8 +22,6 @@
  *     with 8-byte entries + NX at bit 63)
  *   - xv6-riscv kernel/vm.c walk() -- canonical multi-level walk
  *     pattern (Sv39 = 3-level analog)
- *   - serenity Kernel/Arch/x86_64/PageDirectory.h -- 8-byte PTE
- *     accessor + NoExecute bit (0x8000000000000000) shape
  */
 #include "paging.h"
 #include "pmm.h"
@@ -193,10 +191,7 @@ extern char __kernel_data_end[];
  * (BIOS data area, unused low phys) gets the conservative RW-NX default
  * so a write-where bug cannot land executable bytes there.
  *
- * Pattern mirrors xv6-public's vm.c per-section R/W setup (it predates
- * NX so it only enforces R vs RW), threaded through PAE for NX support.
- * Refs: Intel SDM Vol 3A §4.6 (page-level protections) + serenity
- *       Kernel/Arch/x86_64/PageDirectory.cpp (kernel image NX split). */
+ * Refs: Intel SDM Vol 3A §4.6 (page-level protections). */
 static void kernel_wx_install_pt(void)
 {
 	unsigned int pt_phys = pmm_alloc();
@@ -334,7 +329,7 @@ static void map_user_page(unsigned int vaddr, unsigned int frame)
  *                    the original frame (RO + PG_COW) until they too
  *                    take the fault.
  *
- * Pattern from toaruos `mmu_copy_on_write` (arch/x86_64/mmu.c:1313). */
+ */
 int paging_handle_cow_fault(unsigned int va)
 {
 	pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
@@ -399,6 +394,32 @@ static void unmap_user_page(unsigned int vaddr)
 	*pte = 0;
 	pmm_free(frame);
 	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
+}
+
+/* Map caller-allocated frames contiguously in user VAS starting at base_va.
+ * Does NOT take ownership of the frames — caller frees them after unmap. */
+void paging_map_win_buf(unsigned int base_va, unsigned int *frames, int n)
+{
+    for (int i = 0; i < n; i++) {
+        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
+        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 1);
+        if (!pte) continue;
+        *pte = (pae_entry_t)(frames[i] & 0xFFFFF000u) | user_pte_flags(0, 1);
+        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+    }
+}
+
+/* Unmap window buffer pages from user VAS WITHOUT freeing the physical frames.
+ * Caller is responsible for pmm_free on each frame after this returns. */
+void paging_unmap_win_buf(unsigned int base_va, int n)
+{
+    for (int i = 0; i < n; i++) {
+        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
+        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+        if (!pte || !(*pte & 1ULL)) continue;
+        *pte = 0;
+        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+    }
 }
 
 /* Lay out a fresh user address space into the given PDPT:
@@ -482,8 +503,7 @@ unsigned int *paging_boot_pgdir(void)
  * stay shared without PG_COW; writes to them are real W^X violations
  * and the existing trap path kills the offender.
  *
- * Matches toaruos `copy_page_maybe` (arch/x86_64/mmu.c:442) -- same
- * refcount + per-PTE COW bit design. */
+ */
 int paging_copy_user_pgdir(unsigned int *dst_raw, unsigned int *src_raw)
 {
 	pae_entry_t *dst = (pae_entry_t *)dst_raw;
@@ -777,5 +797,17 @@ int paging_user_range_ok(unsigned int addr, unsigned int len)
 		return 1;
 	if (addr >= USER_HEAP_LO && end <= user_heap_next)
 		return 1;
+	if (addr >= USER_WIN_BASE && end <= USER_WIN_BASE + USER_WIN_SIZE) {
+		/* Win buffer pages are only present for processes that called
+		 * win_create. Walk PTEs to confirm every page in the range is
+		 * actually mapped before letting the kernel dereference the ptr. */
+		unsigned int va;
+		for (va = addr & ~0xFFFu; va < end; va += PAGE_4KB) {
+			pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+			if (!pte || !(*pte & 1ULL))
+				return 0;
+		}
+		return 1;
+	}
 	return 0;
 }
