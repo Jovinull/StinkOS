@@ -50,6 +50,8 @@
 #define USER_STACK_TOP   0x00540000u   /* user stack (grows down)   */
 #define USER_HEAP_BASE   0x00540000u   /* sbrk/mmap start           */
 #define USER_FB_BASE     0x10000000u   /* SYS_MAP_FB target         */
+#define USER_WIN_BASE    0x12000000u   /* sys_win_create buffer     */
+#define USER_WIN_SIZE    0x00300000u   /* 768 frames * 4096 = 3 MiB */
 
 /* Higher-half kernel direct map (xv6-style).
  *
@@ -73,7 +75,7 @@
  * PMM sizes statically (refcounts, free-list links) derives from this, and
  * it must not exceed KERNEL_DIRECT_MAP: the kernel reaches every managed
  * frame through the direct map. The machine needs at least this much RAM. */
-#define PMM_PHYS_LIMIT      0x02000000u   /* 32 MiB                  */
+#define PMM_PHYS_LIMIT      0x04000000u   /* 64 MiB                  */
 /* KERNEL_DEVSPACE must sit BELOW the lowest MMIO BAR we want to keep
  * identity-mapped. QEMU places the Bochs/Cirrus VBE LFB at 0xFD000000
  * and the e1000 BAR around 0xFEB80000; anchoring DEVSPACE at 0xFD000000
@@ -98,9 +100,6 @@
  * Refs:
  *   - Intel SDM Vol 3A §4.4 (PAE paging) figure 4-11 (PTE format),
  *     §4.6 (Access Rights, NXE semantics)
- *   - serenity Kernel/Arch/x86_64/PageDirectory.h:53,107 -- same bit
- *     position (`NoExecute = 0x8000000000000000ULL`), same accessor
- *     pattern shaped around individual flag predicates
  *   - xv6-riscv kernel/riscv.h PTE_R / PTE_X separation -- positive-
  *     polarity X bit; our PG_NX is the inverse, but the W^X intent
  *     maps 1:1 ("text gets X, data gets W, never both")

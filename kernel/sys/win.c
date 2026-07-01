@@ -1,0 +1,713 @@
+/* win.c — kernel window table and compositor for StinkOS.
+ *
+ * Physical frames are allocated via pmm_alloc() and accessed from kernel
+ * context via P2V(frame) (every frame is within the 256MiB direct map).
+ * Those same frames are mapped into the owner process's VAS at USER_WIN_BASE
+ * via paging_map_win_buf() so userland can write pixel data directly.
+ *
+ * Compositor: runs every 3 PIT ticks (~30fps). Iterates visible windows by
+ * z-order (back to front), blits each page-aligned buffer segment to the
+ * physical FB via fb_blit_row(), then redraws the mouse cursor on top.
+ */
+#include "win.h"
+#include "clip.h"
+#include "defs.h"
+#include "../arch/memlayout.h"
+#include "../arch/paging.h"
+#include "../arch/pmm.h"
+#include "../drivers/video/fb.h"
+#include "../drivers/input/mouse.h"
+#include "../drivers/misc/rtc.h"
+#include "../drivers/misc/serial.h"
+#include "interrupts.h"
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+
+static struct win_slot slots[WIN_MAX];
+static int focused_slot = -1;    /* index into slots[], -1 = none */
+
+/* Drag state: set when user holds button 1 on a window titlebar. */
+#define DRAG_TITLEBAR_H  34   /* must match OY used by apps */
+#define RESIZE_BORDER     6   /* px from right/bottom edge that starts a resize drag */
+static int drag_slot  = -1;
+static int drag_off_x =  0;
+static int drag_off_y =  0;
+static int prev_btn   =  0;
+
+/* Border-resize state: compositor tracks target size; pushes WIN_EV_RESIZE on release. */
+static int resize_slot    = -1;
+static int resize_edge    =  0;  /* bit0=right, bit1=bottom */
+static int resize_base_w  =  0;
+static int resize_base_h  =  0;
+static int resize_start_x =  0;
+static int resize_start_y =  0;
+static int resize_cur_w   =  0;
+static int resize_cur_h   =  0;
+
+/* ── Init ───────────────────────────────────────────────────────────────── */
+
+void win_init(void)
+{
+    for (int i = 0; i < WIN_MAX; i++) {
+        slots[i].pid = 0;
+        slots[i].visible = 0;
+        slots[i].dirty   = 0;
+        slots[i].n_frames = 0;
+        slots[i].ev_r = slots[i].ev_w = 0;
+    }
+    focused_slot = -1;
+
+    /* Sanity-check guard clauses and clipboard round-trip at boot. */
+    int ok = 1;
+    /* win_create rejects bad arguments without touching paging/pmm */
+    if (win_create(0, 100, 100) != -1) ok = 0;   /* bad pid */
+    if (win_create(1,   0, 100) != -1) ok = 0;   /* zero width */
+    if (win_create(1, 100,   0) != -1) ok = 0;   /* zero height */
+    if (win_create(1, 1025, 100) != -1) ok = 0;  /* w > 1024 */
+    if (win_create(1, 100,  769) != -1) ok = 0;  /* h > 768 */
+    /* clipboard round-trip */
+    char cb[8];
+    clip_write("stink", 5);
+    int n = clip_read(cb, 8);
+    if (n != 5 || cb[0] != 's' || cb[4] != 'k') ok = 0;
+    serial_write(ok ? "compositor: self-test ok\n"
+                    : "compositor: self-test FAIL\n");
+}
+
+/* ── Internal helpers ────────────────────────────────────────────────────── */
+
+static int slot_for_pid(int pid)
+{
+    for (int i = 0; i < WIN_MAX; i++)
+        if (slots[i].pid == pid)
+            return i;
+    return -1;
+}
+
+static int alloc_slot(void)
+{
+    for (int i = 0; i < WIN_MAX; i++)
+        if (slots[i].pid == 0)
+            return i;
+    return -1;
+}
+
+static void ev_push(struct win_slot *s, const struct win_event *ev)
+{
+    int nw = (s->ev_w + 1) % WIN_EV_CAP;
+    if (nw == s->ev_r)
+        return;  /* queue full, drop event */
+    s->evq[s->ev_w] = *ev;
+    s->ev_w = nw;
+}
+
+/* ── Public API ─────────────────────────────────────────────────────────── */
+
+int win_create(int pid, unsigned int w, unsigned int h)
+{
+    if (pid <= 0 || w == 0 || h == 0)
+        return -1;
+    if (w > 1024 || h > 768)
+        return -1;  /* cap to screen resolution; also prevents u32 overflow */
+    if (slot_for_pid(pid) >= 0)
+        return -1;  /* process already has a window */
+
+    unsigned int need = (w * h * 4 + 4095) / 4096;
+    if (need > WIN_MAX_FRAMES)
+        return -1;  /* too large */
+
+    int si = alloc_slot();
+    if (si < 0)
+        return -1;
+
+    struct win_slot *s = &slots[si];
+
+    /* Allocate physical frames. */
+    s->n_frames = 0;
+    for (unsigned int i = 0; i < need; i++) {
+        unsigned int fr = pmm_alloc();
+        if (!fr) {
+            /* OOM: release already-allocated frames */
+            for (int j = 0; j < s->n_frames; j++)
+                pmm_free(s->frames[j]);
+            s->n_frames = 0;
+            return -1;
+        }
+        /* Zero the frame so the window starts blank. */
+        unsigned int *kp = (unsigned int *)P2V(fr);
+        for (unsigned int k = 0; k < 4096 / 4; k++)
+            kp[k] = 0;
+        s->frames[s->n_frames++] = fr;
+    }
+
+    /* Map frames into user VAS at USER_WIN_BASE. */
+    paging_map_win_buf(USER_WIN_BASE, s->frames, s->n_frames);
+
+    /* Initialise slot. */
+    s->pid     = pid;
+    s->w       = w;
+    s->h       = h;
+    s->x       = 0;
+    s->y       = 0;
+    s->z       = si;    /* default z = slot index */
+    s->visible = 0;
+    s->dirty   = 0;
+    s->ev_r    = 0;
+    s->ev_w    = 0;
+    for (int i = 0; i < 64; i++) s->title[i] = 0;
+
+    return 0;
+}
+
+int win_show(int pid, int x, int y, const char *title)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return -1;
+    struct win_slot *s = &slots[si];
+    s->x = x;
+    s->y = y;
+    /* Copy title (up to 63 chars + NUL). */
+    if (title) {
+        int i;
+        for (i = 0; i < 63 && title[i]; i++)
+            s->title[i] = title[i];
+        s->title[i] = 0;
+    }
+    s->visible = 1;
+    s->dirty   = 1;
+    if (focused_slot < 0)
+        focused_slot = si;
+    return 0;
+}
+
+int win_hide(int pid)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return -1;
+    slots[si].visible = 0;
+    if (focused_slot == si) focused_slot = -1;
+    if (drag_slot == si)    drag_slot    = -1;
+    return 0;
+}
+
+void win_flush(int pid)
+{
+    int si = slot_for_pid(pid);
+    if (si >= 0)
+        slots[si].dirty = 1;
+}
+
+void win_destroy(int pid)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return;
+    struct win_slot *s = &slots[si];
+
+    if (focused_slot == si) focused_slot = -1;
+    if (drag_slot    == si) drag_slot    = -1;
+    if (resize_slot  == si) resize_slot  = -1;
+
+    /* Unmap from user VAS. */
+    paging_unmap_win_buf(USER_WIN_BASE, s->n_frames);
+
+    /* Free physical frames. */
+    for (int i = 0; i < s->n_frames; i++)
+        pmm_free(s->frames[i]);
+
+    s->pid      = 0;
+    s->visible  = 0;
+    s->dirty    = 0;
+    s->n_frames = 0;
+    s->ev_r     = 0;
+    s->ev_w     = 0;
+}
+
+int win_get_event(int pid, struct win_event *ev)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0 || !ev) return -1;
+    struct win_slot *s = &slots[si];
+    if (s->ev_r == s->ev_w) return -1;  /* empty */
+    *ev   = s->evq[s->ev_r];
+    s->ev_r = (s->ev_r + 1) % WIN_EV_CAP;
+    return 0;
+}
+
+void win_raise(int pid)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return;
+    /* Find current max z among visible windows */
+    int maxz = 0;
+    for (int i = 0; i < WIN_MAX; i++)
+        if (slots[i].pid && slots[i].visible && slots[i].z > maxz)
+            maxz = slots[i].z;
+    slots[si].z = maxz + 1;
+    focused_slot = si;
+}
+
+void win_move(int pid, int x, int y)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return;
+    slots[si].x = x;
+    slots[si].y = y;
+    slots[si].dirty = 1;
+}
+
+int win_resize(int pid, unsigned int w, unsigned int h)
+{
+    if (w == 0 || h == 0 || w > 1024 || h > 768) return -1;
+
+    int si = slot_for_pid(pid);
+    if (si < 0) return -1;
+    struct win_slot *s = &slots[si];
+
+    unsigned int need = (w * h * 4 + 4095) / 4096;
+    if (need > WIN_MAX_FRAMES) return -1;
+
+    /* Allocate new frames first; roll back on OOM so the old buffer survives. */
+    unsigned int nf[WIN_MAX_FRAMES];
+    for (unsigned int i = 0; i < need; i++) {
+        unsigned int fr = pmm_alloc();
+        if (!fr) {
+            for (unsigned int j = 0; j < i; j++) pmm_free(nf[j]);
+            return -1;
+        }
+        unsigned int *kp = (unsigned int *)P2V(fr);
+        for (unsigned int k = 0; k < 4096 / 4; k++) kp[k] = 0;
+        nf[i] = fr;
+    }
+
+    /* Unmap old buffer from process VAS, then free old frames. */
+    paging_unmap_win_buf(USER_WIN_BASE, s->n_frames);
+    for (int i = 0; i < s->n_frames; i++) pmm_free(s->frames[i]);
+
+    /* Map new frames and update slot. */
+    paging_map_win_buf(USER_WIN_BASE, nf, (int)need);
+    for (unsigned int i = 0; i < need; i++) s->frames[i] = nf[i];
+    s->n_frames = (int)need;
+    s->w = w;
+    s->h = h;
+    s->dirty = 1;
+
+    return 0;
+}
+
+/* ── Syscall routing (redirect drawing calls to window buffer) ───────────── */
+
+/* Write an ARGB pixel to the window buffer at (x, y). */
+static void win_write_px(struct win_slot *s,
+                         unsigned int x, unsigned int y, unsigned int argb)
+{
+    if (x >= s->w || y >= s->h) return;
+    unsigned int byte_off = (y * s->w + x) * 4;
+    unsigned int fi  = byte_off / 4096;
+    unsigned int off = byte_off % 4096;
+    if ((int)fi >= s->n_frames) return;
+    unsigned int *p = (unsigned int *)((char *)P2V(s->frames[fi]) + off);
+    *p = argb;
+}
+
+/* Fill n pixels with argb starting at window-buffer byte offset byte_off.
+ * Walks page boundaries without per-pixel division. */
+static void win_fill_span(struct win_slot *s,
+                          unsigned int byte_off, unsigned int n,
+                          unsigned int argb)
+{
+    unsigned int done = 0;
+    while (done < n) {
+        unsigned int fi  = byte_off / 4096;
+        unsigned int off = byte_off % 4096;
+        if ((int)fi >= s->n_frames) break;
+        unsigned int *p   = (unsigned int *)((char *)P2V(s->frames[fi]) + off);
+        unsigned int avail = (4096 - off) / 4;
+        unsigned int cnt   = n - done;
+        if (avail < cnt) cnt = avail;
+        for (unsigned int i = 0; i < cnt; i++) p[i] = argb;
+        done     += cnt;
+        byte_off += cnt * 4;
+    }
+}
+
+/* Put one pixel into the window buffer. Returns 1 if handled, 0 to fall through. */
+int win_redirect_putpixel(int pid, unsigned int x, unsigned int y, unsigned int rgb)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    win_write_px(&slots[si], x, y, 0xFF000000u | rgb);
+    return 1;
+}
+
+/* Fill a rectangle in the window buffer. Returns 1 if handled, 0 to fall through. */
+int win_redirect_fillrect(int pid,
+                          unsigned int x, unsigned int y,
+                          unsigned int w, unsigned int h,
+                          unsigned int rgb)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    struct win_slot *s = &slots[si];
+    if (x >= s->w || y >= s->h || w == 0 || h == 0) return 1;
+    if (x + w > s->w) w = s->w - x;
+    if (y + h > s->h) h = s->h - y;
+    unsigned int argb     = 0xFF000000u | rgb;
+    unsigned int row_stride = s->w * 4;
+    for (unsigned int row = 0; row < h; row++) {
+        win_fill_span(s, (y + row) * row_stride + x * 4, w, argb);
+    }
+    return 1;
+}
+
+/* Blit a user-supplied ARGB buffer into the window buffer. Returns 1/0. */
+int win_redirect_blit(int pid,
+                      unsigned int x, unsigned int y,
+                      unsigned int w, unsigned int h,
+                      const unsigned int *src)
+{
+    int si = slot_for_pid(pid);
+    if (si < 0) return 0;
+    struct win_slot *s = &slots[si];
+    for (unsigned int row = 0; row < h; row++) {
+        for (unsigned int col = 0; col < w; col++) {
+            unsigned int px = src[row * w + col];
+            if (px >> 24)   /* skip transparent pixels */
+                win_write_px(s, x + col, y + row, px);
+        }
+    }
+    return 1;
+}
+
+/* ── Compositor ──────────────────────────────────────────────────────────── */
+
+/* Blit one window to the framebuffer. Handles page boundaries. */
+static void blit_window(struct win_slot *s)
+{
+    unsigned int row_bytes = s->w * 4;
+    for (unsigned int row = 0; row < s->h; row++) {
+        unsigned int byte_off = row * row_bytes;
+        unsigned int col = 0;
+        while (col < s->w) {
+            unsigned int fi  = byte_off / 4096;
+            unsigned int off = byte_off % 4096;
+            if ((int)fi >= s->n_frames) break;
+            const unsigned int *src =
+                (const unsigned int *)((const char *)P2V(s->frames[fi]) + off);
+            unsigned int avail_px = (4096 - off) / 4;
+            unsigned int need_px  = s->w - col;
+            unsigned int n = (avail_px < need_px) ? avail_px : need_px;
+            fb_blit_row((unsigned int)(s->x + (int)col),
+                        (unsigned int)(s->y + (int)row), n, src);
+            col      += n;
+            byte_off += n * 4;
+        }
+    }
+}
+
+/* Simple insertion sort on a local index array by z-order (ascending). */
+static void sort_by_z(int *order, int n)
+{
+    for (int i = 1; i < n; i++) {
+        int key = order[i];
+        int j = i - 1;
+        while (j >= 0 && slots[order[j]].z > slots[key].z) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+}
+
+/* ── Taskbar ─────────────────────────────────────────────────────────────── */
+
+#define SCREEN_W      1024
+#define SCREEN_H       768
+#define TASKBAR_BTN_W  120
+#define TASKBAR_BTN_PAD  4
+
+/* Map button index (left-to-right) → slot index; returns -1 when out of range. */
+static int taskbar_btn_to_slot(int bx_hit)
+{
+    int btn = 0;
+    for (int i = 0; i < WIN_MAX; i++) {
+        if (!slots[i].pid || !slots[i].visible) continue;
+        int bx = btn * (TASKBAR_BTN_W + TASKBAR_BTN_PAD) + TASKBAR_BTN_PAD;
+        if (bx + TASKBAR_BTN_W > SCREEN_W) break; /* same guard as draw_taskbar */
+        if (bx_hit >= bx && bx_hit < bx + TASKBAR_BTN_W)
+            return i;
+        btn++;
+    }
+    return -1;
+}
+
+/* Format unsigned int into exactly 2 ASCII digits at buf[0..1]. No NUL. */
+static void fmt2d(char *buf, unsigned int v)
+{
+    buf[0] = '0' + (char)((v / 10) % 10);
+    buf[1] = '0' + (char)(v % 10);
+}
+
+static void draw_taskbar(void)
+{
+    int ty = SCREEN_H - TASKBAR_H;
+
+    /* Background + separator */
+    fb_rect(0, (unsigned int)ty, SCREEN_W, TASKBAR_H, 0x0d1117);
+    fb_rect(0, (unsigned int)ty, SCREEN_W, 1,         0x30363d);
+
+    /* One button per visible window */
+    int btn = 0;
+    for (int i = 0; i < WIN_MAX; i++) {
+        struct win_slot *s = &slots[i];
+        if (!s->pid || !s->visible) continue;
+
+        int bx = btn * (TASKBAR_BTN_W + TASKBAR_BTN_PAD) + TASKBAR_BTN_PAD;
+        if (bx + TASKBAR_BTN_W > SCREEN_W) break;
+
+        unsigned int bg = (i == focused_slot) ? 0x2d3748u : 0x1a202cu;
+        unsigned int fg = (i == focused_slot) ? 0xe6edf3u : 0x8b949eu;
+
+        fb_rect((unsigned int)bx,
+                (unsigned int)(ty + 4),
+                TASKBAR_BTN_W,
+                (unsigned int)(TASKBAR_H - 8),
+                bg);
+        fb_text((unsigned int)(bx + 6),
+                (unsigned int)(ty + 8),
+                s->title[0] ? s->title : "App",
+                fg);
+        btn++;
+    }
+
+    /* Clock: "HH:MM" at right edge of taskbar.
+     * RTC I/O only runs once per second (100 PIT ticks). */
+    static char clk[6] = "00:00";
+    static unsigned int last_rtc_tick = 0;
+    unsigned int now = pit_ticks();
+    if (now - last_rtc_tick >= 100) {
+        struct rtc_time t;
+        rtc_read(&t);
+        fmt2d(clk + 0, t.hour);
+        clk[2] = ':';
+        fmt2d(clk + 3, t.minute);
+        clk[5] = '\0';
+        last_rtc_tick = now;
+    }
+    fb_text((unsigned int)(SCREEN_W - 48), (unsigned int)(ty + 8), clk, 0x8b949e);
+}
+
+/* Route accumulated mouse delta to the focused window's event queue. */
+static void route_mouse_events(void)
+{
+    int mx, my;
+    unsigned char mb;
+    mouse_get_state(&mx, &my, &mb);
+    int btn1      = mb & 1;
+    int btn1_down = btn1 && !(prev_btn & 1);   /* leading edge */
+    int btn1_up   = !btn1 && (prev_btn & 1);   /* trailing edge */
+
+    /* ── Drag in progress ───────────────────────────────────────────────── */
+    if (drag_slot >= 0) {
+        if (btn1) {
+            /* Move window: clamp so at least DRAG_TITLEBAR_H px stay on screen */
+            struct win_slot *ds = &slots[drag_slot];
+            int nx = mx - drag_off_x;
+            int ny = my - drag_off_y;
+            int max_y = SCREEN_H - TASKBAR_H - DRAG_TITLEBAR_H;
+            if (nx < -(int)ds->w + 32)     nx = -(int)ds->w + 32;
+            if (nx > SCREEN_W - 32)         nx = SCREEN_W - 32;
+            if (ny < 0)                     ny = 0;
+            if (ny > max_y)                 ny = max_y;
+            if (nx != ds->x || ny != ds->y) {
+                ds->x = nx;
+                ds->y = ny;
+                /* Force full re-composite to paint the moved window. */
+                for (int i = 0; i < WIN_MAX; i++)
+                    if (slots[i].pid && slots[i].visible)
+                        slots[i].dirty = 1;
+            }
+        }
+        if (btn1_up)
+            drag_slot = -1;
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Border resize in progress ───────────────────────────────────── */
+    if (resize_slot >= 0) {
+        if (btn1) {
+            int new_w = resize_base_w;
+            int new_h = resize_base_h;
+            if (resize_edge & 1) {
+                new_w = resize_base_w + (mx - resize_start_x);
+                if (new_w < 80)        new_w = 80;
+                if (new_w > SCREEN_W)  new_w = SCREEN_W;
+            }
+            if (resize_edge & 2) {
+                new_h = resize_base_h + (my - resize_start_y);
+                if (new_h < 60)                   new_h = 60;
+                if (new_h > SCREEN_H - TASKBAR_H) new_h = SCREEN_H - TASKBAR_H;
+            }
+            if (new_w != resize_cur_w || new_h != resize_cur_h) {
+                resize_cur_w = new_w;
+                resize_cur_h = new_h;
+                for (int i = 0; i < WIN_MAX; i++)
+                    if (slots[i].pid && slots[i].visible) slots[i].dirty = 1;
+            }
+        }
+        if (btn1_up) {
+            struct win_event ev = { WIN_EV_RESIZE, resize_cur_w, resize_cur_h, 0, 0 };
+            ev_push(&slots[resize_slot], &ev);
+            resize_slot = -1;
+            for (int i = 0; i < WIN_MAX; i++)
+                if (slots[i].pid && slots[i].visible) slots[i].dirty = 1;
+        }
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Taskbar area ────────────────────────────────────────────────────── */
+    if (my >= SCREEN_H - TASKBAR_H) {
+        if (btn1_down) {
+            int si = taskbar_btn_to_slot(mx);
+            if (si >= 0)
+                win_raise(slots[si].pid);
+        }
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Find topmost visible window under cursor ────────────────────────── */
+    int top_si = -1;
+    int top_z  = -1;
+    for (int i = 0; i < WIN_MAX; i++) {
+        struct win_slot *s = &slots[i];
+        if (!s->pid || !s->visible) continue;
+        if (mx < s->x || mx >= s->x + (int)s->w) continue;
+        if (my < s->y || my >= s->y + (int)s->h) continue;
+        if (s->z > top_z) { top_z = s->z; top_si = i; }
+    }
+
+    if (top_si < 0) { prev_btn = (int)mb; return; }
+
+    struct win_slot *s = &slots[top_si];
+
+    /* ── Titlebar drag: intercept button-1 down in top DRAG_TITLEBAR_H px ── */
+    if (btn1_down && (my - s->y) < DRAG_TITLEBAR_H) {
+        drag_slot  = top_si;
+        drag_off_x = mx - s->x;
+        drag_off_y = my - s->y;
+        if (focused_slot != top_si)
+            focused_slot = top_si;
+        prev_btn = (int)mb;
+        return;
+    }
+
+    /* ── Border resize: right / bottom edge ──────────────────────────────── */
+    if (btn1_down) {
+        int rel_x = mx - s->x;
+        int rel_y = my - s->y;
+        int on_right  = (rel_x >= (int)s->w - RESIZE_BORDER);
+        int on_bottom = (rel_y >= (int)s->h - RESIZE_BORDER);
+        if (on_right || on_bottom) {
+            resize_slot    = top_si;
+            resize_edge    = (on_right ? 1 : 0) | (on_bottom ? 2 : 0);
+            resize_base_w  = (int)s->w;
+            resize_base_h  = (int)s->h;
+            resize_start_x = mx;
+            resize_start_y = my;
+            resize_cur_w   = (int)s->w;
+            resize_cur_h   = (int)s->h;
+            if (focused_slot != top_si) focused_slot = top_si;
+            prev_btn = (int)mb;
+            return;
+        }
+    }
+
+    /* ── Normal event routing ────────────────────────────────────────────── */
+    struct win_event ev;
+    ev.type    = WIN_EV_MOUSE;
+    ev.x       = mx - s->x;
+    ev.y       = my - s->y;
+    ev.buttons = (int)mb;
+    ev.key     = 0;
+    ev_push(s, &ev);
+
+    if (btn1 && focused_slot != top_si)
+        focused_slot = top_si;
+
+    prev_btn = (int)mb;
+}
+
+void win_composite(void)
+{
+    /* Collect visible window indices. */
+    int order[WIN_MAX];
+    int n = 0;
+    for (int i = 0; i < WIN_MAX; i++)
+        if (slots[i].pid && slots[i].visible)
+            order[n++] = i;
+    if (n == 0) return;
+
+    /* Check if any window needs a repaint. */
+    int any_dirty = 0;
+    for (int i = 0; i < n; i++)
+        if (slots[order[i]].dirty) { any_dirty = 1; break; }
+
+    /* Erase cursor before (possibly) redrawing windows. */
+    mouse_undraw_cursor();
+
+    /* Any dirty window requires a full back-to-front blit of all windows.
+     * Partial blitting corrupts the framebuffer when a dirty low-z window
+     * overwrites pixels that a clean high-z window is supposed to cover. */
+    if (any_dirty) {
+        sort_by_z(order, n);
+        for (int i = 0; i < n; i++) {
+            struct win_slot *s = &slots[order[i]];
+            blit_window(s);
+            s->dirty = 0;
+        }
+    }
+
+    /* Resize preview: draw 2px outline at target size while border-dragging. */
+    if (resize_slot >= 0 && resize_slot < WIN_MAX && slots[resize_slot].pid) {
+        struct win_slot *rs = &slots[resize_slot];
+        unsigned int px = (rs->x < 0) ? 0u : (unsigned int)rs->x;
+        unsigned int py = (rs->y < 0) ? 0u : (unsigned int)rs->y;
+        unsigned int pw = (unsigned int)resize_cur_w;
+        unsigned int ph = (unsigned int)resize_cur_h;
+        unsigned int ac = 0x57f287u;
+        fb_rect(px,          py,          pw, 2,  ac);  /* top    */
+        fb_rect(px,          py + ph - 2, pw, 2,  ac);  /* bottom */
+        fb_rect(px,          py,          2,  ph, ac);  /* left   */
+        fb_rect(px + pw - 2, py,          2,  ph, ac);  /* right  */
+    }
+
+    /* Taskbar always redraws on top of windows. */
+    draw_taskbar();
+
+    /* Route mouse events to the window under the cursor. */
+    route_mouse_events();
+
+    /* Redraw cursor on top. */
+    mouse_draw_cursor(0xFFFFFFFF);
+}
+
+/* ── Timer tick ─────────────────────────────────────────────────────────── */
+
+void win_tick(void)
+{
+    static int cnt = 0;
+    /* Fire compositor every 3 ticks: PIT=100Hz → 33ms ≈ 30fps. */
+    if (++cnt < 3)
+        return;
+    cnt = 0;
+
+    /* Only composite if at least one window is visible. */
+    for (int i = 0; i < WIN_MAX; i++) {
+        if (slots[i].pid && slots[i].visible) {
+            win_composite();
+            return;
+        }
+    }
+}

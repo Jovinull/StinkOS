@@ -3,9 +3,15 @@
  * the kernel exposes time to userland. Press any key to return to the menu. */
 #include "libstink.h"
 
+#define OY WIN_TITLEBAR_H
+
 void main(void)
 {
 	sys_log("anim app running");
+
+	draw_window_frame(0, 0, 1024, 768,
+	    "Tick Animation  --  press any key to exit");
+	sys_fillrect(0, OY, 1024, 768 - OY, 0x000000);
 
 	unsigned int t0 = sys_ticks();
 	while (sys_ticks() == t0)
@@ -19,7 +25,7 @@ void main(void)
 		int x = 100 + frame * 8;
 		for (int dy = 0; dy < 6; dy++)
 			for (int dx = 0; dx < 6; dx++)
-				sys_draw(x + dx, 200 + dy, 0xFF00FF);
+				sys_draw(x + dx, OY + 200 + dy, 0xFF00FF);
 		if (sys_getkey() != 0)
 			return;
 	}
