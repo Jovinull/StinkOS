@@ -141,8 +141,16 @@ pub const WIN_BASE: u32  = 0x12000000;
 pub const SCREEN_W: i32  = 1024;
 pub const SCREEN_H: i32  = 768;
 
+static mut CUR_W: i32 = SCREEN_W;
+static mut CUR_H: i32 = SCREEN_H;
+
+#[inline(always)] fn cur_w() -> i32 { unsafe { CUR_W } }
+#[inline(always)] fn cur_h() -> i32 { unsafe { CUR_H } }
+
 pub fn win_init(title: &[u8]) {
     unsafe {
+        CUR_W = SCREEN_W;
+        CUR_H = SCREEN_H;
         sys_win_create(SCREEN_W as u32, SCREEN_H as u32);
         sys_win_show(0, 0, title.as_ptr());
     }
@@ -150,15 +158,19 @@ pub fn win_init(title: &[u8]) {
 
 pub fn win_init_at(title: &[u8], w: i32, h: i32, x: i32, y: i32) {
     unsafe {
+        CUR_W = w;
+        CUR_H = h;
         sys_win_create(w as u32, h as u32);
         sys_win_show(x, y, title.as_ptr());
     }
 }
 
-/// Resize the window buffer to w×h. Reallocates PMM frames and pushes
-/// WIN_EV_RESIZE to the event queue. Returns true on success.
+/// Resize the window buffer to w×h. Returns true on success.
+/// Updates CUR_W/CUR_H so wfill/wline/wpixel/wtext use the correct stride.
 pub fn win_resize(w: i32, h: i32) -> bool {
-    unsafe { sys_win_resize(w as u32, h as u32) == 0 }
+    let ok = unsafe { sys_win_resize(w as u32, h as u32) == 0 };
+    if ok { unsafe { CUR_W = w; CUR_H = h; } }
+    ok
 }
 
 pub fn win_done() {
@@ -167,6 +179,10 @@ pub fn win_done() {
 
 pub fn win_flush() {
     unsafe { sys_win_flush(); }
+}
+
+pub fn win_move(x: i32, y: i32) {
+    unsafe { sys_win_move(x, y); }
 }
 
 pub fn win_poll_event() -> Option<WinEvent> {
@@ -187,27 +203,29 @@ pub fn win_buf() -> *mut u32 {
 
 /// Fill a rectangle in the window buffer.
 pub fn wfill(x: i32, y: i32, w: i32, h: i32, rgb: u32) {
-    unsafe { win_fillrect_buf(win_buf(), SCREEN_W as u32, x, y, w, h, rgb); }
+    unsafe { win_fillrect_buf(win_buf(), cur_w() as u32, x, y, w, h, rgb); }
 }
 
 /// Draw a line in the window buffer.
 pub fn wline(x0: i32, y0: i32, x1: i32, y1: i32, rgb: u32) {
-    unsafe { win_drawline_buf(win_buf(), SCREEN_W as u32,
-                              SCREEN_W as u32, SCREEN_H as u32,
+    unsafe { win_drawline_buf(win_buf(), cur_w() as u32,
+                              cur_w() as u32, cur_h() as u32,
                               x0, y0, x1, y1, rgb); }
 }
 
 /// Set a single pixel in the window buffer.
 pub fn wpixel(x: i32, y: i32, rgb: u32) {
-    if x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H { return; }
+    let cw = cur_w();
+    let ch = cur_h();
+    if x < 0 || y < 0 || x >= cw || y >= ch { return; }
     unsafe {
-        *win_buf().add((y * SCREEN_W + x) as usize) = 0xFF000000 | rgb;
+        *win_buf().add((y * cw + x) as usize) = 0xFF000000 | rgb;
     }
 }
 
 /// Render NUL-terminated text into window buffer using 8×16 font.
 pub fn wtext(x: i32, y: i32, s: &[u8], rgb: u32) -> i32 {
-    unsafe { win_font_str_buf(win_buf(), SCREEN_W as u32, x, y, s.as_ptr(), rgb) }
+    unsafe { win_font_str_buf(win_buf(), cur_w() as u32, x, y, s.as_ptr(), rgb) }
 }
 
 /// Draw a 1px border rectangle in the window buffer.

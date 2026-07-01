@@ -74,7 +74,7 @@ fn render(mx: i32, my: i32, hov: u8, layout: i32, muted: bool, cw: i32, ch: i32)
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-settings: start");
-    win_init_at(b"Settings ", WIN_W, WIN_H, WIN_X, WIN_Y);
+    win_init_at(b"Settings\0", WIN_W, WIN_H, WIN_X, WIN_Y);
 
     let mut cw = WIN_W;
     let mut ch = WIN_H;
