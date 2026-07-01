@@ -144,8 +144,6 @@ fn redraw(mx: i32, my: i32, frame: u32) {
         tile_at(i).draw(hov == Some(i));
     }
 
-    /* Cursor on top */
-    draw_cursor(mx, my);
 }
 
 // ── App launch ────────────────────────────────────────────────────────────────
@@ -168,6 +166,7 @@ fn launch(exec_name: &'static [u8]) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-desktop: start");
+    win_init(b"Desktop\0");
 
     let mut mx: i32 = SCREEN_W / 2;
     let mut my: i32 = SCREEN_H / 2;
@@ -212,8 +211,10 @@ pub extern "C" fn main() {
             prev_frame = frame;
         }
 
+        win_flush();
         sleep_ms(16); /* cap at ~60 fps */
     }
 
+    win_done();
     println!("rs-desktop: exit");
 }
