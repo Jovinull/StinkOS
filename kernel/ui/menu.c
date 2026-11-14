@@ -400,6 +400,7 @@ static void launch_elf(const char *elf_name)
 	if (cur) {
 		cur->cr3 = (unsigned int)new_pgdir;
 		proc_reset_image_state(cur);        /* no stale handlers, keys or mouse travel */
+		proc_set_name(cur, elf_name);
 	}
 
 	serial_write("loader: app loaded from fs\n");

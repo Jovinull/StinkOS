@@ -71,11 +71,11 @@ void paging_user_set_segment_perms(unsigned int va, unsigned int len,
  * violation, stack-overflow into unmapped, etc). */
 int paging_handle_cow_fault(unsigned int va);
 
-/* Map/unmap caller-owned physical frames in the user VAS window buffer region.
- * paging_map_win_buf maps `n` frames starting at base_va (USER_WIN_BASE).
- * paging_unmap_win_buf clears the PTEs without freeing frames (caller frees). */
-void paging_map_win_buf(unsigned int base_va, unsigned int *frames, int n);
-void paging_unmap_win_buf(unsigned int base_va, int n);
+/* Map / unmap frames that something other than the address space owns
+ * (window pixel buffers). See paging.c. paging_map_shared is all or
+ * nothing and returns 0 or -1. */
+int  paging_map_shared(unsigned int base_va, const unsigned int *frames, int n);
+void paging_unmap_shared(unsigned int base_va, int n);
 
 /* Map the physical LFB at the fixed user virtual address USER_FB_BASE using a
  * 4 MiB PSE PDE with PG_USER. Returns the virtual address the app should use.

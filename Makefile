@@ -79,7 +79,7 @@ LIBSTINK_OBJS = $(BUILD)/libstink_alloc.o $(BUILD)/libstink_printf.o \
                 $(BUILD)/libstink_sha256.o $(BUILD)/libstink_socket.o \
                 $(BUILD)/libstink_math.o $(BUILD)/libstink_gfx.o \
                 $(BUILD)/libstink_font.o $(BUILD)/libstink_syms.o \
-                $(BUILD)/libstink_winbuf.o
+                $(BUILD)/libstink_surface.o
 
 # Doom port build configuration. The doomgeneric core wants the POSIX-ish
 # headers our doom-shims provide; -DNORMALUNIX / -DLINUX picks the Chocolate
@@ -221,8 +221,8 @@ $(BUILD)/libstink_gfx.o: lib/libstink_gfx.c lib/libstink.h | $(BUILD)
 $(BUILD)/libstink_font.o: lib/libstink_font.c lib/libstink_font.h lib/libstink.h | $(BUILD)
 	$(CC) $(CFLAGS) -c lib/libstink_font.c -o $(BUILD)/libstink_font.o
 
-$(BUILD)/libstink_winbuf.o: lib/libstink_winbuf.c lib/libstink_winbuf.h lib/libstink_font.h | $(BUILD)
-	$(CC) $(CFLAGS) -c lib/libstink_winbuf.c -o $(BUILD)/libstink_winbuf.o
+$(BUILD)/libstink_surface.o: lib/libstink_surface.c lib/libstink_surface.h lib/libstink_font.h | $(BUILD)
+	$(CC) $(CFLAGS) -c lib/libstink_surface.c -o $(BUILD)/libstink_surface.o
 
 # Userland apps: ELF executables linked at the user code address (0x400000),
 # loaded and relocated into the user region at runtime by the kernel ELF loader.
@@ -1206,10 +1206,14 @@ $(TEST_BIN)/test_arp_ttl: $(TEST_DIR)/test_arp_ttl.c | $(TEST_BIN)
 $(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c kernel/arch/pmm.h kernel/arch/memlayout.h | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -Ikernel/arch -Ikernel/drivers/misc -o $@ $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c
 
+# Real sources again: the clipped drawing primitives every windowed app uses.
+$(TEST_BIN)/test_surface: $(TEST_DIR)/test_surface.c lib/libstink_surface.c lib/libstink_surface.h lib/libstink_font.c | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -I lib -o $@ $(TEST_DIR)/test_surface.c lib/libstink_surface.c lib/libstink_font.c
+
 $(TEST_BIN)/test_bootmain_walk: $(TEST_DIR)/test_bootmain_walk.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_bootmain_walk.c
 
-unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim $(TEST_BIN)/test_audio_mode $(TEST_BIN)/test_mbr_write $(TEST_BIN)/test_tcp_close_pid $(TEST_BIN)/test_icmp_echo $(TEST_BIN)/test_arp_ratelimit $(TEST_BIN)/test_utf8_collapse $(TEST_BIN)/test_dhcp_dns2 $(TEST_BIN)/test_arp_ttl $(TEST_BIN)/test_pmm $(TEST_BIN)/test_ipv4_martian $(TEST_BIN)/test_ipv4_teardrop $(TEST_BIN)/test_fb_rect_clip $(TEST_BIN)/test_mmap_overflow $(TEST_BIN)/test_blit_scale $(TEST_BIN)/test_tcp_keepalive $(TEST_BIN)/test_dns_cache $(TEST_BIN)/test_tcp_cwnd $(TEST_BIN)/test_tcp_wscale $(TEST_BIN)/test_tcp_ooo $(TEST_BIN)/test_ipv4_reasm_alloc $(TEST_BIN)/test_pipe $(TEST_BIN)/test_klog $(TEST_BIN)/test_timer $(TEST_BIN)/test_tcp_rto $(TEST_BIN)/test_fs_grow $(TEST_BIN)/test_fs_delete $(TEST_BIN)/test_elf_loader $(TEST_BIN)/test_keymap_br $(TEST_BIN)/test_vfs_fd $(TEST_BIN)/test_paging_brk $(TEST_BIN)/test_proc_reap $(TEST_BIN)/test_mouse_packet $(TEST_BIN)/test_bootmain_walk
+unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mixer $(TEST_BIN)/test_ipv4_checksum $(TEST_BIN)/test_tcp_options $(TEST_BIN)/test_sched $(TEST_BIN)/test_tcp_state $(TEST_BIN)/test_ipv4_parse $(TEST_BIN)/test_arp_cache $(TEST_BIN)/test_mbr_parse $(TEST_BIN)/test_dhcp_options $(TEST_BIN)/test_eth_frame $(TEST_BIN)/test_arp_storm $(TEST_BIN)/test_stinkfs_dir $(TEST_BIN)/test_tcp_dupack $(TEST_BIN)/test_tcp_sack_use $(TEST_BIN)/test_icmp_ratelimit $(TEST_BIN)/test_tcp_persist $(TEST_BIN)/test_tcp_timewait $(TEST_BIN)/test_dns_retry $(TEST_BIN)/test_dhcp_retry $(TEST_BIN)/test_blit_overflow $(TEST_BIN)/test_udp_checksum $(TEST_BIN)/test_tcp_checksum $(TEST_BIN)/test_tcp_rst_gate $(TEST_BIN)/test_tcp_rxwnd $(TEST_BIN)/test_tcp_syn_gate $(TEST_BIN)/test_ipv4_unicast $(TEST_BIN)/test_ipv4_srcroute $(TEST_BIN)/test_rtc_alarm $(TEST_BIN)/test_tcp_tcb_sim $(TEST_BIN)/test_audio_mode $(TEST_BIN)/test_mbr_write $(TEST_BIN)/test_tcp_close_pid $(TEST_BIN)/test_icmp_echo $(TEST_BIN)/test_arp_ratelimit $(TEST_BIN)/test_utf8_collapse $(TEST_BIN)/test_dhcp_dns2 $(TEST_BIN)/test_arp_ttl $(TEST_BIN)/test_pmm $(TEST_BIN)/test_ipv4_martian $(TEST_BIN)/test_ipv4_teardrop $(TEST_BIN)/test_fb_rect_clip $(TEST_BIN)/test_mmap_overflow $(TEST_BIN)/test_blit_scale $(TEST_BIN)/test_tcp_keepalive $(TEST_BIN)/test_dns_cache $(TEST_BIN)/test_tcp_cwnd $(TEST_BIN)/test_tcp_wscale $(TEST_BIN)/test_tcp_ooo $(TEST_BIN)/test_ipv4_reasm_alloc $(TEST_BIN)/test_pipe $(TEST_BIN)/test_klog $(TEST_BIN)/test_timer $(TEST_BIN)/test_tcp_rto $(TEST_BIN)/test_fs_grow $(TEST_BIN)/test_fs_delete $(TEST_BIN)/test_elf_loader $(TEST_BIN)/test_keymap_br $(TEST_BIN)/test_vfs_fd $(TEST_BIN)/test_paging_brk $(TEST_BIN)/test_proc_reap $(TEST_BIN)/test_mouse_packet $(TEST_BIN)/test_bootmain_walk $(TEST_BIN)/test_surface
 	@echo "=== unit tests ==="
 	$(TEST_BIN)/test_sha256
 	$(TEST_BIN)/test_inet_addr
@@ -1275,6 +1279,7 @@ unittest: $(TEST_BIN)/test_sha256 $(TEST_BIN)/test_inet_addr $(TEST_BIN)/test_mi
 	$(TEST_BIN)/test_proc_reap
 	$(TEST_BIN)/test_mouse_packet
 	$(TEST_BIN)/test_bootmain_walk
+	$(TEST_BIN)/test_surface
 
 clean:
 	rm -rf $(BUILD) os.bin stinkos-install.iso

@@ -427,6 +427,17 @@ void proc_idle(void)
 
 /* ---- lifetime ------------------------------------------------------------ */
 
+void proc_set_name(struct proc *p, const char *elf_name)
+{
+	if (!p || !elf_name)
+		return;
+	int i = 0;
+	for (; i < PROC_NAME_LEN - 1 && elf_name[i] && elf_name[i] != '.'; i++)
+		p->name[i] = elf_name[i];
+	for (; i < PROC_NAME_LEN; i++)
+		p->name[i] = 0;
+}
+
 void proc_reset_image_state(struct proc *p)
 {
 	if (!p)
