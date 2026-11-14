@@ -79,6 +79,22 @@ static int raw_equal(const struct raw_time *a, const struct raw_time *b)
 	       a->month == b->month && a->year == b->year;
 }
 
+/* Top of installed RAM as the firmware recorded it in CMOS, in bytes, or
+ * 0 when the registers are empty. 0x34/0x35 count 64 KiB blocks above
+ * 16 MiB; 0x30/0x31 count KiB above 1 MiB (and saturate at 64 MiB, which
+ * is why they are only the fallback). Good enough to keep the frame
+ * allocator inside real memory; it is not a memory map. */
+unsigned int rtc_cmos_ram_top(void)
+{
+	unsigned int blocks = cmos_read(0x34) | ((unsigned int)cmos_read(0x35) << 8);
+	if (blocks)
+		return 0x01000000u + blocks * 0x10000u;
+	unsigned int kib = cmos_read(0x30) | ((unsigned int)cmos_read(0x31) << 8);
+	if (kib)
+		return 0x00100000u + kib * 1024u;
+	return 0;
+}
+
 void rtc_read(struct rtc_time *out)
 {
 	struct raw_time prev, cur;

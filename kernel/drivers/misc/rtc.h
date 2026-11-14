@@ -40,4 +40,7 @@ int  rtc_alarm_fired(void);
  * and bumps the pending flag. */
 void rtc_handle_irq(void);
 
+/* Top of installed RAM in bytes per the CMOS size registers, 0 if unknown. */
+unsigned int rtc_cmos_ram_top(void);
+
 #endif

@@ -193,10 +193,10 @@ move into the sections above.
 | A9 | P0 | acpi | firmware table pointers above the 256 MiB direct map fault before the IDT exists (`-m 512`) | **fixed + retested** (`ktest --mem 512`: boot hung at the RSDP line before) |
 | A10 | P1 | video | kernel uses the LFB physical address as a virtual one; only valid at or above 0xFD000000 | **fixed + retested**: LFB and NIC registers mapped through `paging_map_mmio` (`-vga cirrus` halted at the first pixel before) |
 | A11 | P1 | boot | stage 2 reads the kernel from the primary ATA master whatever the BIOS boot drive was | open |
-| A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
+| A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | **fixed + retested** (`ktest --mem 24 oom`: a second process was given memory that did not hold data): the PMM range is clamped to the RAM size in CMOS. Not a memory map: reserved holes below the top are still assumed absent |
 | A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | **fixed + retested**: the bootloader scans the VBE mode list for 1024x768 (32 bpp, then 24), checks the set-mode result and falls back; verified on QEMU std, cirrus and vmware |
 | A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
-| A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
+| A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | **fixed + retested** for the two-Shift case (`tools/qa/kbd_test.py`: typed `Xxx`, want `XXx`); Caps Lock repeat and 0xE1 are fixed but QEMU key injection does not reproduce them |
 | A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | fixed (handlers and pending signals cleared on exec / app launch, signal 0 refused); not covered by a test |
 | A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | fixed (linker ASSERT) |
 | A18 | P1 | audio | Q16.16 cursor wraps at 65536 samples: longer sounds loop forever and never free the channel | **fixed + retested** (`ktest audio-modes`, 70000-sample sound) |
@@ -219,3 +219,6 @@ move into the sections above.
 | N9 | P1 | tcp | FIN handling: jumps holes, close drops unsent data, FIN retransmitted at the wrong sequence | open |
 | N10 | P1 | dhcp | options applied in any state, constant xid, no chaddr check | open |
 | N11 | P2 | net | ARP entry not refreshed by use; DNS/ping state global; UDP/TCP checksum pseudo-header uses the local IP instead of the packet's destination; timers only run when userland polls | open |
+| K15 | P1 | sched | x87 registers were not saved across context switches: two processes using floating point corrupted each other's values; the FPU was never initialised | **fixed + retested** (`ktest fpu`: "parent's x87 registers changed under it") |
+| K16 | P1 | proc | `SYS_PROC_INFO` returned only its header line (padding loop never advanced): `ps` showed no processes | **fixed + retested** (`ktest procinfo`) |
+| K17 | P1 | sched | round-robin restarted from the slot of whichever high-priority thread ran last, starving all but one lower-priority process | **fixed + retested** (`ktest fair3`, `win-exec-kill` on the userland branch hung) |

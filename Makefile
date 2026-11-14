@@ -13,7 +13,7 @@ help:
 	@echo "  make test-headless -- boot, run, capture serial, diff a baseline"
 	@echo "  make unittest      -- run every host-side regression test"
 	@echo "  make ktest         -- kernel regression cases in QEMU (one VM per case)"
-	@echo "  make qa-net qa-input -- host-driven network / input scenarios"
+	@echo "  make qa-net qa-input qa-kbd -- host-driven network / input scenarios"
 	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
 	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
 	@echo "  make clean         -- delete build/ os.bin stinkos-install.iso"
@@ -279,6 +279,11 @@ $(BUILD)/ktchild.elf: apps/crt0.s apps/ktchild.c lib/libstink.h apps/app.ld $(LI
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/ktchild.c -o $(BUILD)/ktchild_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktchild.elf $(BUILD)/crt0.o $(BUILD)/ktchild_app.o $(LIBSTINK_OBJS)
+
+$(BUILD)/ktmem.elf: apps/crt0.s apps/ktmem.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/ktmem.c -o $(BUILD)/ktmem_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktmem.elf $(BUILD)/crt0.o $(BUILD)/ktmem_app.o $(LIBSTINK_OBJS)
 
 # Rust userland (v0.9+). Cargo is invoked through the user's standard
 # rustup install (~/.cargo/bin); add it to PATH if your shell hasn't.
@@ -669,7 +674,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 $(BUILD)/autorun.txt: | $(BUILD)
 	printf 'RS-DESKTOP\n' > $@
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/breakout.elf $(BUILD)/exitcode.elf $(BUILD)/ktest.elf $(BUILD)/ktchild.elf $(BUILD)/autorun.txt
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/breakout.elf $(BUILD)/exitcode.elf $(BUILD)/ktest.elf $(BUILD)/ktchild.elf $(BUILD)/ktmem.elf $(BUILD)/autorun.txt
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -757,6 +762,7 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  EXITCODE.ELF=$(BUILD)/exitcode.elf \
 	  KTEST.ELF=$(BUILD)/ktest.elf \
 	  KTCHILD.ELF=$(BUILD)/ktchild.elf \
+	  KTMEM.ELF=$(BUILD)/ktmem.elf \
 	  AUTORUN=$(BUILD)/autorun.txt"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
@@ -904,6 +910,11 @@ smoke-rs-stdio: all
 ktest: all
 	@python3 tools/qa/ktest.py
 
+# The memory-pressure cases again on a machine smaller than the frame
+# allocator's compile-time limit: the kernel has to size itself to it.
+ktest-lowmem: all
+	@python3 tools/qa/ktest.py --mem 24 oom leak-exec concurrent pmm-churn
+
 # Host-driven QEMU scenarios that need input or network traffic from
 # outside the guest.
 qa-net: all
@@ -911,6 +922,9 @@ qa-net: all
 
 qa-input: all
 	@python3 tools/qa/input_flush.py
+
+qa-kbd: all
+	@python3 tools/qa/kbd_test.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so

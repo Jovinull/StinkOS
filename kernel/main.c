@@ -29,7 +29,17 @@ void kmain(void)
 	serial_write("gdt: kernel+user segments and tss loaded\n");
 	bootdiag_add("cpu: gdt+tss", BOOT_OK);
 
-	pmm_init(V2P((unsigned int)__bss_end), PMM_PHYS_LIMIT);
+	/* Manage frames up to PMM_PHYS_LIMIT, or to the top of installed RAM
+	 * when the machine has less. The watermark allocator has no way to
+	 * notice a frame that is not there: it would hand it out, zero it
+	 * "successfully" and page tables stored in it would read back as
+	 * garbage. The last 256 KiB below the top are left alone -- firmware
+	 * keeps its ACPI tables there. */
+	unsigned int ram_top = rtc_cmos_ram_top();
+	unsigned int pmm_end = PMM_PHYS_LIMIT;
+	if (ram_top && ram_top - 0x40000u < pmm_end)
+		pmm_end = ram_top - 0x40000u;
+	pmm_init(V2P((unsigned int)__bss_end), pmm_end);
 	paging_init();
 	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");

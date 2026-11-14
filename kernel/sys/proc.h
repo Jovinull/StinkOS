@@ -57,6 +57,13 @@ struct proc {
 	unsigned int      kstack_warned;     /* highest stack usage already reported on serial */
 	unsigned int      pipe_ends;         /* bit h set = this proc holds pipe handle h (pipe.c) */
 	unsigned int      last_run;          /* scheduler sequence number of its last turn on the CPU */
+
+	/* x87 state (fnsave image, 108 bytes) while the process is not on the
+	 * CPU. The kernel itself never uses floating point, so the state is
+	 * swapped only in proc_yield. fpu_valid == 0 means "never ran with an
+	 * FPU state of its own yet": it gets a freshly initialised one. */
+	unsigned char     fpu[108] __attribute__((aligned(4)));
+	int               fpu_valid;
 };
 
 /* Kernel stack size for every process but the boot one (which runs on the
@@ -164,6 +171,10 @@ int            proc_kill(struct proc *p);
  * the reaper, orphans living ones, wakes a parent blocked in wait. The
  * caller must already have released its own resources (sockets, audio). */
 void           proc_exit_current(void) __attribute__((noreturn));
+
+/* Reset the running process's FPU to the power-on state (a new program
+ * image must not inherit its predecessor's registers). */
+void           proc_fpu_reset(void);
 
 /* Name a process after the program it runs ("SNAKE.ELF" -> "SNAKE").
  * fork copies the parent's name; without this every program started from

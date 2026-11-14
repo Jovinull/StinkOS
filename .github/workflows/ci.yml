@@ -68,11 +68,17 @@ jobs:
       - name: Kernel regression suite (ktest)
         run: make ktest
 
+      - name: Kernel regression suite, 24 MiB machine
+        run: make ktest-lowmem
+
       - name: QA -- unsolicited TCP while an app runs
         run: make qa-net
 
       - name: QA -- keys typed at an app are not replayed into the menu
         run: make qa-input
+
+      - name: QA -- keyboard modifier state
+        run: make qa-kbd
 
       # Dedicated smokes split out of test-headless: each spins its
       # own QEMU instance + asserts a single feature end-to-end.

@@ -292,6 +292,53 @@ static int t_orphan(void)
 	return 0;
 }
 
+/* The process table as text: one header line, then one row per process,
+ * and our own row says who we are. */
+static int t_procinfo(void)
+{
+	static char buf[1024];
+	int n = sys_proc_info(buf, sizeof(buf));
+	if (n <= 0 || n >= (int)sizeof(buf)) FAIL("proc_info returned %d", n);
+	buf[n] = '\0';
+	if (strncmp(buf, "PID", 3) != 0) FAIL("no header line");
+	if (proc_rows() < 1) FAIL("no process rows after the header");
+
+	int me = sys_getpid(), seen_me = 0, rows = 0;
+	const char *p = strchr(buf, '\n');
+	while (p && p[1]) {
+		p++;
+		const char *digits = p;
+		while (*digits == ' ')
+			digits++;                       /* numbers are right-aligned in their column */
+		int pid = atoi(digits);
+		if (pid <= 0) FAIL("row %d does not start with a pid", rows);
+		const char *eol = strchr(p, '\n');
+		if (!eol) FAIL("row %d is not terminated", rows);
+		if (eol - p > 60) FAIL("row %d is %d characters long", rows, (int)(eol - p));
+		if (pid == me) {
+			seen_me = 1;
+			if (!strstr(p, "RUN")) FAIL("our own row is not RUN");
+			static char name[16];
+			if ((unsigned int)(eol - p) < 5) FAIL("row too short");
+			memcpy(name, eol - 5, 5);
+			name[5] = '\0';
+			if (strcmp(name, "KTEST") != 0) FAIL("our row is named '%s', want KTEST", name);
+		}
+		rows++;
+		p = eol;
+	}
+	if (!seen_me) FAIL("pid %d is missing from %d rows", me, rows);
+
+	/* A child shows up as one more row, and goes away when reaped. */
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) { sys_sleep_ms(200); child_exit(0); }
+	if (proc_rows() != rows + 1) FAIL("a new child did not add a row");
+	sys_waitpid(pid);
+	if (proc_rows() != rows) FAIL("a reaped child still has a row");
+	return 0;
+}
+
 /* ---- scheduling ---------------------------------------------------------- */
 
 static unsigned int spin_for(unsigned int nticks)
@@ -408,6 +455,46 @@ static int t_fair3(void)
 		if (share[i] * 100u / total < 15u)
 			FAIL("process %d got %u%% of the CPU (shares %u %u %u)", i,
 			     share[i] * 100u / total, share[0], share[1], share[2]);
+	return 0;
+}
+
+/* Floating-point registers are per-process state. Each worker parks two
+ * values on the x87 stack, lets the scheduler run the other one for a few
+ * ticks, and takes them back: they must be its own. */
+static int fpu_worker(double seed, int rounds)
+{
+	for (int r = 0; r < rounds; r++) {
+		double a = seed + r, b = (seed + r) * 3.0;
+		double ra = 0, rb = 0;
+		__asm__ volatile ("fldl %0\n\tfldl %1" : : "m"(a), "m"(b));
+		unsigned int t0 = sys_ticks();
+		while ((unsigned int)(sys_ticks() - t0) < 3)
+			;                               /* integer-only: nothing here touches the FPU */
+		__asm__ volatile ("fstpl %0\n\tfstpl %1" : "=m"(rb), "=m"(ra));
+		if (ra != a || rb != b)
+			return r + 1;
+	}
+	return 0;
+}
+
+static int t_fpu(void)
+{
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0)
+		child_exit(fpu_worker(1000.25, 20) == 0 ? 1 : 2);
+	int mine = fpu_worker(7.5, 20);
+	int theirs = sys_waitpid(pid);
+	if (mine) FAIL("parent's x87 registers changed under it (round %d)", mine);
+	if (theirs != 1) FAIL("child's x87 registers changed under it");
+
+	/* A fresh image starts with a clean FPU, whatever its parent left. */
+	__asm__ volatile ("fld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1");   /* fill the stack */
+	pid = sys_fork();
+	if (pid == 0) { sys_exec("ktchild"); child_exit(99); }
+	__asm__ volatile ("fninit");
+	int code = sys_waitpid(pid);
+	if (code != 42) FAIL("exec'd child failed (%d)", code);
 	return 0;
 }
 
@@ -762,6 +849,53 @@ static int t_mount_guard(void)
 	return 0;
 }
 
+/* Take memory until the kernel says no, use every byte of it, give it all
+ * back. Running out must be an orderly "no", every page handed out must be
+ * real memory that holds what was written to it, and nothing may be lost.
+ * Run with less RAM than the allocator's compile-time limit (--mem 24)
+ * this also checks that the kernel sized itself to the machine. */
+static int t_oom(void)
+{
+	enum { CHUNK = 256 * 1024, MAXC = 56 };     /* heap region is ~14.7 MiB */
+	static unsigned char *chunk[MAXC];
+	unsigned int base = free_pages();
+	int n = 0;
+	while (n < MAXC) {
+		unsigned char *p = sys_mmap(CHUNK);
+		if (!p)
+			break;
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			p[off] = (unsigned char)(n * 31 + (off >> 10));
+		chunk[n++] = p;
+	}
+	if (n == 0) FAIL("could not map even 256 KiB (free=%u pages)", base);
+	for (int i = 0; i < n; i++)
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			if (chunk[i][off] != (unsigned char)(i * 31 + (off >> 10)))
+				FAIL("chunk %d of %d lost its contents at offset %u", i, n, off);
+	/* While we hold ours, a second process does the same. Together the
+	 * two ask for more than a small machine has: the second must be told
+	 * no at some point, and until then every page it gets must be real. */
+	int pid = sys_fork();
+	if (pid == 0) { sys_exec("ktmem"); child_exit(99); }
+	if (pid > 0) {
+		int code = sys_waitpid(pid);
+		if (code == 43) FAIL("a second process was given memory that does not hold data");
+		if (code != 42 && code != 44) FAIL("second process ended with %d", code);
+	}
+	for (int i = 0; i < n; i++)
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			if (chunk[i][off] != (unsigned char)(i * 31 + (off >> 10)))
+				FAIL("our chunk %d was overwritten while another process ran", i);
+	for (int i = 0; i < n; i++)
+		if (sys_munmap(chunk[i], CHUNK) != 0) FAIL("munmap failed");
+	unsigned int after = free_pages();
+	if (after != base) FAIL("lost %d frames after mapping %d chunks", (int)(base - after), n);
+	sys_printf("ktest: oom: mapped %d KiB before the limit, %u pages free at start",
+	           n * (CHUNK / 1024), base);
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -986,12 +1120,15 @@ static const struct ktcase cases[] = {
 	{ "munmap-hole", t_munmap_hole },
 	{ "kill-reap",   t_kill_reap },
 	{ "orphan",      t_orphan },
+	{ "procinfo",    t_procinfo },
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },
 	{ "fair3",       t_fair3 },
+	{ "fpu",         t_fpu },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
+	{ "oom",         t_oom },
 	{ "eflags",      t_eflags },
 	{ "net-ping",    t_net_ping },
 	{ "audio-unmap", t_audio_unmap },

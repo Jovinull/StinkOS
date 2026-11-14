@@ -99,6 +99,7 @@ static void zero_proc(struct proc *p)
 	p->kstack_warned   = 0;
 	p->pipe_ends       = 0;
 	p->last_run        = 0;
+	p->fpu_valid       = 0;
 	p->esp             = 0;
 	p->cr3             = 0;
 	p->pending_signals = 0;
@@ -145,6 +146,17 @@ void proc_init(void)
 	 * cr3 means "kernel thread" to the scheduler, which would park it on
 	 * the kernel-only tables the first time it is switched back in. */
 	boot->cr3         = (unsigned int)paging_boot_pgdir();
+
+	/* Bring the FPU to a known state: clear CR0.EM (no emulation) and
+	 * CR0.TS (no lazy-switch traps), set CR0.MP and CR0.NE, then fninit.
+	 * Nothing set this up before; programs ran on whatever the firmware
+	 * left. */
+	unsigned int cr0;
+	__asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+	cr0 &= ~0x0000000Cu;                    /* EM, TS */
+	cr0 |=  0x00000022u;                    /* MP, NE */
+	__asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
+	__asm__ volatile ("fninit");
 	boot->kstack_base = gdt_boot_kstack_base();
 	/* Nothing runs on this stack yet (boot is still on the early stack
 	 * from kentry), so it can take the same fill pattern as the pool. */
@@ -330,6 +342,14 @@ int proc_yield(void)
 	next->last_run = ++sched_seq;
 	running        = next;
 
+	/* Floating-point registers belong to the process. fnsave stores the
+	 * outgoing state and leaves the FPU initialised, which is exactly
+	 * what a process without a saved state should start from. */
+	__asm__ volatile ("fnsave %0" : "=m"(prev->fpu));
+	prev->fpu_valid = 1;
+	if (next->fpu_valid)
+		__asm__ volatile ("frstor %0" : : "m"(next->fpu));
+
 	paging_vm_save(&prev->vm_heap_next, &prev->vm_fb_mapped);
 	paging_switch((unsigned int *)next->cr3);
 	paging_vm_load(next->vm_heap_next, next->vm_fb_mapped);
@@ -427,6 +447,13 @@ void proc_idle(void)
 
 /* ---- lifetime ------------------------------------------------------------ */
 
+void proc_fpu_reset(void)
+{
+	__asm__ volatile ("fninit");
+	if (running)
+		running->fpu_valid = 0;
+}
+
 void proc_set_name(struct proc *p, const char *elf_name)
 {
 	if (!p || !elf_name)
@@ -445,6 +472,8 @@ void proc_reset_image_state(struct proc *p)
 	p->pending_signals = 0;
 	for (int i = 0; i < PROC_NSIG; i++)
 		p->sig_handlers[i] = 0;
+	if (p == running)
+		proc_fpu_reset();                  /* the new program starts with a clean FPU */
 	if (p->pid == 1) {                         /* the foreground program */
 		keyboard_flush();
 		mouse_reset_delta();
@@ -589,7 +618,11 @@ static unsigned int append_dec(char *out, unsigned int off, unsigned int cap,
 	int n = 0;
 	if (v == 0) tmp[n++] = '0';
 	while (v > 0 && n < 11) { tmp[n++] = '0' + (v % 10); v /= 10; }
-	while (n < width && off + 1 < cap) out[off++] = ' ';
+	/* Left-pad to `width`. (The loop used to test `n < width` without
+	 * ever changing n, so the first short number padded to the end of
+	 * the buffer and no row after the header survived.) */
+	for (int pad = n; pad < width && off + 1 < cap; pad++)
+		out[off++] = ' ';
 	for (int i = n - 1; i >= 0 && off + 1 < cap; i--) out[off++] = tmp[i];
 	return off;
 }
