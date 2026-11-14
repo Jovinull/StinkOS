@@ -62,6 +62,11 @@ int cpuid_has_pae(void)
 	return has_basic_feature(CPUID_EDX_PAE_BIT);
 }
 
+int cpuid_has_tsc(void)
+{
+	return has_basic_feature(1u << 4);
+}
+
 int cpuid_has_nx(void)
 {
 	return has_extended_feature(CPUID_EXTENDED_FEATURES, CPUID_EXT_EDX_NX_BIT);

@@ -33,6 +33,7 @@
 #include "win.h"
 #include "defs.h"
 #include "memlayout.h"
+#include "cpuid.h"
 
 /* ---- palette ------------------------------------------------------------- */
 
@@ -592,8 +593,85 @@ static void cursor_draw(int x, int y)
 
 /* ---- rendering ----------------------------------------------------------- */
 
+/* ---- measurement ---------------------------------------------------------
+ * What drawing costs, on the serial console:
+ *
+ *   win: perf frames=F composed=C copied=P busy_us=B worst_us=W
+ *
+ * for each second in which at least one frame was drawn: how many frames,
+ * how many pixels were recomposed into the back buffer and how many were
+ * copied to video memory (both in thousands), the time spent doing it and
+ * the longest single frame. A still screen prints nothing, which is the
+ * point: there is no work when nothing changed. Because the kernel does
+ * not preempt itself, the longest frame is also the longest this thread
+ * keeps the CPU from a process that became runnable (interrupts stay on
+ * throughout). Times come from the time-stamp counter, calibrated against
+ * the timer; they read 0 on a CPU without one. */
+static struct {
+	unsigned int frames, composed, copied;     /* this second; pixels */
+	unsigned int busy_us, worst_us;
+	unsigned int since;                        /* tick this second began */
+} perf;
+static unsigned int tsc_per_us;
+
+static unsigned int tsc_lo(void)
+{
+	unsigned int lo, hi;
+	__asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+	(void)hi;                                  /* intervals here are far below 2^32 cycles */
+	return lo;
+}
+
+static void perf_calibrate(void)
+{
+	if (!cpuid_has_tsc())
+		return;
+	unsigned int t0 = pit_ticks();
+	while (pit_ticks() == t0)                  /* start on a tick edge */
+		proc_block(1);
+	t0 = pit_ticks();
+	unsigned int c0 = tsc_lo();
+	while (pit_ticks() - t0 < 10)
+		proc_block(1);
+	unsigned int c1 = tsc_lo();
+	tsc_per_us = (c1 - c0) / ((pit_ticks() - t0) * 10000u);
+}
+
+static void perf_report(void)
+{
+	unsigned int now = pit_ticks();
+	if (now - perf.since < 100)
+		return;
+	if (perf.frames) {
+		serial_write("win: perf frames=");
+		serial_write_dec(perf.frames);
+		serial_write(" composed=");
+		serial_write_dec(perf.composed / 1000u);
+		serial_write(" copied=");
+		serial_write_dec(perf.copied / 1000u);
+		serial_write(" busy_us=");
+		serial_write_dec(perf.busy_us);
+		serial_write(" worst_us=");
+		serial_write_dec(perf.worst_us);
+		serial_putc('\n');
+	}
+	perf.frames = perf.composed = perf.copied = 0;
+	perf.busy_us = perf.worst_us = 0;
+	perf.since = now;
+}
+
+static unsigned int rect_area(struct rect r)
+{
+	return rect_empty(r) ? 0 : (unsigned int)(r.x1 - r.x0) * (unsigned int)(r.y1 - r.y0);
+}
+
 static void render(void)
 {
+	unsigned int c0 = tsc_per_us ? tsc_lo() : 0;
+
+	perf.frames++;
+	perf.composed += rect_area(scene);
+	perf.copied += rect_area(present);
 	if (!rect_empty(scene)) {
 		compose(scene);
 		scene.x0 = scene.x1 = 0;
@@ -604,6 +682,13 @@ static void render(void)
 		           (unsigned int)(present.y1 - present.y0));
 		present.x0 = present.x1 = 0;
 		cursor_draw(last_mx, last_my);         /* the copy may have painted over it */
+	}
+
+	if (tsc_per_us) {
+		unsigned int us = (tsc_lo() - c0) / tsc_per_us;
+		perf.busy_us += us;
+		if (us > perf.worst_us)
+			perf.worst_us = us;
 	}
 }
 
@@ -822,6 +907,7 @@ static void clock_step(void)
 
 static void kwm_main(void)
 {
+	perf_calibrate();
 	for (;;) {
 		if (!any_window()) {                   /* text menu / legacy mode: stay out of the way */
 			cur_drawn = 0;
@@ -838,6 +924,7 @@ static void kwm_main(void)
 				render();
 				frame_tick = pit_ticks();
 			}
+			perf_report();
 		}
 		proc_block(1);
 	}
