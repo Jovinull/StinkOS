@@ -12,6 +12,8 @@ help:
 	@echo "  make run-iso       -- boot stinkos-install.iso (USB-stick layout)"
 	@echo "  make test-headless -- boot, run, capture serial, diff a baseline"
 	@echo "  make unittest      -- run every host-side regression test"
+	@echo "  make ktest         -- kernel regression cases in QEMU (one VM per case)"
+	@echo "  make qa-net qa-input -- host-driven network / input scenarios"
 	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
 	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
 	@echo "  make clean         -- delete build/ os.bin stinkos-install.iso"
@@ -678,6 +680,21 @@ smoke-exitcode: all
 # alloc::format! through the shared `libstink` Rust crate.
 smoke-rs-stdio: all
 	@python3 tools/smoke-rs-stdio.py
+
+# Kernel regression suite: apps/ktest.c run from ring 3 against the real
+# kernel, one QEMU VM per case (frame leaks, per-process heap, COW vs
+# kernel writes, pointer validation, scheduling, pipes, audio, network).
+# See docs/TESTING.md.
+ktest: all
+	@python3 tools/qa/ktest.py
+
+# Host-driven QEMU scenarios that need input or network traffic from
+# outside the guest.
+qa-net: all
+	@python3 tools/qa/net_rst.py
+
+qa-input: all
+	@python3 tools/qa/input_flush.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so

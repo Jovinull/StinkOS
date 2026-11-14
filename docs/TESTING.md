@@ -1,56 +1,94 @@
 # Testing
 
-StinkOS runs a host-side regression suite via `make unittest`. The suite
-exists because the kernel ships exclusively into QEMU (no real hardware
-in CI, no real users hammering it), so silent regressions in sub-byte
-arithmetic, tick wraparounds, RFC corner cases, and ring-buffer seams
-would otherwise sit unnoticed until someone manually replicated the
-exact failing scenario.
+StinkOS is tested at four levels. They answer different questions, and
+only the last three run the kernel's own code.
 
-## How the tests work
+| Level | Command | What it runs | What it can prove |
+|---|---|---|---|
+| Host models | `make unittest` | `tests/test_*.c`, a copy of one piece of kernel logic per file | The arithmetic of that logic, as it was when the copy was made |
+| Host tests on real sources | `make unittest` (`test_pmm`) | The kernel's own `.c` file linked into a host binary | That file's behaviour |
+| Kernel cases in QEMU | `make ktest` | `apps/ktest.c` in ring 3 against the booted kernel, one VM per case | Kernel invariants end to end |
+| Scenarios in QEMU | `make test-headless`, `make smoke-*`, `make qa-net`, `make qa-input` | Scripts driving a booted system through keyboard, mouse, serial and network | Whole-system behaviour |
 
-The suite is **not** linked against kernel code. Each test in `tests/`
-is a self-contained C file that:
+## Host models, and their limit
 
-1. Replicates the kernel's decision logic byte for byte (the same loop
-   bodies, the same constants, the same branches).
-2. Drives it with deterministic inputs the host compiler can run.
-3. Exits 0 on success, 1 on failure.
+Most files in `tests/` do **not** link kernel code. Each one replicates a
+kernel decision (same loop bodies, constants and branches) and drives it
+with deterministic inputs. That catches off-by-one and wrap-around
+mistakes in the logic cheaply, with nothing but the host compiler.
 
-The Makefile compiles each test with the host `$(HOST_CC)` and runs
-the produced binary; the first failure exits the suite.
+It does not catch the kernel drifting away from the copy. A model keeps
+passing when the kernel function it was copied from is rewritten, and it
+says nothing about how that function interacts with interrupts, paging or
+other processes. Before the 2026-11 recovery pass, `make unittest` was
+green while 13 of the first 14 `ktest` cases failed against the same
+tree. Treat a model as a calculator check, not as evidence that the
+kernel behaves.
 
-This means **the tests are mirrors, not bindings.** When you change
-the kernel logic on purpose, you update the mirror in the same commit.
-If you forget, the next person running `make unittest` discovers the
-divergence and either updates the mirror to match the intentional
-change, or reverts the kernel back to the contract the test pinned.
+When you change kernel logic on purpose, update its model in the same
+commit. When you can, prefer the next level instead.
 
-## Why this layout
+## Host tests on real sources
 
-We considered three alternatives and rejected each:
+A kernel file that only does arithmetic (no privileged instructions, no
+direct-map dereferences) can be compiled for the host as it is.
+`tests/test_pmm.c` links `kernel/arch/pmm.c` this way, with two serial
+stubs. New host tests should take this form whenever the file allows it.
 
-| Approach | Why not |
+## Kernel cases in QEMU (`make ktest`)
+
+`apps/ktest.c` is a ring-3 program with one function per kernel
+invariant: no frame leaks across fork / exec / kill, a program break per
+process, COW that holds when the kernel writes, pointer validation that
+matches what is mapped, a scheduler that neither starves nor wastes CPU,
+owned pipes and sockets, audio that survives its buffer going away.
+
+`tools/qa/ktest.py` runs each case in its own VM:
+
+1. copy `os.bin` (the build output is never written to);
+2. add two files to the copy: `AUTORUN` (the kernel menu starts the app
+   it names at boot) and `KTEST.ARG` (the case name);
+3. boot it with a NIC and an SB16 attached, wait for QEMU to exit
+   (the app powers the machine off when done), read the serial log.
+
+A case reports `PASS`, `FAIL <why>`, `CRASH` (kernel exception in the
+log) or `HANG` (no verdict before the timeout). One VM per case means a
+case that takes the kernel down does not hide the rest.
+
+```sh
+python3 tools/qa/ktest.py                  # all cases
+python3 tools/qa/ktest.py leak-exec -v     # one case, with the serial log
+python3 tools/qa/ktest.py --mem 512        # same, with 512 MiB of RAM
+```
+
+To add a case: write `static int t_name(void)` in `apps/ktest.c`
+returning 0 or `FAIL("why")`, add it to `cases[]` and to `CASES` in
+`tools/qa/ktest.py`. Write it so that it fails on the bug: run it against
+the unfixed kernel first.
+
+## Scenarios in QEMU
+
+`tools/qa/stinkqa.py` is the shared driver: QMP keyboard and mouse
+input, the serial log, PNG screenshots, and helpers to add or remove
+files in a private image copy. Scripts built on it wait on serial output
+or on QEMU exiting rather than on fixed sleeps.
+
+| Script | Scenario |
 |---|---|
-| Cross-compile kernel objects with a stub loader, link tests against them | Forces a second build pipeline and host-vs-target ABI gymnastics for a hobby OS that already has a tight build. The mirror approach catches the same regressions with `gcc tests/foo.c -o foo`. |
-| Boot QEMU and probe via serial | Slow, hard to make deterministic for protocol corner cases (no programmable lossy network in unit-test scope). Acceptable for end-to-end smoke; not for the ~50 invariants we pin. |
-| No host tests; review only | The bugs we pin (TCP wraparound, fb_rect overflow loop, mmap size overflow, klog seam, fragment overlap) are exactly the ones that survive review every time. |
+| `tools/qa/net_rst.py` | the host opens TCP connections to a closed guest port while an app runs; the guest must reset them and its kernel stack audit must stay quiet |
+| `tools/qa/input_flush.py` | keys typed at an app that never reads them must not be replayed into the menu when it exits |
 
-## Adding a new test
+The older `tools/test-headless.py` and `tools/smoke-*.py` predate the
+driver and use fixed paths under `/tmp` and fixed sleeps; do not run two
+of them at once.
 
-1. Pick one kernel decision worth pinning. Good candidates: anything
-   with off-by-one risk, anything with unsigned wraparound, anything
-   whose contract is documented in a comment but enforced nowhere.
-2. Create `tests/test_<area>.c`. Top comment must say which kernel
-   file/lines you mirror and why a regression there would be silent.
-3. Replicate the logic with the same constants and branch structure.
-   Resist the urge to "improve" it; the goal is to detect drift.
-4. Add a build rule and two unittest list entries in `Makefile`:
-   - the `$(TEST_BIN)/test_<area>` rule
-   - the prerequisite list at the top of `unittest:`
-   - the runner line in the body of `unittest:`
-5. Run `gcc -O2 -Wall -Wextra -o /tmp/<random> tests/test_<area>.c &&
-   /tmp/<random>` and confirm `0 failure(s)`.
+## Adding a host model
+
+1. Pick one kernel decision worth pinning: off-by-one risk, unsigned
+   wrap-around, a contract documented in a comment but enforced nowhere.
+2. Create `tests/test_<area>.c`. The top comment must say which kernel
+   file it models, and which QEMU case (if any) covers the real code.
+3. Add a build rule and the two `unittest` entries in `Makefile`.
 
 ## When a test fails
 
