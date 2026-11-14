@@ -9,6 +9,7 @@
 #include "serial.h"
 #include "ethernet.h"     /* eth_handle_frame for the IRQ-driven RX path */
 #include "memlayout.h"    /* V2P for DMA descriptor and buffer phys addrs */
+#include "paging.h"       /* paging_map_mmio for BAR0 */
 
 /* Register offsets from MMIO base (BAR0). The Intel SDM lists hundreds; we
  * only need a handful at this layer. */
@@ -163,7 +164,11 @@ int e1000_init(void)
 	 * everything above KERNEL_DEVSPACE = 0xFE000000). xv6 uses the same
 	 * DEVSPACE trick for the LAPIC / IOAPIC MMIO. */
 	unsigned int mmio_phys = bar0 & 0xFFFFFFF0u;
-	e1000_mmio = (volatile unsigned int *)mmio_phys;
+	e1000_mmio = (volatile unsigned int *)paging_map_mmio(mmio_phys, 0x20000u);
+	if (!e1000_mmio) {
+		serial_write("e1000: no room to map BAR0\n");
+		return 0;
+	}
 
 	/* Turn on memory + bus-master bits in the command register, otherwise
 	 * the device will not see CPU writes or initiate its own DMA. */

@@ -187,14 +187,14 @@ move into the sections above.
 | A3 | P1 | pipes | no owner, not closed on exit, not counted across fork | **fixed + retested** (`ktest pipes`): per-process ownership bits, references across fork, release at exit |
 | A4 | P0 | traps | no `cld` on trap entry (user DF=1 reverses kernel `rep movs`); fork seeds a ring-0 `popf` from user EFLAGS | **fixed + retested** (`ktest eflags`) |
 | A5 | P1 | input | key queue never flushed: keys typed in an app replay into the menu (can launch apps, delete files) | **fixed + retested** (`tools/qa/input_flush.py`) |
-| A6 | P1 | video | `SYS_MAP_FB` maps 2 MiB of a 2.25-3 MiB framebuffer; userland assumes 32 bpp, QEMU's mode 0x118 is 24 bpp | open |
+| A6 | P1 | video | `SYS_MAP_FB` maps 2 MiB of a 2.25-3 MiB framebuffer; userland assumes 32 bpp, QEMU's mode 0x118 is 24 bpp | **fixed + retested**: the whole LFB is mapped, `SYS_FB_INFO` reports pitch and depth, `fbdemo` verified at 24 bpp (cirrus) and 32 bpp |
 | A7 | P2 | input | mouse accumulators read-and-cleared with IRQs on; cursor save/draw not atomic | fixed (read-and-clear and cursor snapshot with IRQs off); no failing run |
 | A8 | P2 | rtc | unbounded update-in-progress loop; CMOS index raced by IRQ8 | fixed (bounded wait, CMOS access with IRQs off); no failing run |
 | A9 | P0 | acpi | firmware table pointers above the 256 MiB direct map fault before the IDT exists (`-m 512`) | **fixed + retested** (`ktest --mem 512`: boot hung at the RSDP line before) |
-| A10 | P1 | video | kernel uses the LFB physical address as a virtual one; only valid at or above 0xFD000000 | open |
+| A10 | P1 | video | kernel uses the LFB physical address as a virtual one; only valid at or above 0xFD000000 | **fixed + retested**: LFB and NIC registers mapped through `paging_map_mmio` (`-vga cirrus` halted at the first pixel before) |
 | A11 | P1 | boot | stage 2 reads the kernel from the primary ATA master whatever the BIOS boot drive was | open |
 | A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
-| A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | open |
+| A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | **fixed + retested**: the bootloader scans the VBE mode list for 1024x768 (32 bpp, then 24), checks the set-mode result and falls back; verified on QEMU std, cirrus and vmware |
 | A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
 | A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
 | A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | fixed (handlers and pending signals cleared on exec / app launch, signal 0 refused); not covered by a test |

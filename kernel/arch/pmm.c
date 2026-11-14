@@ -92,6 +92,21 @@ unsigned int pmm_alloc(void)
 	return frame;
 }
 
+/* `n` physically contiguous frames, or 0. Only the untouched tail above
+ * the watermark is contiguous by construction, so this serves boot-time
+ * buffers (the compositor's back buffer); it never searches the free
+ * list. The frames are ordinary allocations afterwards. */
+unsigned int pmm_alloc_contig(unsigned int n)
+{
+	if (n == 0 || n > (end_frame - next_frame) / FRAME_SIZE)
+		return 0;
+	unsigned int base = next_frame;
+	next_frame += n * FRAME_SIZE;
+	for (unsigned int i = 0; i < n; i++)
+		refcount[frame_idx(base) + i] = 1;
+	return base;
+}
+
 unsigned int pmm_total_pages(void)
 {
 	return (end_frame - start_frame) / FRAME_SIZE;

@@ -4,6 +4,7 @@
 
 void pmm_init(unsigned int start, unsigned int end);
 unsigned int pmm_alloc(void);          /* a 4 KiB-aligned frame, or 0 if none */
+unsigned int pmm_alloc_contig(unsigned int n);   /* n contiguous frames from untouched memory, or 0 */
 
 /* Decrement the frame's refcount; the frame is returned to the free pool
  * only when the refcount hits zero. Without prior pmm_ref_inc calls a

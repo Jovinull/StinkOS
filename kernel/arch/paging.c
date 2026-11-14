@@ -88,7 +88,8 @@ typedef unsigned long long pae_entry_t;
 static pae_entry_t *page_pdpt;          /* KVA of active PDPT (4 entries used) */
 static pae_entry_t *kernel_only_pdpt;   /* address space for kernel threads: no user half */
 static unsigned int user_heap_next;
-static int          fb_pde_mapped;
+static int          fb_pde_mapped;      /* number of 2 MiB PDEs mapped at USER_FB_BASE */
+#define USER_FB_MAX_PDES 8u             /* up to 16 MiB of framebuffer */
 
 /* Shared kernel PDs (phys addrs). Built once at boot; every per-proc
  * PDPT points its slots [1..3] at the same physical PDs so all
@@ -223,6 +224,36 @@ static void kernel_wx_install_pt(void)
 
 	pae_entry_t *pd2 = KVA(kernel_pd2_phys);
 	pd2[0] = (pae_entry_t)pt_phys | 3ULL;     /* P|RW, no PS -> 4 KiB PT */
+}
+
+/* Map `size` bytes of device memory at physical `phys` into the kernel and
+ * return the virtual address of `phys`. 2 MiB pages, RW, non-executable,
+ * handed out from a bump pointer inside [KERNEL_MMIO_BASE, KERNEL_DEVSPACE).
+ * The window lives in the PD shared by every address space, so the mapping
+ * is visible whichever process is running. Returns 0 when the window is
+ * full. There is no unmap: devices are mapped once at boot. */
+static unsigned int mmio_next_pde;      /* PDEs used so far in the window */
+
+unsigned int paging_map_mmio(unsigned int phys, unsigned int size)
+{
+	if (size == 0)
+		return 0;
+	unsigned int first = phys & ~(PAGE_2MB - 1u);
+	unsigned int off   = phys - first;
+	unsigned int pdes  = (unsigned int)(((unsigned long long)off + size + PAGE_2MB - 1u) / PAGE_2MB);
+	unsigned int base_idx = (KERNEL_MMIO_BASE - 3 * PAGE_1GB) / PAGE_2MB;
+	unsigned int limit    = (KERNEL_DEVSPACE  - 3 * PAGE_1GB) / PAGE_2MB;
+	if (base_idx + mmio_next_pde + pdes > limit)
+		return 0;
+
+	pae_entry_t *pd = KVA(kernel_pd3_phys);
+	pae_entry_t nx = g_nx_enabled ? PG_NX : 0;
+	unsigned int idx = base_idx + mmio_next_pde;
+	for (unsigned int i = 0; i < pdes; i++)
+		pd[idx + i] = (pae_entry_t)(first + i * PAGE_2MB) | 0x83ULL | nx;
+	mmio_next_pde += pdes;
+	load_cr3_active();                         /* flush: the PDEs were empty, but be exact */
+	return KERNEL_MMIO_BASE + (idx - base_idx) * PAGE_2MB + off;
 }
 
 static void wire_kernel_pdpt(pae_entry_t *pdpt)
@@ -629,7 +660,8 @@ void paging_reset_user_heap(void)
 		if (pdpte & 1ULL) {
 			pae_entry_t *pd0 =
 			    KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
-			pd0[PD_IDX(USER_FB_BASE)] = 0;
+			for (int i = 0; i < fb_pde_mapped; i++)
+				pd0[PD_IDX(USER_FB_BASE) + i] = 0;
 		}
 		fb_pde_mapped = 0;
 		load_cr3_active();
@@ -645,23 +677,34 @@ void paging_reset_user_heap(void)
 	}
 }
 
-/* Map the physical LFB at USER_FB_BASE using a 2 MiB PSE huge PDE in
- * the active proc's PD0. The LFB phys is 2 MiB-aligned in QEMU/VBE. */
-void paging_map_fb(unsigned int phys_base)
+/* Map the physical LFB into the active process at USER_FB_BASE with 2 MiB
+ * pages: as many as it takes to cover `size` bytes from `phys_base` (a
+ * 1024x768x32 framebuffer is 3 MiB; one PDE left the last third unmapped).
+ * Returns the user address of the first pixel, or 0. */
+static unsigned int fb_user_addr;
+
+unsigned int paging_map_fb(unsigned int phys_base, unsigned int size)
 {
-	if (phys_base == 0)
-		return;
+	if (phys_base == 0 || size == 0)
+		return 0;
 	pae_entry_t pdpte = page_pdpt[0];
 	if (!(pdpte & 1ULL))
-		return;
+		return 0;
 	pae_entry_t *pd0 = KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
 	unsigned int aligned = phys_base & ~(PAGE_2MB - 1u);
-	pd0[PD_IDX(USER_FB_BASE)] = (pae_entry_t)aligned | 0x87ULL; /* P|RW|U|PS */
-	fb_pde_mapped = 1;
+	unsigned int off     = phys_base - aligned;
+	unsigned int pdes    = (off + size + PAGE_2MB - 1u) / PAGE_2MB;
+	if (pdes > USER_FB_MAX_PDES)
+		return 0;
+	for (unsigned int i = 0; i < pdes; i++)
+		pd0[PD_IDX(USER_FB_BASE) + i] =
+		    (pae_entry_t)(aligned + i * PAGE_2MB) | 0x87ULL |      /* P|RW|U|PS */
+		    (g_nx_enabled ? PG_NX : 0);
+	fb_pde_mapped = (int)pdes;
+	fb_user_addr  = USER_FB_BASE + off;
 	load_cr3_active();
+	return fb_user_addr;
 }
-
-unsigned int paging_user_fb_base(void) { return USER_FB_BASE; }
 
 unsigned int paging_user_alloc(void)
 {

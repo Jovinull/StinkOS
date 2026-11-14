@@ -3,6 +3,7 @@
 #include "fb.h"
 #include "vbe.h"
 #include "font.h"
+#include "paging.h"
 
 static volatile unsigned char *fb;
 static unsigned int pitch;
@@ -13,12 +14,54 @@ static unsigned int fb_phys;      /* raw physical address of the LFB */
 
 void fb_init(const struct vbe_mode *m)
 {
-	fb       = (volatile unsigned char *)m->framebuffer;
+	/* The LFB can be anywhere in physical space (0xFD000000 on QEMU's
+	 * std VGA, 0xFC000000 on cirrus, 0xE0000000 and lower on real cards),
+	 * so it is mapped into the kernel's MMIO window rather than assumed
+	 * to be identity-mapped. Only 24 and 32 bpp are drawable. */
 	fb_phys  = m->framebuffer;
 	pitch    = m->pitch;
 	width    = m->width;
 	height   = m->height;
 	bytes_pp = m->bpp / 8;
+	fb = (volatile unsigned char *)paging_map_mmio(fb_phys, pitch * height);
+	if (!fb || (bytes_pp != 3 && bytes_pp != 4))
+		width = height = 0;                /* every primitive clips to nothing */
+}
+
+int          fb_usable(void)   { return width != 0; }
+unsigned int fb_width(void)    { return width; }
+unsigned int fb_height(void)   { return height; }
+unsigned int fb_pitch(void)    { return pitch; }
+unsigned int fb_bpp(void)      { return bytes_pp * 8; }
+unsigned int fb_size_bytes(void) { return pitch * height; }
+
+/* Copy the rectangle (x, y, w, h) of a full-screen XRGB back buffer
+ * (`width` pixels per row) to the screen. This is the compositor's only
+ * path to video memory; at 32 bpp a row is one run of 32-bit stores. */
+void fb_present(const unsigned int *back, unsigned int x, unsigned int y,
+                unsigned int w, unsigned int h)
+{
+	if (!back || x >= width || y >= height)
+		return;
+	if (w > width - x)  w = width - x;
+	if (h > height - y) h = height - y;
+	for (unsigned int row = 0; row < h; row++) {
+		const unsigned int *s = back + (y + row) * width + x;
+		volatile unsigned char *p = fb + (y + row) * pitch + x * bytes_pp;
+		if (bytes_pp == 4) {
+			volatile unsigned int *d = (volatile unsigned int *)p;
+			for (unsigned int i = 0; i < w; i++)
+				d[i] = s[i];
+		} else {
+			for (unsigned int i = 0; i < w; i++) {
+				unsigned int rgb = s[i];
+				p[0] = (unsigned char)rgb;
+				p[1] = (unsigned char)(rgb >> 8);
+				p[2] = (unsigned char)(rgb >> 16);
+				p += 3;
+			}
+		}
+	}
 }
 
 unsigned int fb_phys_base(void) { return fb_phys; }

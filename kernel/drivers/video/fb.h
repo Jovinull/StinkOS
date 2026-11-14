@@ -30,4 +30,17 @@ void fb_text(unsigned int x, unsigned int y, const char *s, unsigned int rgb);
 void fb_char_big(unsigned int x, unsigned int y, char c, unsigned int rgb, unsigned int scale);
 void fb_text_big(unsigned int x, unsigned int y, const char *s, unsigned int rgb, unsigned int scale);
 
+/* Mode facts, for SYS_FB_INFO and the compositor. fb_usable() is 0 when
+ * the bootloader found no drawable linear mode. */
+int          fb_usable(void);
+unsigned int fb_width(void);
+unsigned int fb_height(void);
+unsigned int fb_pitch(void);
+unsigned int fb_bpp(void);
+unsigned int fb_size_bytes(void);
+
+/* Copy a rectangle of a full-screen XRGB back buffer to the screen. */
+void fb_present(const unsigned int *back, unsigned int x, unsigned int y,
+                unsigned int w, unsigned int h);
+
 #endif

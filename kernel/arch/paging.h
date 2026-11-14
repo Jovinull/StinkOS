@@ -81,8 +81,11 @@ void paging_unmap_win_buf(unsigned int base_va, int n);
  * 4 MiB PSE PDE with PG_USER. Returns the virtual address the app should use.
  * The mapping is torn down in paging_reset_user_heap so each new app must call
  * SYS_MAP_FB explicitly. */
-void         paging_map_fb(unsigned int phys_base);
-unsigned int paging_user_fb_base(void);
+unsigned int paging_map_fb(unsigned int phys_base, unsigned int size);
+
+/* Map device memory into the kernel's MMIO window; returns the virtual
+ * address of `phys`, or 0 if the window is full. See paging.c. */
+unsigned int paging_map_mmio(unsigned int phys, unsigned int size);
 
 /* TODO §1 multitasking, step 1: per-process page directories.
  *
