@@ -165,6 +165,11 @@ int            proc_kill(struct proc *p);
  * caller must already have released its own resources (sockets, audio). */
 void           proc_exit_current(void) __attribute__((noreturn));
 
+/* Name a process after the program it runs ("SNAKE.ELF" -> "SNAKE").
+ * fork copies the parent's name; without this every program started from
+ * the shell would show up as its launcher. */
+void           proc_set_name(struct proc *p, const char *elf_name);
+
 /* A process just replaced its program image (exec, or the menu launching
  * an app in PID 1): anything that referred to the old image is void.
  * Clears signal handlers (their addresses belonged to the old code) and

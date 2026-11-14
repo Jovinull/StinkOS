@@ -208,6 +208,7 @@ unsigned int arp_snapshot(char *out, unsigned int cap)
 	for (int i = 0; i < ARP_CACHE_SIZE; i++) {
 		if (!cache[i].valid) continue;
 		ipv4_t ip = cache[i].ip;
+		unsigned int row = off;                /* pad relative to this row, not to the buffer */
 		off = append_dec(out, off, cap, (unsigned int)( ip        & 0xFF));
 		if (off + 1 < cap) out[off++] = '.';
 		off = append_dec(out, off, cap, (unsigned int)((ip >>  8) & 0xFF));
@@ -215,7 +216,9 @@ unsigned int arp_snapshot(char *out, unsigned int cap)
 		off = append_dec(out, off, cap, (unsigned int)((ip >> 16) & 0xFF));
 		if (off + 1 < cap) out[off++] = '.';
 		off = append_dec(out, off, cap, (unsigned int)((ip >> 24) & 0xFF));
-		while (off + 1 < cap && off % 16 != 0) out[off++] = ' ';
+		do {                                   /* at least one space, then out to column 16 */
+			if (off + 1 < cap) out[off++] = ' ';
+		} while (off + 1 < cap && off - row < 16);
 		for (int k = 0; k < 6; k++) {
 			off = append_hex2(out, off, cap, cache[i].mac[k]);
 			if (k < 5 && off + 1 < cap) out[off++] = ':';

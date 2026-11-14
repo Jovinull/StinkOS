@@ -427,6 +427,17 @@ void proc_idle(void)
 
 /* ---- lifetime ------------------------------------------------------------ */
 
+void proc_set_name(struct proc *p, const char *elf_name)
+{
+	if (!p || !elf_name)
+		return;
+	int i = 0;
+	for (; i < PROC_NAME_LEN - 1 && elf_name[i] && elf_name[i] != '.'; i++)
+		p->name[i] = elf_name[i];
+	for (; i < PROC_NAME_LEN; i++)
+		p->name[i] = 0;
+}
+
 void proc_reset_image_state(struct proc *p)
 {
 	if (!p)
@@ -578,7 +589,11 @@ static unsigned int append_dec(char *out, unsigned int off, unsigned int cap,
 	int n = 0;
 	if (v == 0) tmp[n++] = '0';
 	while (v > 0 && n < 11) { tmp[n++] = '0' + (v % 10); v /= 10; }
-	while (n < width && off + 1 < cap) out[off++] = ' ';
+	/* Left-pad to `width`. (The loop used to test `n < width` without
+	 * ever changing n, so the first short number padded to the end of
+	 * the buffer and no row after the header survived.) */
+	for (int pad = n; pad < width && off + 1 < cap; pad++)
+		out[off++] = ' ';
 	for (int i = n - 1; i >= 0 && off + 1 < cap; i--) out[off++] = tmp[i];
 	return off;
 }

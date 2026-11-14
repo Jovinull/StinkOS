@@ -292,6 +292,53 @@ static int t_orphan(void)
 	return 0;
 }
 
+/* The process table as text: one header line, then one row per process,
+ * and our own row says who we are. */
+static int t_procinfo(void)
+{
+	static char buf[1024];
+	int n = sys_proc_info(buf, sizeof(buf));
+	if (n <= 0 || n >= (int)sizeof(buf)) FAIL("proc_info returned %d", n);
+	buf[n] = '\0';
+	if (strncmp(buf, "PID", 3) != 0) FAIL("no header line");
+	if (proc_rows() < 1) FAIL("no process rows after the header");
+
+	int me = sys_getpid(), seen_me = 0, rows = 0;
+	const char *p = strchr(buf, '\n');
+	while (p && p[1]) {
+		p++;
+		const char *digits = p;
+		while (*digits == ' ')
+			digits++;                       /* numbers are right-aligned in their column */
+		int pid = atoi(digits);
+		if (pid <= 0) FAIL("row %d does not start with a pid", rows);
+		const char *eol = strchr(p, '\n');
+		if (!eol) FAIL("row %d is not terminated", rows);
+		if (eol - p > 60) FAIL("row %d is %d characters long", rows, (int)(eol - p));
+		if (pid == me) {
+			seen_me = 1;
+			if (!strstr(p, "RUN")) FAIL("our own row is not RUN");
+			static char name[16];
+			if ((unsigned int)(eol - p) < 5) FAIL("row too short");
+			memcpy(name, eol - 5, 5);
+			name[5] = '\0';
+			if (strcmp(name, "KTEST") != 0) FAIL("our row is named '%s', want KTEST", name);
+		}
+		rows++;
+		p = eol;
+	}
+	if (!seen_me) FAIL("pid %d is missing from %d rows", me, rows);
+
+	/* A child shows up as one more row, and goes away when reaped. */
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) { sys_sleep_ms(200); child_exit(0); }
+	if (proc_rows() != rows + 1) FAIL("a new child did not add a row");
+	sys_waitpid(pid);
+	if (proc_rows() != rows) FAIL("a reaped child still has a row");
+	return 0;
+}
+
 /* ---- scheduling ---------------------------------------------------------- */
 
 static unsigned int spin_for(unsigned int nticks)
@@ -847,6 +894,7 @@ static const struct ktcase cases[] = {
 	{ "munmap-hole", t_munmap_hole },
 	{ "kill-reap",   t_kill_reap },
 	{ "orphan",      t_orphan },
+	{ "procinfo",    t_procinfo },
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },
