@@ -256,6 +256,17 @@ $(BUILD)/exitcode.elf: apps/crt0.s apps/exitcode.c lib/libstink.h apps/app.ld $(
 	$(CC) $(CFLAGS) -c apps/exitcode.c -o $(BUILD)/exitcode_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/exitcode.elf $(BUILD)/crt0.o $(BUILD)/exitcode_app.o $(LIBSTINK_OBJS)
 
+# Kernel regression apps driven by tools/qa/ktest.py (see docs/TESTING.md).
+$(BUILD)/ktest.elf: apps/crt0.s apps/ktest.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/ktest.c -o $(BUILD)/ktest_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktest.elf $(BUILD)/crt0.o $(BUILD)/ktest_app.o $(LIBSTINK_OBJS)
+
+$(BUILD)/ktchild.elf: apps/crt0.s apps/ktchild.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/ktchild.c -o $(BUILD)/ktchild_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktchild.elf $(BUILD)/crt0.o $(BUILD)/ktchild_app.o $(LIBSTINK_OBJS)
+
 # Rust userland (v0.9+). Cargo is invoked through the user's standard
 # rustup install (~/.cargo/bin); add it to PATH if your shell hasn't.
 # Custom target spec apps/rust/i686-stinkos.json + -Z build-std=core
@@ -454,7 +465,7 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/exitcode.elf
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/exitcode.elf $(BUILD)/ktest.elf $(BUILD)/ktchild.elf
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -523,7 +534,9 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  RS-JSON.ELF=$(BUILD)/rs-json.elf \
 	  TEST.JSON=apps/rust/rs-json/test.json \
 	  RS-LIFE.ELF=$(BUILD)/rs-life.elf \
-	  EXITCODE.ELF=$(BUILD)/exitcode.elf"; \
+	  EXITCODE.ELF=$(BUILD)/exitcode.elf \
+	  KTEST.ELF=$(BUILD)/ktest.elf \
+	  KTCHILD.ELF=$(BUILD)/ktchild.elf"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
 	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
