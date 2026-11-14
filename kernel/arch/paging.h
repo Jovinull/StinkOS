@@ -10,7 +10,10 @@ unsigned int paging_user_code_end(void);   /* end of the mapped code region */
 unsigned int paging_user_stack_top(void);  /* top of the user stack */
 unsigned int paging_user_alloc(void);      /* next pre-mapped user heap page, or 0 */
 unsigned int paging_user_brk(void);        /* current program break (heap end) */
-unsigned int paging_user_set_brk(unsigned int new_brk);  /* resize, returns new break */
+/* Move the program break to `new_brk` (rounded up to a page). All or
+ * nothing: returns 0 on success, -1 if it is outside the heap region or
+ * memory ran out, in which case the break is exactly where it was. */
+int paging_user_set_brk(unsigned int new_brk);
 void paging_reset_user_heap(void);         /* reset the heap for a new app */
 
 /* Reserve a contiguous block of `size` bytes (rounded up to 4 KiB pages) in
@@ -33,8 +36,23 @@ int          paging_user_munmap(unsigned int addr, unsigned int size);
  * demand by SYS_MAP_FB and tracked separately. */
 unsigned int paging_user_mapped_pages(void);
 
-/* True if [addr, addr+len) lies entirely within the app's mapped user pages. */
+/* Pointer validation for syscalls, decided from the live page tables.
+ *
+ * paging_user_range_ok: every page of [addr, addr+len) is present and
+ * user-accessible -- the kernel may READ it.
+ * paging_user_range_writable: additionally every page is writable by the
+ * process; pages still COW-shared after fork are privatized on the spot.
+ * Use this one for any buffer the kernel is about to WRITE into.
+ * len == 0 is always fine. */
 int paging_user_range_ok(unsigned int addr, unsigned int len);
+int paging_user_range_writable(unsigned int addr, unsigned int len);
+
+/* The parts of an address space that live outside its page tables: the
+ * heap watermark and whether the framebuffer PDE is mapped. The scheduler
+ * saves them into the outgoing PCB and loads the incoming one's around
+ * every paging_switch, so each process keeps its own program break. */
+void paging_vm_save(unsigned int *heap_next, int *fb_mapped);
+void paging_vm_load(unsigned int heap_next, int fb_mapped);
 
 /* W^X: re-stamp user PTEs in [va, va+len) with the bits implied by an
  * ELF PT_LOAD's p_flags (PF_X = exec, PF_W = write). Called by the ELF
