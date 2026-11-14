@@ -98,6 +98,7 @@ static void zero_proc(struct proc *p)
 	p->kstack_base     = 0;
 	p->kstack_warned   = 0;
 	p->pipe_ends       = 0;
+	p->last_run        = 0;
 	p->esp             = 0;
 	p->cr3             = 0;
 	p->pending_signals = 0;
@@ -247,10 +248,17 @@ struct proc *proc_kthread_create(const char *name, void (*entry)(void))
 	return p;
 }
 
-/* Pick the next runnable slot, preferring lower priority values (highest
- * priority wins). Within a priority level, round-robin from `from + 1` so
- * equal-prio peers share the CPU fairly. Returns NULL if nothing else is
- * runnable. */
+/* Pick the next runnable slot: the highest priority (lowest value) wins,
+ * and among equals the one that has waited longest since its last turn.
+ *
+ * Least-recently-run rather than "the next slot after the current one":
+ * a high-priority kernel thread that wakes every tick (kwm, knet) becomes
+ * the current slot each time, and a scan that starts from it keeps handing
+ * the CPU to the same lower-priority process -- whichever sits right after
+ * the thread in the table -- while the others starve. Returns NULL if
+ * nothing else is runnable. */
+static unsigned int sched_seq;
+
 static struct proc *next_ready(int from)
 {
 	int best_prio = 32;                       /* worse than any valid priority */
@@ -260,7 +268,9 @@ static struct proc *next_ready(int from)
 		int idx = (from + i) % PROC_MAX;
 		if (table[idx].state != PROC_READY || table[idx].suspended)
 			continue;
-		if (table[idx].priority < best_prio) {
+		if (table[idx].priority < best_prio ||
+		    (table[idx].priority == best_prio &&
+		     (int)(table[idx].last_run - table[best_idx].last_run) < 0)) {
 			best_prio = table[idx].priority;
 			best_idx  = idx;
 		}
@@ -316,8 +326,9 @@ int proc_yield(void)
 	kstack_check(prev);
 	if (prev->state == PROC_RUNNING)
 		prev->state = PROC_READY;          /* preempted, not blocked */
-	next->state = PROC_RUNNING;
-	running     = next;
+	next->state    = PROC_RUNNING;
+	next->last_run = ++sched_seq;
+	running        = next;
 
 	paging_vm_save(&prev->vm_heap_next, &prev->vm_fb_mapped);
 	paging_switch((unsigned int *)next->cr3);
@@ -470,6 +481,20 @@ void proc_abandon_children(struct proc *parent)
 		else
 			c->parent_pid = 0;             /* the orphan reaper takes it when it exits */
 	}
+}
+
+int proc_kill(struct proc *p)
+{
+	if (!p || p->pid <= 1 || p->state == PROC_ZOMBIE ||
+	    p->state == PROC_EMBRYO || p->state == PROC_UNUSED)
+		return -1;
+	if (!p->killed) {
+		p->killed    = 1;
+		p->exit_code = 137;                /* SIGKILL exit-code convention */
+	}
+	p->suspended = 0;
+	proc_wake(p);
+	return 0;
 }
 
 void proc_exit_current(void)
