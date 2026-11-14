@@ -29,6 +29,11 @@ import time
 SCREEN_W = 1024
 SCREEN_H = 768
 
+# Every timeout in these tools is multiplied by this. Emulation on a busy
+# CI runner is several times slower than on a workstation:
+#   STINKQA_TIMEOUT_SCALE=3 python3 tools/qa/wm_test.py
+TIMEOUT_SCALE = float(os.environ.get("STINKQA_TIMEOUT_SCALE", "1"))
+
 # Characters that need a qcode other than themselves (US layout).
 _QCODE = {
     " ": "spc", "\n": "ret", "\t": "tab", ".": "dot", ",": "comma",
@@ -57,6 +62,7 @@ class Vm:
         self.dir = tempfile.mkdtemp(prefix="stinkqa-")
         self.serial_path = os.path.join(self.dir, "serial.log")
         self.qmp_path = os.path.join(self.dir, "qmp.sock")
+        self._png = None           # does this QEMU write PNG screendumps? unknown yet
         self._mx = None            # last known guest cursor position
         self._my = None
         args = ["qemu-system-i386", "-cpu", cpu,
@@ -135,7 +141,7 @@ class Vm:
     def wait_exit(self, timeout=10):
         """Wait for QEMU to exit by itself (guest shutdown). True if it did."""
         try:
-            self.proc.wait(timeout=timeout)
+            self.proc.wait(timeout=timeout * TIMEOUT_SCALE)
             return True
         except subprocess.TimeoutExpired:
             return False
@@ -190,7 +196,7 @@ class Vm:
     def wait_serial(self, text, timeout=15, start=0):
         """Block until `text` shows up in the serial log (searching from
         offset `start`). Returns the offset just past the match."""
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout * TIMEOUT_SCALE
         while True:
             log = self.serial()
             i = log.find(text, start)
@@ -301,7 +307,21 @@ class Vm:
         """Dump the guest display to a PNG file and return its path."""
         path = os.path.abspath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.qmp("screendump", filename=path, format="png")
+        if self._png is not False:
+            try:
+                self.qmp("screendump", filename=path, format="png")
+                self._png = True
+                return path
+            except QaError:
+                if self._png:
+                    raise
+                self._png = False                # this QEMU build cannot write PNG
+        from PIL import Image
+        ppm = path + ".ppm"
+        self.qmp("screendump", filename=ppm)
+        with Image.open(ppm) as im:
+            im.save(path)
+        os.remove(ppm)
         return path
 
     def image(self):
@@ -315,7 +335,7 @@ class Vm:
     def wait_stable(self, timeout=5, settle=0.15):
         """Wait until two consecutive screenshots are identical; returns the
         stable image. Raises if the screen never settles (animation)."""
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout * TIMEOUT_SCALE
         prev = self.image()
         while time.time() < deadline:
             time.sleep(settle)
