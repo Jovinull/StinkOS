@@ -182,7 +182,7 @@ move into the sections above.
 
 | Id | Sev | Area | Finding | Status |
 |----|-----|------|---------|--------|
-| A1 | P0 | audio | IRQ mixer dereferences user sample pointers under whatever address space is loaded; unmap/exec/another process running halts the kernel | open |
+| A1 | P0 | audio | IRQ mixer dereferences user sample pointers under whatever address space is loaded; unmap/exec/another process running halts the kernel | **fixed + retested** (`ktest audio-unmap`: kernel halt before): the mixer owns a copy of every sound |
 | A2 | P0 | fs | `SYS_MOUNT` accepts any LBA range: a mount over LBA 0 lets an app overwrite the boot sector and kernel | open |
 | A3 | P1 | pipes | no owner, not closed on exit, not counted across fork | open |
 | A4 | P0 | traps | no `cld` on trap entry (user DF=1 reverses kernel `rep movs`); fork seeds a ring-0 `popf` from user EFLAGS | **fixed + retested** (`ktest eflags`) |
@@ -199,11 +199,11 @@ move into the sections above.
 | A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
 | A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | open |
 | A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | open |
-| A18 | P1 | audio | Q16.16 cursor wraps at 65536 samples: longer sounds loop forever and never free the channel | open |
-| A19 | P1 | audio | mixer handles have no owner: any process can stop or mute another's channels | open |
-| A20 | P1 | audio | stereo mode programs half the block size (per QEMU's sb16 model) | open |
-| A21 | P2 | audio | `SYS_AUDIO_MODE` stops output before validating the mode; DMA ring not cleared on format change | open |
-| A22 | P2 | speaker | tone outlives the process that started it | open |
+| A18 | P1 | audio | Q16.16 cursor wraps at 65536 samples: longer sounds loop forever and never free the channel | **fixed + retested** (`ktest audio-modes`, 70000-sample sound) |
+| A19 | P1 | audio | mixer handles have no owner: any process can stop or mute another's channels | **fixed + retested** (`ktest audio-modes`): handles carry owner + generation |
+| A20 | P1 | audio | stereo mode programs half the block size (per QEMU's sb16 model) | **fixed + retested** (`ktest audio-modes`: 1.00 s of audio took 480 ms) |
+| A21 | P2 | audio | `SYS_AUDIO_MODE` stops output before validating the mode; DMA ring not cleared on format change | **fixed + retested** (`ktest audio-modes`) |
+| A22 | P2 | speaker | tone outlives the process that started it | fixed (speaker released when its owner exits; divisor clamped); not covered by a test |
 | A23 | P1 | fs | new-file path advances `next_free` before the directory-full check | open |
 | A24 | P2 | fs | case-sensitive lookups everywhere except the loader | open |
 | A25 | P2 | vfs | `vfs_seek` adds offsets as signed int with no overflow guard | open |

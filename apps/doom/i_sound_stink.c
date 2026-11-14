@@ -125,14 +125,15 @@ static int Stink_StartSound(sfxinfo_t *sfx, int channel, int vol, int sep)
 	}
 	W_ReleaseLumpNum(sfx->lumpnum);
 
+	/* The kernel mixer copies the samples before the call returns, so the
+	 * upsampled buffer is ours to free straight away. */
 	int handle = sys_audio_play(up, up_len, vol * 2);
-	if (handle < 0) {
-		free(up);
+	free(up);
+	if (handle < 0)
 		return -1;
-	}
 
 	stink_channels[channel].kernel_handle = handle;
-	stink_channels[channel].upsampled     = up;
+	stink_channels[channel].upsampled     = (unsigned char *)0;
 	stink_channels[channel].active        = 1;
 	return channel;
 }
@@ -148,7 +149,17 @@ static boolean Stink_SoundIsPlaying(int channel)
 {
 	if (channel < 0 || channel >= STINK_CHANNELS)
 		return false;
-	return stink_channels[channel].active ? true : false;
+	if (!stink_channels[channel].active)
+		return false;
+	/* Ask the mixer: the sound may have run out on its own, in which case
+	 * the engine should reuse this channel instead of treating it as busy
+	 * until something evicts it. */
+	if (!sys_audio_playing(stink_channels[channel].kernel_handle)) {
+		stink_channels[channel].active = 0;
+		stink_channels[channel].kernel_handle = -1;
+		return false;
+	}
+	return true;
 }
 
 static void Stink_CacheSounds(sfxinfo_t *sounds, int num)

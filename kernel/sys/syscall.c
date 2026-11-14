@@ -149,6 +149,9 @@ extern void enter_user_mode(unsigned int entry, unsigned int user_stack);
  * we are nested inside such a launch. */
 static int exec_active;
 
+/* PID that last turned the PC speaker on through SYS_SOUND (0 = off). */
+static int speaker_owner;
+
 /* Build "NAME.ELF" from a user-typed name (e.g. "snake" → "SNAKE.ELF") and
  * verify it exists in StinkFS. Fills elf_out (16 bytes, NUL-padded) and
  * returns 0 on success, -1 if the name is too long or the file is not found. */
@@ -280,6 +283,10 @@ void app_return(void)
 	struct proc *cur = proc_current();
 	int pid = cur ? cur->pid : 0;
 	audio_mix_silence_pid(pid);
+	if (speaker_owner == pid) {                /* a tone must not outlive its process */
+		speaker_play(0);
+		speaker_owner = 0;
+	}
 	tcp_close_pid(pid);
 
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
@@ -339,6 +346,10 @@ void syscall_dispatch(struct regs *r)
 	 * any state. iret restores the caller's EFLAGS (typically IF=1 for
 	 * ring-3 callers), so the on-return state is unchanged. */
 	__asm__ volatile ("sti");
+
+	/* Syscall entry is a safe point for work interrupt handlers leave
+	 * behind: nothing else is inside the kernel. (Cheap flag check.) */
+	audio_reclaim();
 
 	switch (r->eax) {
 	case 1: {                                  /* SYS_LOG: ebx = string */
@@ -551,6 +562,10 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)rtc_alarm_fired();
 		break;
 	case 80: {                                 /* SYS_AUDIO_MODE: ebx=mode (0=u8, 1=s16 mono, 2=s16 stereo) -> 0/-1 */
+		if (r->ebx > 2u) {                 /* validate first: a bad mode must not stop output */
+			r->eax = (unsigned int)-1;
+			break;
+		}
 		audio_stop_output();
 		int rc;
 		switch (r->ebx) {
@@ -826,7 +841,11 @@ void syscall_dispatch(struct regs *r)
 		break;
 	case 7:                                    /* SYS_SOUND: ebx = freq (0=off) */
 		speaker_play(r->ebx);
+		speaker_owner = r->ebx ? proc_current()->pid : 0;
 		r->eax = 0;
+		break;
+	case 95:                                   /* SYS_AUDIO_PLAYING: ebx=handle -> 1 while it still sounds */
+		r->eax = (unsigned int)audio_mix_playing((int)r->ebx);
 		break;
 	case 8:                                    /* SYS_FWRITE: ebx=name ecx=buf edx=size */
 		r->eax = (unsigned int)fs_syscall_write(r->ebx, r->ecx, r->edx);

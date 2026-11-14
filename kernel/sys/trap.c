@@ -232,6 +232,8 @@ void irq_handler(struct regs *r)
 		proc_tick(ticks);                   /* wake sleepers that are due */
 		if (ticks % 50 == 0)
 			proc_kstack_audit();        /* canary + high-water mark */
+		if (from_user)
+			audio_reclaim();            /* no kernel code interrupted: PMM is safe */
 		/* The kernel does not preempt itself: only a tick that
 		 * interrupted ring 3 may switch processes. Kernel code is
 		 * rescheduled where it explicitly yields or blocks. */

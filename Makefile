@@ -61,7 +61,11 @@ KINCLUDES = -Ikernel -Ikernel/arch -Ikernel/drivers/video -Ikernel/drivers/input
 # --gc-sections drops any function/data section the entry point can't reach,
 # which (paired with -ffunction-sections / -fdata-sections above) means an app
 # only pays the on-disk cost of the libstink helpers it actually calls.
-APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
+# -z noexecstack: state it outright. Objects without a .note.GNU-stack
+# section (everything our C toolchain emits) otherwise make ld warn about an
+# "implied executable stack" when linked with Rust objects that carry the
+# note. The kernel maps every user stack NX regardless.
+APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections -z noexecstack
 
 # Userland support library objects: malloc/free allocator, snprintf family,
 # FILE*-based stdio, POSIX glue (errno, gettimeofday, open/stat...) and the
