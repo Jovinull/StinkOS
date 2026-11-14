@@ -550,6 +550,104 @@ static int t_net_ping(void)
 	return 0;
 }
 
+/* The mixer runs in the sound card's interrupt, under whatever address
+ * space happens to be loaded. It must not depend on the caller's buffer
+ * staying mapped: unmap it mid-play, and play from a heap address that
+ * does not exist in the other process sharing the CPU. */
+static int t_audio_unmap(void)
+{
+	unsigned int base = free_pages();
+	unsigned char *p = sys_mmap(4 * PAGE);
+	if (!p) FAIL("mmap failed");
+	for (unsigned int i = 0; i < 4 * PAGE; i++)
+		p[i] = (unsigned char)(128 + ((i & 32) ? 20 : -20));
+	int h = sys_audio_play(p, 4 * PAGE, 64);
+	if (h < 0) FAIL("audio_play failed");
+	if (sys_munmap(p, 4 * PAGE) != 0) FAIL("munmap failed");
+	sys_sleep_ms(900);                  /* several sound IRQs with the buffer gone */
+
+	/* Second half: a sound started here keeps playing while a child that
+	 * has no mapping at this address runs. */
+	unsigned char *q = sys_mmap(8 * PAGE);
+	if (!q) FAIL("mmap failed");
+	memset(q, 128, 8 * PAGE);
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) { sys_exec("ktchild"); child_exit(99); }
+	sys_audio_play(q, 8 * PAGE, 64);
+	unsigned int t0 = sys_ticks();
+	while ((unsigned int)(sys_ticks() - t0) < 60)
+		;                               /* stay runnable so both share the CPU */
+	sys_waitpid(pid);
+	sys_munmap(q, 8 * PAGE);
+	sys_sleep_ms(1700);                 /* let both sounds run out */
+	unsigned int after = free_pages();
+	if (after != base) FAIL("%d frames still held after the sounds ended", (int)(base - after));
+	return 0;
+}
+
+/* How long a sound of known length takes in each output format. The
+ * mixer consumes source samples at the output rate (22050 Hz), so 22050
+ * samples last one second whatever the format; stereo used to finish in
+ * half the time. Also checks handle hygiene: a stale handle must not
+ * reach the sound that reused its channel. */
+static int t_audio_modes(void)
+{
+	static unsigned char tone[22050];
+	for (unsigned int i = 0; i < sizeof(tone); i++)
+		tone[i] = (unsigned char)(128 + ((i & 16) ? 6 : -6));
+	if (sys_audio_mode(99) != -1) FAIL("bogus mode accepted");
+	if (sys_audio_query() < 0) FAIL("a rejected mode switch stopped audio output");
+
+	for (int mode = 0; mode <= 2; mode++) {
+		if (sys_audio_mode(mode) != 0) FAIL("mode %d refused", mode);
+		sys_sleep_ms(450);              /* let the first buffers cycle */
+		int h = sys_audio_play(tone, sizeof(tone), 32);
+		if (h < 0) FAIL("play failed in mode %d", mode);
+		unsigned int t0 = sys_ticks();
+		while (sys_audio_playing(h) && (unsigned int)(sys_ticks() - t0) < 400)
+			sys_sleep_ms(10);
+		unsigned int took = sys_ticks() - t0;   /* 10 ms units; ideal = 100 */
+		/* Draining is noticed one half-buffer (up to ~370 ms) late. */
+		if (took < 80 || took > 160)
+			FAIL("1.00 s of audio took %u0 ms in mode %d", took, mode);
+		if (sys_audio_playing(h)) FAIL("ended sound still reported playing");
+
+		int h2 = sys_audio_play(tone, sizeof(tone), 32);
+		if (h2 == h) FAIL("handle reused for a new sound");
+		sys_audio_stop(h);              /* stale: must not touch h2's sound */
+		if (!sys_audio_playing(h2)) FAIL("stale handle stopped a newer sound (mode %d)", mode);
+		sys_audio_stop(h2);
+		if (sys_audio_playing(h2)) FAIL("stop did not stop");
+	}
+	sys_audio_mode(0);
+
+	/* Another process cannot stop or mute our sound through its handle. */
+	int h = sys_audio_play(tone, sizeof(tone), 32);
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		sys_audio_stop(h);
+		sys_audio_set_volume(h, 0);
+		child_exit(sys_audio_playing(h) ? 2 : 1);   /* not ours: reads as not playing */
+	}
+	int code = sys_waitpid(pid);
+	if (code != 1) FAIL("child could see our channel (exit %d)", code);
+	if (!sys_audio_playing(h)) FAIL("another process stopped our sound");
+	sys_audio_stop(h);
+
+	/* Longer than 65536 samples used to wrap the cursor and loop forever. */
+	static unsigned char longtone[70000];
+	memset(longtone, 128, sizeof(longtone));
+	h = sys_audio_play(longtone, sizeof(longtone), 16);
+	if (h < 0) FAIL("70000-sample sound refused");
+	unsigned int t0 = sys_ticks();
+	while (sys_audio_playing(h) && (unsigned int)(sys_ticks() - t0) < 600)
+		sys_sleep_ms(20);
+	if (sys_audio_playing(h)) FAIL("70000-sample sound never ended");
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -587,6 +685,8 @@ static const struct ktcase cases[] = {
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "eflags",      t_eflags },
 	{ "net-ping",    t_net_ping },
+	{ "audio-unmap", t_audio_unmap },
+	{ "audio-modes", t_audio_modes },
 	{ "badptr",      t_badptr },
 };
 

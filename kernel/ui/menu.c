@@ -338,11 +338,9 @@ static void redraw(void)
 
 void menu_exit(void)
 {
-	/* The IRQ-driven mixer reads sample pointers that live in the app's user
-	 * pages. Once we longjmp out and reset the user heap (in launch()), those
-	 * pages get unmapped; if a sound is still queued the next IRQ would walk
-	 * freed memory. Cut every channel before tearing down. */
-	audio_mix_silence_all();
+	/* app_return already silenced the exiting app's own channels; sounds
+	 * that belong to processes still running in the background keep
+	 * playing (the mixer owns its sample data, see audio.c). */
 	klongjmp(&exit_ctx, 1);                 /* jump back into launch() */
 }
 

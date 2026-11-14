@@ -14,6 +14,7 @@
 #include "serial.h"
 #include "proc.h"
 #include "memlayout.h"
+#include "pmm.h"
 
 /* SB16 I/O port layout, base 0x220 (the default; mixer register 0x80 can
  * select 0x240/0x260/0x280 on real hardware, but every common configuration
@@ -84,23 +85,35 @@ static int output_running;
  * (whole-buffer cycle) by summing every active channel's contribution. Volume
  * is fixed-point 0..256 (256 = unity gain). Samples are mono unsigned 8-bit.
  *
- * Channel source pointers point at memory the caller must keep alive until
- * the channel drains -- the typical Doom case where sound lumps live in the
- * pre-cached Z_Zone region. menu_exit silences everything before tearing
- * down an app's address space so a stale pointer can't reach the IRQ. */
+ * Sample ownership. The mixer runs in the SB16 interrupt, with whichever
+ * process's address space was loaded when it fired. It therefore never
+ * touches user memory: audio_mix_play copies the caller's samples into
+ * page frames the channel owns, and the interrupt reads those through the
+ * kernel direct map. The caller may free, unmap or exec over its buffer
+ * the moment the call returns.
+ *
+ * Frames are allocated and freed in process context only (the PMM is not
+ * interrupt-safe). When the interrupt runs a channel dry it just clears
+ * `active`; the frames go back at the next audio_reclaim(), which the
+ * timer path calls from a safe point. */
 #define MIX_CHANNELS 8
+#define MIX_MAX_BYTES  (1u << 20)             /* longest single sound: 1 MiB (~47 s) */
+#define MIX_MAX_PAGES  (MIX_MAX_BYTES / 4096u)
 
 struct mix_channel {
-	const unsigned char *src;
-	unsigned int         pos;           /* Q16.16 fixed-point index */
+	unsigned int         frames[MIX_MAX_PAGES]; /* phys frames holding the copy */
+	unsigned int         n_frames;
+	unsigned long long   pos;           /* Q48.16 fixed-point index (never wraps in practice) */
 	unsigned int         length;        /* in source samples (integer) */
 	unsigned int         step;          /* Q16.16 step per output sample */
 	int                  volume;        /* 0..256 */
-	int                  active;
+	volatile int         active;        /* set last on play; cleared by the IRQ at the end */
 	int                  owner_pid;     /* PID that called audio_mix_play */
+	unsigned int         gen;           /* bumped per play: makes stale handles miss */
 };
 
 static struct mix_channel channels[MIX_CHANNELS];
+static volatile int reclaim_pending;    /* some channel ended and still holds frames */
 
 /* Global master volume (0..256, unity = 256). Applied after the per-channel
  * sum but before saturation, so muting at the master level survives any
@@ -210,6 +223,24 @@ unsigned int audio_dsp_version(void)
  * step is (src_rate << 16) / output_rate, computed once at play time.
  * Nearest-sample reads keep the mixer cheap; a real cubic interpolator
  * would clean up the artefacts when ratios are far from unity. */
+/* Next sample of an active channel, centred on zero (-128..127). Runs in
+ * interrupt context: reads the channel's own frames through the direct
+ * map, never user memory. Returns 0 (and retires the channel) at the end
+ * of the sound. */
+static int ch_pull(struct mix_channel *ch, int *out)
+{
+	unsigned int idx = (unsigned int)(ch->pos >> 16);
+	if (idx >= ch->length) {
+		ch->active = 0;                 /* frames are reclaimed in process context */
+		reclaim_pending = 1;
+		return 0;
+	}
+	const unsigned char *page = (const unsigned char *)P2V(ch->frames[idx >> 12]);
+	*out = (int)page[idx & 0xFFFu] - 128;
+	ch->pos += ch->step;
+	return 1;
+}
+
 static void mixer_fill_window(unsigned int offset, unsigned int n)
 {
 	unsigned char *out = (unsigned char *)audio_buffer + offset;
@@ -220,14 +251,10 @@ static void mixer_fill_window(unsigned int offset, unsigned int n)
 			struct mix_channel *ch = &channels[c];
 			if (!ch->active)
 				continue;
-			unsigned int idx = ch->pos >> 16;
-			if (idx >= ch->length) {
-				ch->active = 0;
+			int s;
+			if (!ch_pull(ch, &s))
 				continue;
-			}
-			int s = (int)ch->src[idx] - 128;
 			sum += (s * ch->volume) >> 8;
-			ch->pos += ch->step;
 		}
 		sum = (sum * master_volume) >> 8;
 		if (sum >  127) sum =  127;
@@ -251,17 +278,13 @@ static void mixer_fill_window_s16(unsigned char *dst, unsigned int frames)
 			struct mix_channel *ch = &channels[c];
 			if (!ch->active)
 				continue;
-			unsigned int idx = ch->pos >> 16;
-			if (idx >= ch->length) {
-				ch->active = 0;
+			/* u8 -> s16: scale by 256 to expand the 8-bit dynamic
+			 * range into the 16-bit slot. Per-channel volume is
+			 * still applied as a 0..256 fixed-point gain. */
+			int s;
+			if (!ch_pull(ch, &s))
 				continue;
-			}
-			/* u8 -> s16: subtract bias, scale by 256 to expand the
-			 * 8-bit dynamic range into the 16-bit slot. Per-channel
-			 * volume is still applied as a 0..256 fixed-point gain. */
-			int s = ((int)ch->src[idx] - 128) << 8;
-			sum += (s * ch->volume) >> 8;
-			ch->pos += ch->step;
+			sum += ((s << 8) * ch->volume) >> 8;
 		}
 		sum = (sum * master_volume) >> 8;
 		if (sum >  32767) sum =  32767;
@@ -283,12 +306,51 @@ int audio_get_master(void)
 	return master_volume;
 }
 
-/* Claim the first free mixer channel for a one-shot sound effect. Volume is
- * clamped to 0..256; pass 256 for unity. Returns the channel handle (0..7),
- * or -1 if every slot is busy. */
+/* Handles are (generation << 3 | channel): a handle kept after its sound
+ * ended does not match the next sound that lands in the same channel. */
+#define HANDLE_OF(idx, gen)   ((int)((((gen) & 0x0FFFFFFFu) << 3) | (unsigned int)(idx)))
+
+static void channel_release(struct mix_channel *ch)
+{
+	for (unsigned int i = 0; i < ch->n_frames; i++)
+		pmm_free(ch->frames[i]);
+	ch->n_frames = 0;
+}
+
+void audio_reclaim(void)
+{
+	if (!reclaim_pending)
+		return;
+	reclaim_pending = 0;
+	for (int i = 0; i < MIX_CHANNELS; i++)
+		if (!channels[i].active && channels[i].n_frames)
+			channel_release(&channels[i]);
+}
+
+/* The channel a handle refers to, if that sound is still the one in it and
+ * the caller owns it; NULL otherwise. */
+static struct mix_channel *channel_of(int handle)
+{
+	if (handle < 0)
+		return 0;
+	unsigned int idx = (unsigned int)handle & 7u;
+	struct mix_channel *ch = &channels[idx];
+	if (HANDLE_OF(idx, ch->gen) != handle)
+		return 0;
+	struct proc *cur = proc_current();
+	if (cur && ch->owner_pid != cur->pid)
+		return 0;
+	return ch;
+}
+
+/* Claim the first free mixer channel for a one-shot sound effect and copy
+ * `length` unsigned 8-bit samples into it. Volume is clamped to 0..256;
+ * pass 256 for unity. Returns a handle, or -1 if every channel is busy,
+ * the sound is longer than MIX_MAX_BYTES, or memory ran out.
+ * Process context only. */
 int audio_mix_play(const unsigned char *samples, unsigned int length, int volume)
 {
-	if (!samples || length == 0)
+	if (!samples || length == 0 || length > MIX_MAX_BYTES)
 		return -1;
 	if (volume < 0)   volume = 0;
 	if (volume > 256) volume = 256;
@@ -296,17 +358,38 @@ int audio_mix_play(const unsigned char *samples, unsigned int length, int volume
 	struct proc *cur = proc_current();
 	int pid = cur ? cur->pid : 0;
 
+	audio_reclaim();
 	for (int i = 0; i < MIX_CHANNELS; i++) {
-		if (!channels[i].active) {
-			channels[i].src       = samples;
-			channels[i].pos       = 0;
-			channels[i].length    = length;
-			channels[i].step      = 1u << 16;   /* unity (output_rate) */
-			channels[i].volume    = volume;
-			channels[i].active    = 1;
-			channels[i].owner_pid = pid;
-			return i;
+		struct mix_channel *ch = &channels[i];
+		if (ch->active)
+			continue;
+		if (ch->n_frames)
+			channel_release(ch);
+
+		unsigned int pages = (length + 4095u) / 4096u;
+		for (unsigned int pg = 0; pg < pages; pg++) {
+			unsigned int frame = pmm_alloc();
+			if (!frame) {
+				channel_release(ch);
+				return -1;
+			}
+			ch->frames[ch->n_frames++] = frame;
+			unsigned char *dst = (unsigned char *)P2V(frame);
+			unsigned int off = pg * 4096u;
+			unsigned int n = length - off;
+			if (n > 4096u)
+				n = 4096u;
+			for (unsigned int k = 0; k < n; k++)
+				dst[k] = samples[off + k];
 		}
+		ch->pos       = 0;
+		ch->length    = length;
+		ch->step      = 1u << 16;           /* unity (output_rate) */
+		ch->volume    = volume;
+		ch->owner_pid = pid;
+		ch->gen++;
+		ch->active    = 1;                  /* last: the IRQ may pick it up from here */
+		return HANDLE_OF(i, ch->gen);
 	}
 	return -1;
 }
@@ -332,43 +415,56 @@ int audio_mix_play_rate(const unsigned char *samples, unsigned int length,
 	unsigned int step = (unsigned int)(((unsigned long long)src_rate << 16) / AUDIO_RATE_HZ);
 	if (step == 0) step = 1;
 	if (step > (16u << 16)) step = (16u << 16);   /* 16x speed ceiling */
-	channels[h].step = step;
+	channels[h & 7].step = step;
 	return h;
 }
 
 void audio_mix_stop(int handle)
 {
-	if (handle < 0 || handle >= MIX_CHANNELS)
+	struct mix_channel *ch = channel_of(handle);
+	if (!ch)
 		return;
-	channels[handle].active = 0;
+	ch->active = 0;
+	channel_release(ch);
 }
 
 void audio_mix_set_volume(int handle, int volume)
 {
-	if (handle < 0 || handle >= MIX_CHANNELS)
+	struct mix_channel *ch = channel_of(handle);
+	if (!ch)
 		return;
 	if (volume < 0)   volume = 0;
 	if (volume > 256) volume = 256;
-	channels[handle].volume = volume;
+	ch->volume = volume;
 }
 
-/* Silence every channel without touching the DSP -- used when an app exits
- * and its sample buffers are about to be unmapped. */
+int audio_mix_playing(int handle)
+{
+	struct mix_channel *ch = channel_of(handle);
+	return ch && ch->active;
+}
+
+/* Silence every channel without touching the DSP. */
 void audio_mix_silence_all(void)
 {
-	for (int i = 0; i < MIX_CHANNELS; i++)
+	for (int i = 0; i < MIX_CHANNELS; i++) {
 		channels[i].active = 0;
+		channel_release(&channels[i]);
+	}
 }
 
-/* Silence only the channels owned by `pid`. Lets the scheduler (or future
- * suspend logic) mute a single process's output without trashing audio
- * belonging to other still-running apps. A `pid` of 0 matches the kernel
- * boot context and any channel started outside a userland call. */
+/* Silence only the channels owned by `pid` and give their sample frames
+ * back. Called when a process exits, is killed or is suspended. A `pid`
+ * of 0 matches the kernel boot context. */
 void audio_mix_silence_pid(int pid)
 {
-	for (int i = 0; i < MIX_CHANNELS; i++)
-		if (channels[i].active && channels[i].owner_pid == pid)
-			channels[i].active = 0;
+	for (int i = 0; i < MIX_CHANNELS; i++) {
+		struct mix_channel *ch = &channels[i];
+		if (ch->owner_pid != pid || (!ch->active && !ch->n_frames))
+			continue;
+		ch->active = 0;
+		channel_release(ch);
+	}
 }
 
 /* Stereo s16 mixer. Sources are mono u8 -- the same dynamic-range
@@ -384,14 +480,10 @@ static void mixer_fill_window_s16_stereo(unsigned char *dst, unsigned int frames
 			struct mix_channel *ch = &channels[c];
 			if (!ch->active)
 				continue;
-			unsigned int idx = ch->pos >> 16;
-			if (idx >= ch->length) {
-				ch->active = 0;
+			int s;
+			if (!ch_pull(ch, &s))
 				continue;
-			}
-			int s = ((int)ch->src[idx] - 128) << 8;
-			sum += (s * ch->volume) >> 8;
-			ch->pos += ch->step;
+			sum += ((s << 8) * ch->volume) >> 8;
 		}
 		sum = (sum * master_volume) >> 8;
 		if (sum >  32767) sum =  32767;
@@ -449,6 +541,17 @@ int audio_current_mode(void)
 	return output_is_16bit;     /* holds the AUDIO_MODE_* enum value */
 }
 
+/* Fill the whole DMA ring with one byte value. Silence is 0x80 for
+ * unsigned 8-bit output and 0x00 for signed 16-bit; whatever the previous
+ * format (or the BSS) left in the ring would otherwise play as a
+ * full-scale burst until both halves have been refilled. */
+static void ring_fill(unsigned char v)
+{
+	unsigned char *b = (unsigned char *)audio_buffer;
+	for (unsigned int i = 0; i < AUDIO_BUFFER_SIZE; i++)
+		b[i] = v;
+}
+
 /* SB16 sample-rate command: two-byte HIGH-then-LOW big-endian rate. */
 static void dsp_set_output_rate(unsigned int hz)
 {
@@ -485,6 +588,7 @@ int audio_start_output(void)
 	dsp_write((unsigned char)(count & 0xFF));
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
+	ring_fill(0x80);                        /* start from silence in this format */
 	next_fill_half = 0;
 	output_is_16bit = AUDIO_MODE_MONO_U8;
 	output_running  = 1;
@@ -521,6 +625,7 @@ int audio_start_output_16bit(void)
 	dsp_write((unsigned char)(count & 0xFF));
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
+	ring_fill(0x00);                        /* start from silence in this format */
 	next_fill_half = 0;
 	output_is_16bit = AUDIO_MODE_MONO_S16;
 	output_running  = 1;
@@ -545,14 +650,18 @@ int audio_start_output_stereo(void)
 	dsp_write(DSP_SPEAKER_ON);
 	dsp_set_output_rate(AUDIO_RATE_HZ);
 
-	/* DSP block count is in SAMPLE PAIRS for stereo, but in raw "sample
-	 * frame" units; one stereo s16 frame = 4 bytes. */
-	unsigned int count = (AUDIO_HALF_SIZE / 4u) - 1u;
+	/* The DSP block length counts 16-bit samples, stereo or not: a
+	 * half-buffer of AUDIO_HALF_SIZE bytes is AUDIO_HALF_SIZE / 2 of
+	 * them. Dividing by the frame size (4) made the card interrupt every
+	 * quarter buffer while the handler refilled a half, so every sound
+	 * ran at double speed with alternate chunks dropped. */
+	unsigned int count = (AUDIO_HALF_SIZE / 2u) - 1u;
 	dsp_write(DSP_OUTPUT_16BIT_AI);
 	dsp_write(DSP_MODE_STEREO_S16);
 	dsp_write((unsigned char)(count & 0xFF));
 	dsp_write((unsigned char)((count >> 8) & 0xFF));
 
+	ring_fill(0x00);                        /* start from silence in this format */
 	next_fill_half = 0;
 	output_is_16bit = AUDIO_MODE_STEREO_S16;
 	output_running  = 1;

@@ -16,7 +16,13 @@ void speaker_play(unsigned int freq)
 		return;
 	}
 
+	/* The PIT reload value is 16 bits (and 0 means 65536): clamp instead
+	 * of letting an out-of-range frequency wrap to an unrelated pitch. */
 	unsigned int divisor = PIT_HZ / freq;
+	if (divisor < 2)
+		divisor = 2;                              /* above ~600 kHz */
+	if (divisor > 0xFFFF)
+		divisor = 0xFFFF;                         /* below ~18.2 Hz */
 
 	outb(PIT_CMD, 0xB6);                              /* ch2, mode 3, lo/hi byte */
 	outb(PIT_CH2, (unsigned char)(divisor & 0xFF));
