@@ -354,8 +354,13 @@ static void launch_elf(const char *elf_name)
 		return;
 	}
 
-	if (ksetjmp(&exit_ctx) != 0)
-		return;                         /* app called SYS_EXIT: back to menu */
+	if (ksetjmp(&exit_ctx) != 0) {
+		/* App ended (SYS_EXIT or a fault): back to the menu. Whatever it
+		 * left unread in the input queues was meant for it, not for us. */
+		keyboard_flush();
+		mouse_reset_delta();
+		return;
+	}
 
 	unsigned int lba, sectors;
 	if (fs_file_lba_sectors(elf_name, &lba, &sectors) != 0) {
@@ -392,8 +397,10 @@ static void launch_elf(const char *elf_name)
 
 	if (old_pgdir != new_pgdir)
 		paging_destroy_user_pgdir(old_pgdir);
-	if (cur)
+	if (cur) {
 		cur->cr3 = (unsigned int)new_pgdir;
+		proc_reset_image_state(cur);        /* no stale handlers, keys or mouse travel */
+	}
 
 	serial_write("loader: app loaded from fs\n");
 	enter_user_mode(entry, paging_user_stack_top());

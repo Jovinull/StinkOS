@@ -161,21 +161,54 @@ void mouse_get_state(int *x, int *y, unsigned char *buttons)
 	*buttons = cur_buttons;
 }
 
+static unsigned int irq_off(void)
+{
+	unsigned int flags;
+	__asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
+	return flags;
+}
+
+static void irq_back(unsigned int flags)
+{
+	if (flags & 0x200u)
+		__asm__ volatile ("sti");
+}
+
 /* Returns the motion accumulated since the previous call and resets the
- * accumulators. The kernel syscall handler runs with interrupts disabled
- * (the int 0x80 IDT entry is an interrupt gate), so no IRQ12 can race the
- * read-and-reset; no separate cli/sti pair needed. */
+ * accumulators. Syscalls run with interrupts enabled, so the read-and-
+ * reset is done with them off: an IRQ12 landing between the two would
+ * have its motion thrown away. */
 void mouse_consume_delta(int *dx, int *dy, unsigned char *buttons)
 {
+	unsigned int flags = irq_off();
 	*dx = delta_x_accum;
 	*dy = delta_y_accum;
 	delta_x_accum = 0;
 	delta_y_accum = 0;
 	*buttons = cur_buttons;
+	irq_back(flags);
+}
+
+/* Forget motion nobody consumed (called when the foreground app changes,
+ * so the new one does not start with the previous one's leftover travel). */
+void mouse_reset_delta(void)
+{
+	unsigned int flags = irq_off();
+	delta_x_accum = 0;
+	delta_y_accum = 0;
+	irq_back(flags);
 }
 
 void mouse_draw_cursor(unsigned int rgb)
 {
+	/* One position for the whole save + draw: the mouse IRQ moves cur_x /
+	 * cur_y, and a cursor saved at one spot and drawn at another leaves
+	 * fragments behind when it is restored. */
+	unsigned int flags = irq_off();
+	int cur_x_snap = cur_x, cur_y_snap = cur_y;
+	irq_back(flags);
+#define cur_x cur_x_snap
+#define cur_y cur_y_snap
 	int idx = 0;
 
 	for (int i = -3; i <= 3; i++)
@@ -193,6 +226,8 @@ void mouse_draw_cursor(unsigned int rgb)
 		fb_putpixel((unsigned int)cur_x, (unsigned int)(cur_y + i), rgb);
 		fb_putpixel((unsigned int)(cur_x + i), (unsigned int)cur_y, rgb);
 	}
+#undef cur_x
+#undef cur_y
 }
 
 void mouse_undraw_cursor(void)

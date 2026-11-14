@@ -18,6 +18,7 @@ void mouse_get_state(int *x, int *y, unsigned char *buttons);
  * accumulator to zero before returning, so back-to-back calls only see new
  * motion. Designed for apps that need raw deltas (mouselook, drawing tools)
  * instead of the clamped absolute cursor. */
+void mouse_reset_delta(void);   /* drop motion nobody consumed */
 void mouse_consume_delta(int *dx, int *dy, unsigned char *buttons);
 
 /* Draws the cursor at the current position, saving whatever pixels were

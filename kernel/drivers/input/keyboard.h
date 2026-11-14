@@ -40,4 +40,7 @@ unsigned int keyboard_get_event(void);
 #define KEYMAP_BR   1
 int keyboard_set_layout(int layout);
 
+/* Discard all pending characters and key events. */
+void keyboard_flush(void);
+
 #endif

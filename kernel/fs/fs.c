@@ -90,6 +90,24 @@ static int stinkfs_dir_load(struct fs_mount *m)
 		d->magic     = STINKFS_MAGIC;
 		d->count     = 0;
 		d->next_free = m->data_lba;
+		return 0;
+	}
+	/* The directory came off a disk: everything below indexes and does
+	 * sector arithmetic with these fields, so a damaged (or crafted) one
+	 * must be refused here rather than trusted. */
+	if (d->count > FS_MAX_FILES)
+		return -1;
+	if (d->next_free < m->data_lba || d->next_free > m->data_end)
+		return -1;
+	for (unsigned int i = 0; i < d->count; i++) {
+		struct fs_file *f = &d->files[i];
+		unsigned int sectors = (f->size + 511u) / 512u;
+		if (f->size > 0xFFFFFE00u)
+			return -1;                     /* +511 would wrap */
+		if (f->start < m->data_lba || f->start > d->next_free ||
+		    sectors > d->next_free - f->start)
+			return -1;
+		f->name[15] = '\0';
 	}
 	return 0;
 }
@@ -149,13 +167,14 @@ static int stinkfs_file_write(struct fs_mount *m, const char *name,
 	if (i >= 0 && need <= need_sectors(d->files[i].size)) {
 		start = d->files[i].start;
 	} else {
-		if (d->next_free + need > m->data_end)
+		if (need > m->data_end - d->next_free)
 			return -1;
+		if (i < 0 && d->count >= FS_MAX_FILES)
+			return -1;                     /* before claiming space: a full
+			                                * directory must not burn sectors */
 		start = d->next_free;
 		d->next_free += need;
 		if (i < 0) {
-			if (d->count >= FS_MAX_FILES)
-				return -1;
 			i = (int)d->count;
 			d->count++;
 			for (int k = 0; k < 16; k++)
@@ -428,6 +447,22 @@ int fs_mount_register(int slot, int drive, unsigned int dir_lba,
 	if (mounts[slot].present)              return -1;
 	if (drive < 0 || drive > 3)            return -1;
 	if (data_lba <= dir_lba || data_end <= data_lba) return -1;
+	if (data_lba - dir_lba < FS_DIR_SECTORS)         return -1;
+	if (data_end > 0x0FFFFFFFu)            return -1;   /* the ATA driver is LBA28 */
+
+	/* A secondary volume on the boot disk may only be carved out of space
+	 * the primary volume is not using: at or above its allocation
+	 * watermark. Anything lower would alias the boot sector, the kernel,
+	 * the primary directory or live file data -- and this call is
+	 * reachable from ring 3 (SYS_MOUNT). The primary's limit is pulled
+	 * down to the new volume's start so it cannot later grow into it. */
+	if (slot != 0 && mounts[0].present && drive == mounts[0].drive) {
+		struct fs_dir *pd = mount_dir(&mounts[0]);
+		if (dir_lba < pd->next_free)
+			return -1;
+		if (dir_lba < mounts[0].data_end)
+			mounts[0].data_end = dir_lba;
+	}
 
 	mounts[slot].drive    = drive;
 	mounts[slot].dir_lba  = dir_lba;

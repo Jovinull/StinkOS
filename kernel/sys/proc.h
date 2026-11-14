@@ -55,6 +55,7 @@ struct proc {
 
 	unsigned int      kstack_base;       /* lowest address of the kernel stack (canary lives here) */
 	unsigned int      kstack_warned;     /* highest stack usage already reported on serial */
+	unsigned int      pipe_ends;         /* bit h set = this proc holds pipe handle h (pipe.c) */
 };
 
 /* Kernel stack size for every process but the boot one (which runs on the
@@ -157,6 +158,14 @@ void           proc_idle(void);
  * the reaper, orphans living ones, wakes a parent blocked in wait. The
  * caller must already have released its own resources (sockets, audio). */
 void           proc_exit_current(void) __attribute__((noreturn));
+
+/* A process just replaced its program image (exec, or the menu launching
+ * an app in PID 1): anything that referred to the old image is void.
+ * Clears signal handlers (their addresses belonged to the old code) and
+ * pending signals; for the foreground process it also discards queued
+ * keyboard and mouse input, so keys typed at the previous program are not
+ * replayed into the new one. */
+void           proc_reset_image_state(struct proc *p);
 
 /* Detach every child of `p` (reap the zombies, orphan the living) without
  * exiting. Used when the boot proc's app ends and it becomes the menu

@@ -263,8 +263,10 @@ static int exec_run_by_elf(const char *elf_name)
 		audio_mix_silence_pid(cur->pid);
 	if (old_pgdir != new_pgdir)
 		paging_destroy_user_pgdir(old_pgdir);
-	if (cur)
+	if (cur) {
 		cur->cr3 = (unsigned int)new_pgdir;
+		proc_reset_image_state(cur);
+	}
 
 	enter_user_mode(entry, paging_user_stack_top());
 	return -1;                                 /* unreachable */
@@ -288,6 +290,7 @@ void app_return(void)
 		speaker_owner = 0;
 	}
 	tcp_close_pid(pid);
+	pipe_release_all(cur);
 
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
 	 * process menu launched. menu_exit's klongjmp would crash the
@@ -643,8 +646,8 @@ void syscall_dispatch(struct regs *r)
 	case 66:                                   /* SYS_REBOOT: warm-reset via the 8042 keyboard controller */
 		/* The classic PC reset path: pulse the 8042 reset line low. */
 		serial_write("reboot: pulsing 8042 reset line\n");
-		while (inb(0x64) & 0x02)              /* wait until input buffer drains */
-			;
+		for (unsigned int spins = 0; (inb(0x64) & 0x02) && spins < 1000000u; spins++)
+			;                                 /* input buffer drains, or we give up waiting */
 		outb(0x64, 0xFE);                       /* command 0xFE = CPU reset */
 		for (;;) __asm__ volatile ("cli; hlt"); /* unreachable on a real CPU */
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
@@ -678,7 +681,7 @@ void syscall_dispatch(struct regs *r)
 	}
 	case 53: {                                 /* SYS_SIGNAL: ebx=sig ecx=handler_addr -> 0 ok / -1 */
 		unsigned int sig = r->ebx;
-		if (sig >= PROC_NSIG) {
+		if (sig == 0 || sig >= PROC_NSIG) {    /* 0 is "no signal" to SYS_SIGPOLL */
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -694,7 +697,7 @@ void syscall_dispatch(struct regs *r)
 	case 54: {                                 /* SYS_RAISE: ebx=pid ecx=sig -> 0 ok / -1 */
 		int pid = (int)r->ebx;
 		unsigned int sig = r->ecx;
-		if (sig >= PROC_NSIG) {
+		if (sig == 0 || sig >= PROC_NSIG) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1247,6 +1250,8 @@ void syscall_dispatch(struct regs *r)
 			child->sig_handlers[i] = parent->sig_handlers[i];
 		child->pending_signals = 0;
 		child->priority        = parent->priority;
+		child->pipe_ends       = parent->pipe_ends;
+		pipe_fork(child->pipe_ends);
 
 		child->state = PROC_READY;
 		r->eax = (unsigned int)child->pid;     /* parent return */

@@ -20,6 +20,17 @@ static struct pipe pool[PIPE_MAX];
 #define END_READ         0
 #define END_WRITE        1
 
+/* Which pipe ends the calling process holds: bit `handle` of its PCB's
+ * pipe_ends. A handle is only a small index, so every operation checks
+ * the bit -- a process cannot use (or close) an end it was never given.
+ * fork copies the bits and pipe_fork() takes a reference per copied end;
+ * pipe_release_all() drops them when the process dies. */
+static int holds(int handle)
+{
+	struct proc *cur = proc_current();
+	return cur && (cur->pipe_ends & (1u << handle));
+}
+
 static struct pipe *get_pipe(int handle, int expect_end)
 {
 	if (handle < 0 || handle >= (PIPE_MAX * 2))
@@ -28,14 +39,15 @@ static struct pipe *get_pipe(int handle, int expect_end)
 		return 0;
 	int idx = HANDLE_IDX(handle);
 	struct pipe *p = &pool[idx];
-	if (!p->used)
+	if (!p->used || !holds(handle))
 		return 0;
 	return p;
 }
 
 int pipe_alloc(int *rd_handle, int *wr_handle)
 {
-	if (!rd_handle || !wr_handle)
+	struct proc *cur = proc_current();
+	if (!rd_handle || !wr_handle || !cur)
 		return -1;
 	for (int i = 0; i < PIPE_MAX; i++) {
 		if (pool[i].used)
@@ -48,18 +60,18 @@ int pipe_alloc(int *rd_handle, int *wr_handle)
 		pool[i].used    = 1;
 		*rd_handle = MAKE_HANDLE(i, END_READ);
 		*wr_handle = MAKE_HANDLE(i, END_WRITE);
+		cur->pipe_ends |= (1u << *rd_handle) | (1u << *wr_handle);
 		return 0;
 	}
 	return -1;
 }
 
-int pipe_close(int handle)
+/* Drop one reference on an end; frees the pipe when both sides are gone. */
+static void end_unref(int handle)
 {
-	if (handle < 0 || handle >= (PIPE_MAX * 2))
-		return -1;
 	struct pipe *p = &pool[HANDLE_IDX(handle)];
 	if (!p->used)
-		return -1;
+		return;
 	if (HANDLE_END(handle) == END_READ) {
 		if (p->readers)
 			p->readers--;
@@ -69,7 +81,38 @@ int pipe_close(int handle)
 	}
 	if (!p->readers && !p->writers)
 		p->used = 0;
+}
+
+int pipe_close(int handle)
+{
+	if (handle < 0 || handle >= (PIPE_MAX * 2) || !holds(handle))
+		return -1;
+	proc_current()->pipe_ends &= ~(1u << handle);
+	end_unref(handle);
 	return 0;
+}
+
+void pipe_fork(unsigned int ends)
+{
+	for (int h = 0; h < PIPE_MAX * 2; h++) {
+		if (!(ends & (1u << h)))
+			continue;
+		struct pipe *p = &pool[HANDLE_IDX(h)];
+		if (HANDLE_END(h) == END_READ)
+			p->readers++;
+		else
+			p->writers++;
+	}
+}
+
+void pipe_release_all(struct proc *p)
+{
+	if (!p)
+		return;
+	for (int h = 0; h < PIPE_MAX * 2; h++)
+		if (p->pipe_ends & (1u << h))
+			end_unref(h);
+	p->pipe_ends = 0;
 }
 
 int pipe_read(int handle, void *dst, unsigned int n)

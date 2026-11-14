@@ -648,6 +648,86 @@ static int t_audio_modes(void)
 	return 0;
 }
 
+/* Pipes: an end belongs to the processes that were given it. */
+static int t_pipes(void)
+{
+	/* 1. A process that was never handed the pipe cannot touch it by
+	 *    guessing handle numbers. */
+	int guesser = sys_fork();
+	if (guesser < 0) FAIL("fork failed");
+	if (guesser == 0) {
+		sys_sleep_ms(150);              /* until the parent has made its pipe */
+		int hits = 0;
+		for (int h = 0; h < 32; h++) {
+			if (sys_pipe_write(h, "x", 1) >= 0) hits++;
+			if (sys_pipe_close(h) == 0) hits++;
+		}
+		child_exit(hits);
+	}
+	int fds[2];
+	if (sys_pipe(fds) != 0) FAIL("pipe() failed");
+	if (sys_pipe_write(fds[1], "ab", 2) != 2) FAIL("write to own pipe failed");
+	int hits = sys_waitpid(guesser);
+	if (hits != 0) FAIL("an unrelated process got %d operations through on our pipe", hits);
+	char buf[8];
+	if (sys_pipe_read(fds[0], buf, 2) != 2 || buf[0] != 'a' || buf[1] != 'b')
+		FAIL("pipe contents were disturbed");
+
+	/* 2. A child inherits both ends; when it dies holding the write end
+	 *    and we close ours, the reader must see EOF instead of blocking. */
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		sys_pipe_write(fds[1], "hi", 2);
+		child_exit(3);                  /* exits without closing anything */
+	}
+	if (sys_waitpid(pid) != 3) FAIL("child failed");
+	sys_pipe_close(fds[1]);
+	if (sys_pipe_read(fds[0], buf, 2) != 2 || buf[0] != 'h') FAIL("lost the child's bytes");
+	int pid2 = sys_fork();
+	if (pid2 < 0) FAIL("fork failed");
+	if (pid2 == 0)
+		child_exit(sys_pipe_read(fds[0], buf, 1) == 0 ? 1 : 2);   /* EOF, not a hang */
+	/* waitpid would block forever on a stuck reader: give it time, then
+	 * kill it (a no-op if it already exited cleanly with code 1). */
+	sys_sleep_ms(300);
+	sys_kill(pid2);                         /* no-op if it already exited cleanly */
+	int eof = sys_waitpid(pid2);
+	if (eof != 1) FAIL("reader did not get EOF after every writer was gone (exit %d)", eof);
+	sys_pipe_close(fds[0]);
+
+	/* 3. Processes that die with pipes open must not use the pool up. */
+	for (int i = 0; i < 24; i++) {
+		int c = sys_fork();
+		if (c < 0) FAIL("fork failed");
+		if (c == 0) {
+			int f[2];
+			child_exit(sys_pipe(f) == 0 ? 1 : 2);
+		}
+		if (sys_waitpid(c) != 1) FAIL("pipe pool exhausted after %d dead owners", i);
+	}
+	return 0;
+}
+
+/* SYS_MOUNT must not let a process alias the boot area or live data. */
+static int t_mount_guard(void)
+{
+	if (sys_mount(1, 0, 0, 4, 200000) == 0)
+		FAIL("mounted a volume over LBA 0 (boot sector + kernel)");
+	if (sys_mount(1, 0, 512, 516, 200516) == 0)
+		FAIL("mounted a second volume over the primary one");
+	if (sys_mount(1, 0, 600, 604, 700) == 0)
+		FAIL("mounted a volume inside the primary's used data");
+	if (sys_mount(1, 0, 199000, 199004, 0x10000000u) == 0)
+		FAIL("accepted a volume beyond the LBA28 limit");
+	if (sys_mount(1, 0, 199000, 199001, 200000) == 0)
+		FAIL("accepted a directory area shorter than the directory");
+	/* The legitimate use still works: a volume in the free tail. */
+	if (sys_mount(1, 0, 199000, 199004, 200000) != 0)
+		FAIL("refused a volume in unused space");
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -658,6 +738,15 @@ static int t_sbrk_oom(void)
 	if (sys_sbrk(0) != brk0) FAIL("break moved after a failed sbrk");
 	unsigned int after = free_pages();
 	if (after != base) FAIL("failed sbrk kept %d frames", (int)(base - after));
+	return 0;
+}
+
+/* Not a check by itself: sits for a while without reading any input and
+ * then returns to whatever started it. tools/qa/input_flush.py types keys
+ * during the pause and verifies they are not replayed into the menu. */
+static int t_idle_exit(void)
+{
+	sys_sleep_ms(2500);
 	return 0;
 }
 
@@ -687,7 +776,10 @@ static const struct ktcase cases[] = {
 	{ "net-ping",    t_net_ping },
 	{ "audio-unmap", t_audio_unmap },
 	{ "audio-modes", t_audio_modes },
+	{ "pipes",       t_pipes },
+	{ "mount-guard", t_mount_guard },
 	{ "badptr",      t_badptr },
+	{ "idle-exit",   t_idle_exit },       /* driven by input_flush.py, not by "all" */
 };
 
 void main(void)
@@ -700,10 +792,11 @@ void main(void)
 		n--;
 	arg[n] = '\0';
 	int all = (n == 0 || strcmp(arg, "all") == 0);
+	int stay = (strcmp(arg, "idle-exit") == 0);   /* return to the menu instead of powering off */
 
 	int ran = 0;
 	for (unsigned int i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-		if (!all && strcmp(arg, cases[i].name) != 0)
+		if (all ? cases[i].fn == t_idle_exit : strcmp(arg, cases[i].name) != 0)
 			continue;
 		ran++;
 		sys_printf("ktest: %s: start", cases[i].name);
@@ -716,5 +809,6 @@ void main(void)
 	if (!ran)
 		sys_printf("ktest: no such case '%s'", arg);
 	sys_log("ktest: done");
-	sys_shutdown();
+	if (!stay)
+		sys_shutdown();
 }

@@ -115,6 +115,10 @@ int vfs_seek(int fd, int offset, int whence)
 		return -1;
 	}
 
+	/* base >= 0 here. Reject instead of wrapping when the sum leaves int
+	 * range in either direction. */
+	if (offset > 0 && base > 0x7FFFFFFF - offset)
+		return -1;
 	int pos = base + offset;
 	if (pos < 0)
 		return -1;
