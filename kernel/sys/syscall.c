@@ -266,6 +266,7 @@ static int exec_run_by_elf(const char *elf_name)
 	if (cur) {
 		cur->cr3 = (unsigned int)new_pgdir;
 		proc_reset_image_state(cur);
+		proc_set_name(cur, elf_name);
 	}
 
 	enter_user_mode(entry, paging_user_stack_top());
