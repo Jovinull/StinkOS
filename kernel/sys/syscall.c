@@ -1253,6 +1253,12 @@ void syscall_dispatch(struct regs *r)
 		child->priority        = parent->priority;
 		child->pipe_ends       = parent->pipe_ends;
 		pipe_fork(child->pipe_ends);
+		/* The child resumes at the same instruction with the same
+		 * floating-point registers. fnsave resets the FPU, so load the
+		 * image straight back for the parent. */
+		__asm__ volatile ("fnsave %0" : "=m"(child->fpu));
+		__asm__ volatile ("frstor %0" : : "m"(child->fpu));
+		child->fpu_valid = 1;
 
 		child->state = PROC_READY;
 		r->eax = (unsigned int)child->pid;     /* parent return */
