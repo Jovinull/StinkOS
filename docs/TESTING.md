@@ -77,6 +77,7 @@ or on QEMU exiting rather than on fixed sleeps.
 |---|---|
 | `tools/qa/net_rst.py` | the host opens TCP connections to a closed guest port while an app runs; the guest must reset them and its kernel stack audit must stay quiet |
 | `tools/qa/input_flush.py` | keys typed at an app that never reads them must not be replayed into the menu when it exits |
+| `tools/qa/kbd_test.py` | modifier state key by key: two Shifts, a held Caps Lock, the Pause sequence |
 
 The older `tools/test-headless.py` and `tools/smoke-*.py` predate the
 driver and use fixed paths under `/tmp` and fixed sleeps; do not run two

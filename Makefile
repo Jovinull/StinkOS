@@ -13,7 +13,7 @@ help:
 	@echo "  make test-headless -- boot, run, capture serial, diff a baseline"
 	@echo "  make unittest      -- run every host-side regression test"
 	@echo "  make ktest         -- kernel regression cases in QEMU (one VM per case)"
-	@echo "  make qa-net qa-input -- host-driven network / input scenarios"
+	@echo "  make qa-net qa-input qa-kbd -- host-driven network / input scenarios"
 	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
 	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
 	@echo "  make clean         -- delete build/ os.bin stinkos-install.iso"
@@ -695,6 +695,9 @@ qa-net: all
 
 qa-input: all
 	@python3 tools/qa/input_flush.py
+
+qa-kbd: all
+	@python3 tools/qa/kbd_test.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so

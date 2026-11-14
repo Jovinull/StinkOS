@@ -196,7 +196,7 @@ move into the sections above.
 | A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
 | A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | open |
 | A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
-| A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
+| A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | **fixed + retested** for the two-Shift case (`tools/qa/kbd_test.py`: typed `Xxx`, want `XXx`); Caps Lock repeat and 0xE1 are fixed but QEMU key injection does not reproduce them |
 | A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | fixed (handlers and pending signals cleared on exec / app launch, signal 0 refused); not covered by a test |
 | A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | fixed (linker ASSERT) |
 | A18 | P1 | audio | Q16.16 cursor wraps at 65536 samples: longer sounds loop forever and never free the channel | **fixed + retested** (`ktest audio-modes`, 70000-sample sound) |
