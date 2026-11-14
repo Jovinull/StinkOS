@@ -378,6 +378,36 @@ static int t_resched(void)
 	return 0;
 }
 
+/* Three CPU-bound processes must all make progress while the kernel's own
+ * high-priority thread keeps waking (the NIC keeps the network thread
+ * busy). A round-robin that restarts from the thread's table slot starves
+ * all but one of them. */
+static int t_fair3(void)
+{
+	int pids[2];
+	for (int i = 0; i < 2; i++) {
+		pids[i] = sys_fork();
+		if (pids[i] < 0) FAIL("fork failed");
+		if (pids[i] == 0) {
+			unsigned int c = spin_for(60);
+			child_exit(c > 0 ? (int)(c / 256u) + 1 : 0);
+		}
+	}
+	unsigned int mine = spin_for(60);
+	unsigned int share[3] = { mine / 256u + 1, 0, 0 };
+	for (int i = 0; i < 2; i++) {
+		int code = sys_waitpid(pids[i]);
+		if (code <= 0) FAIL("child %d made no progress", i);
+		share[i + 1] = (unsigned int)code;
+	}
+	unsigned int total = share[0] + share[1] + share[2];
+	for (int i = 0; i < 3; i++)
+		if (share[i] * 100u / total < 15u)
+			FAIL("process %d got %u%% of the CPU (shares %u %u %u)", i,
+			     share[i] * 100u / total, share[0], share[1], share[2]);
+	return 0;
+}
+
 /* Two processes hammering the filesystem and the frame allocator at once:
  * every byte each one reads back must be its own, and no frame may go
  * missing. */
@@ -770,6 +800,7 @@ static const struct ktcase cases[] = {
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },
+	{ "fair3",       t_fair3 },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "eflags",      t_eflags },
