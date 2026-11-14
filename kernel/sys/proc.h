@@ -56,6 +56,7 @@ struct proc {
 	unsigned int      kstack_base;       /* lowest address of the kernel stack (canary lives here) */
 	unsigned int      kstack_warned;     /* highest stack usage already reported on serial */
 	unsigned int      pipe_ends;         /* bit h set = this proc holds pipe handle h (pipe.c) */
+	unsigned int      last_run;          /* scheduler sequence number of its last turn on the CPU */
 };
 
 /* Kernel stack size for every process but the boot one (which runs on the
@@ -153,6 +154,11 @@ void           proc_kstack_audit(void);
 /* Give up the CPU if anyone else can use it, otherwise halt until the next
  * interrupt. For kernel polling loops (the menu's idle loop). */
 void           proc_idle(void);
+
+/* Ask `p` to die: it exits by itself at its next return to ring 3 with
+ * exit code 137. Wakes it if it is blocked, un-suspends it. Returns 0, or
+ * -1 for a proc that cannot be killed (PID 1, a zombie, an embryo). */
+int            proc_kill(struct proc *p);
 
 /* Turn the caller into a ZOMBIE and never return: hands zombie children to
  * the reaper, orphans living ones, wakes a parent blocked in wait. The
