@@ -183,31 +183,31 @@ move into the sections above.
 | Id | Sev | Area | Finding | Status |
 |----|-----|------|---------|--------|
 | A1 | P0 | audio | IRQ mixer dereferences user sample pointers under whatever address space is loaded; unmap/exec/another process running halts the kernel | **fixed + retested** (`ktest audio-unmap`: kernel halt before): the mixer owns a copy of every sound |
-| A2 | P0 | fs | `SYS_MOUNT` accepts any LBA range: a mount over LBA 0 lets an app overwrite the boot sector and kernel | open |
-| A3 | P1 | pipes | no owner, not closed on exit, not counted across fork | open |
+| A2 | P0 | fs | `SYS_MOUNT` accepts any LBA range: a mount over LBA 0 lets an app overwrite the boot sector and kernel | **fixed + retested** (`ktest mount-guard`); on-disk directories are also validated at mount |
+| A3 | P1 | pipes | no owner, not closed on exit, not counted across fork | **fixed + retested** (`ktest pipes`): per-process ownership bits, references across fork, release at exit |
 | A4 | P0 | traps | no `cld` on trap entry (user DF=1 reverses kernel `rep movs`); fork seeds a ring-0 `popf` from user EFLAGS | **fixed + retested** (`ktest eflags`) |
-| A5 | P1 | input | key queue never flushed: keys typed in an app replay into the menu (can launch apps, delete files) | open |
+| A5 | P1 | input | key queue never flushed: keys typed in an app replay into the menu (can launch apps, delete files) | **fixed + retested** (`tools/qa/input_flush.py`) |
 | A6 | P1 | video | `SYS_MAP_FB` maps 2 MiB of a 2.25-3 MiB framebuffer; userland assumes 32 bpp, QEMU's mode 0x118 is 24 bpp | open |
-| A7 | P2 | input | mouse accumulators read-and-cleared with IRQs on; cursor save/draw not atomic | open |
-| A8 | P2 | rtc | unbounded update-in-progress loop; CMOS index raced by IRQ8 | open |
-| A9 | P0 | acpi | firmware table pointers above the 256 MiB direct map fault before the IDT exists (`-m 512`) | open |
+| A7 | P2 | input | mouse accumulators read-and-cleared with IRQs on; cursor save/draw not atomic | fixed (read-and-clear and cursor snapshot with IRQs off); no failing run |
+| A8 | P2 | rtc | unbounded update-in-progress loop; CMOS index raced by IRQ8 | fixed (bounded wait, CMOS access with IRQs off); no failing run |
+| A9 | P0 | acpi | firmware table pointers above the 256 MiB direct map fault before the IDT exists (`-m 512`) | **fixed + retested** (`ktest --mem 512`: boot hung at the RSDP line before) |
 | A10 | P1 | video | kernel uses the LFB physical address as a virtual one; only valid at or above 0xFD000000 | open |
 | A11 | P1 | boot | stage 2 reads the kernel from the primary ATA master whatever the BIOS boot drive was | open |
 | A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
 | A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | open |
 | A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
 | A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
-| A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | open |
-| A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | open |
+| A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | fixed (handlers and pending signals cleared on exec / app launch, signal 0 refused); not covered by a test |
+| A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | fixed (linker ASSERT) |
 | A18 | P1 | audio | Q16.16 cursor wraps at 65536 samples: longer sounds loop forever and never free the channel | **fixed + retested** (`ktest audio-modes`, 70000-sample sound) |
 | A19 | P1 | audio | mixer handles have no owner: any process can stop or mute another's channels | **fixed + retested** (`ktest audio-modes`): handles carry owner + generation |
 | A20 | P1 | audio | stereo mode programs half the block size (per QEMU's sb16 model) | **fixed + retested** (`ktest audio-modes`: 1.00 s of audio took 480 ms) |
 | A21 | P2 | audio | `SYS_AUDIO_MODE` stops output before validating the mode; DMA ring not cleared on format change | **fixed + retested** (`ktest audio-modes`) |
 | A22 | P2 | speaker | tone outlives the process that started it | fixed (speaker released when its owner exits; divisor clamped); not covered by a test |
-| A23 | P1 | fs | new-file path advances `next_free` before the directory-full check | open |
+| A23 | P1 | fs | new-file path advances `next_free` before the directory-full check | fixed; not covered by a test |
 | A24 | P2 | fs | case-sensitive lookups everywhere except the loader | open |
-| A25 | P2 | vfs | `vfs_seek` adds offsets as signed int with no overflow guard | open |
-| A26 | P2 | misc | unbounded 8042 wait in `SYS_REBOOT` | open |
+| A25 | P2 | vfs | `vfs_seek` adds offsets as signed int with no overflow guard | fixed; not covered by a test |
+| A26 | P2 | misc | unbounded 8042 wait in `SYS_REBOOT` | fixed |
 | N1 | P0 | net | `tcp_emit_rst` keeps an 11 KiB `struct tcb` on an 8 KiB kernel stack; the TX call chain alone nests four 1.5 KiB buffers | **fixed + retested** (`tools/qa/net_rst.py`: 8048 of 8192 stack bytes used before, audit quiet after) |
 | N2 | P0 | net | the whole RX path (ARP/IP/TCP, replies included) runs inside the IRQ handler, on top of any syscall using the same structures and static buffers | **fixed + retested**: RX and timers moved to the `knet` kernel thread (`ktest net-ping`) |
 | N3 | P0 | net | socket handles have no owner: any process can read, write or close another's connection | fixed (syscalls gate on `tcp_owned_by`); not yet covered by a test |

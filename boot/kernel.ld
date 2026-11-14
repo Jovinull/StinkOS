@@ -47,6 +47,11 @@ SECTIONS
 	} :text
 	. = ALIGN(4096);
 	__kernel_rodata_end = .;
+	/* paging.c stamps per-section W^X on a single page table covering
+	 * the first 2 MiB of the direct map. Code or read-only data past it
+	 * would silently land in a writable huge page. */
+	ASSERT(__kernel_rodata_end <= 0x80200000,
+	       "kernel .text/.rodata outgrew the 2 MiB W^X window (kernel_wx_install_pt)")
 
 	__kernel_data_start = .;
 	.data : AT(ADDR(.data) - 0x80000000) {

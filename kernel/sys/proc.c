@@ -97,6 +97,7 @@ static void zero_proc(struct proc *p)
 	p->kstack_top      = 0;
 	p->kstack_base     = 0;
 	p->kstack_warned   = 0;
+	p->pipe_ends       = 0;
 	p->esp             = 0;
 	p->cr3             = 0;
 	p->pending_signals = 0;
@@ -414,6 +415,19 @@ void proc_idle(void)
 }
 
 /* ---- lifetime ------------------------------------------------------------ */
+
+void proc_reset_image_state(struct proc *p)
+{
+	if (!p)
+		return;
+	p->pending_signals = 0;
+	for (int i = 0; i < PROC_NSIG; i++)
+		p->sig_handlers[i] = 0;
+	if (p->pid == 1) {                         /* the foreground program */
+		keyboard_flush();
+		mouse_reset_delta();
+	}
+}
 
 static void reap_slot(struct proc *p)
 {

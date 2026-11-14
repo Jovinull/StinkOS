@@ -145,6 +145,20 @@ static void kevent_push(int pressed, int extended, unsigned char sc7)
 	}
 }
 
+/* Drop everything queued in both rings. Called when the foreground
+ * program changes: keys typed at one program must not be replayed to the
+ * next (the menu treats a stale Enter as "launch" and a stale 'd' in the
+ * file view as "delete"). */
+void keyboard_flush(void)
+{
+	unsigned int flags;
+	__asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
+	kbuf_tail   = kbuf_head;
+	kevent_tail = kevent_head;
+	if (flags & 0x200u)
+		__asm__ volatile ("sti");
+}
+
 char keyboard_getchar(void)
 {
 	if (kbuf_head == kbuf_tail)
