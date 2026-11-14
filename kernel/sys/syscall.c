@@ -1196,7 +1196,11 @@ void syscall_dispatch(struct regs *r)
 		child_regs->eax  = 0;                  /* child sees fork() == 0 */
 		unsigned int *sp = (unsigned int *)byte_sp;
 		*(--sp) = (unsigned int)trap_return;   /* ret -> trap_return */
-		*(--sp) = r->eflags;                   /* eflags (popf) */
+		/* context_switch pops this with popf while still in ring 0.
+		 * It must be a kernel-chosen value: the caller's EFLAGS image
+		 * (NT, DF, TF are all settable from ring 3) belongs in the
+		 * trap frame above, where iret applies it to user mode only. */
+		*(--sp) = 0x00000202;                  /* IF + the always-one bit */
 		*(--sp) = 0;                           /* ebp */
 		*(--sp) = 0;                           /* ebx */
 		*(--sp) = 0;                           /* esi */
