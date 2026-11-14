@@ -74,6 +74,9 @@ jobs:
       - name: QA -- keys typed at an app are not replayed into the menu
         run: make qa-input
 
+      - name: QA -- keyboard modifier state
+        run: make qa-kbd
+
       # Dedicated smokes split out of test-headless: each spins its
       # own QEMU instance + asserts a single feature end-to-end.
       # Cheaper per-assertion than the menu sweep, less prone to

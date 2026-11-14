@@ -102,10 +102,17 @@ static const char *active_map_shift(void)
 	return current_layout == KEYMAP_BR ? map_br_shift : map_shift;
 }
 
-static int shift_down = 0;
+/* Modifier state. Left and right keys are tracked separately: with one
+ * flag for both, releasing one Shift while the other is still held turned
+ * shifting off. */
+static int lshift_down, rshift_down;
+static int lctrl_down, rctrl_down;
+#define shift_down (lshift_down || rshift_down)
+#define ctrl_down  (lctrl_down || rctrl_down)
 static int capslock_on = 0;
-static int ctrl_down = 0;
+static int capslock_held = 0;     /* key is physically down: ignore its auto-repeat */
 static int extended_prefix = 0;   /* set after seeing SC_EXTENDED, for one byte */
+static int e1_skip = 0;           /* bytes left of an 0xE1 (Pause) sequence */
 
 /* Decoded-character ring buffer, drained by keyboard_getchar (the syscall). */
 #define KBUF_SIZE 128
@@ -155,6 +162,7 @@ void keyboard_flush(void)
 	__asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
 	kbuf_tail   = kbuf_head;
 	kevent_tail = kevent_head;
+	/* Modifier state is NOT reset: the keys may really still be down. */
 	if (flags & 0x200u)
 		__asm__ volatile ("sti");
 }
@@ -189,6 +197,21 @@ void keyboard_handle(void)
 {
 	unsigned char sc = inb(KBD_DATA);
 
+	/* Bytes that are not key codes: command replies (ACK 0xFA, resend
+	 * 0xFE, self-test 0xAA is a valid release code so it is left alone),
+	 * error/overrun markers, and the six-byte Pause sequence E1 1D 45
+	 * E1 9D C5, whose 1D/9D would otherwise read as Ctrl down/up. */
+	if (e1_skip) {
+		e1_skip--;
+		return;
+	}
+	if (sc == 0xE1) {
+		e1_skip = 2;
+		return;
+	}
+	if (sc == 0xFA || sc == 0xFE || sc == 0x00 || sc == 0xFF)
+		return;
+
 	if (sc == SC_EXTENDED) {
 		extended_prefix = 1;
 		return;
@@ -203,7 +226,7 @@ void keyboard_handle(void)
 		extended_prefix = 0;
 
 		if ((sc & 0x7F) == SC_CTRL) {     /* E0 1D = right Ctrl */
-			ctrl_down = !(sc & SC_RELEASE);
+			rctrl_down = !(sc & SC_RELEASE);
 			return;
 		}
 		if (sc & SC_RELEASE)
@@ -228,25 +251,38 @@ void keyboard_handle(void)
 
 	if (sc & SC_RELEASE) {
 		unsigned char code = sc & 0x7F;
-		if (code == SC_LSHIFT || code == SC_RSHIFT)
-			shift_down = 0;
+		if (code == SC_LSHIFT)
+			lshift_down = 0;
+		else if (code == SC_RSHIFT)
+			rshift_down = 0;
 		else if (code == SC_CTRL)
-			ctrl_down = 0;
+			lctrl_down = 0;
+		else if (code == SC_CAPSLOCK)
+			capslock_held = 0;
 		return;
 	}
 
-	if (sc == SC_LSHIFT || sc == SC_RSHIFT) {
-		shift_down = 1;
+	if (sc == SC_LSHIFT) {
+		lshift_down = 1;
+		return;
+	}
+	if (sc == SC_RSHIFT) {
+		rshift_down = 1;
 		return;
 	}
 
 	if (sc == SC_CTRL) {
-		ctrl_down = 1;
+		lctrl_down = 1;
 		return;
 	}
 
 	if (sc == SC_CAPSLOCK) {
-		capslock_on = !capslock_on;
+		/* Toggle once per physical press: the keyboard repeats the make
+		 * code while the key is held, which used to flip the state at
+		 * the repeat rate and leave it at whatever it landed on. */
+		if (!capslock_held)
+			capslock_on = !capslock_on;
+		capslock_held = 1;
 		return;
 	}
 
