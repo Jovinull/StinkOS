@@ -4,11 +4,7 @@
  * Runs inside a window frame; content starts at OY (below the titlebar). */
 #include "libstink.h"
 
-#define W   SYS_FB_W
-#define H   SYS_FB_H
-#define S   SYS_FB_STRIDE
 #define OY  ((unsigned int)WIN_TITLEBAR_H)
-#define GH  (H - OY)
 
 static const unsigned int BARS[8] = {
     0xC0C0C0,   /* grey    */
@@ -24,21 +20,26 @@ static const unsigned int BARS[8] = {
 int main(void)
 {
     /* Window frame must be drawn before touching the LFB directly. */
-    draw_window_frame(0, 0, (int)W, (int)H,
+    draw_window_frame(0, 0, (int)SYS_FB_W, (int)SYS_FB_H,
         "Framebuffer Demo  --  direct VRAM write via SYS_MAP_FB");
 
-    volatile unsigned int *fb = sys_map_fb();
-    if (!fb) {
-        sys_log("fbdemo: sys_map_fb failed");
+    /* Ask what the framebuffer really looks like: 24 or 32 bpp, and a
+     * pitch that is not necessarily width * bytes-per-pixel. */
+    struct sys_fb_info fi;
+    volatile unsigned char *fb = sys_map_fb();
+    if (sys_fb_info(&fi) != 0 || !fb) {
+        sys_log("fbdemo: no framebuffer to map");
         sys_exit();
     }
+    unsigned int W = fi.width, H = fi.height;
+    unsigned int GH = H - OY;
 
     unsigned int bar_h = OY + (GH * 2u) / 3u;
 
     /* Top two-thirds of content area: eight EIA colour bars. */
     for (unsigned int y = OY; y < bar_h; y++) {
         for (unsigned int x = 0u; x < W; x++)
-            fb[y * S + x] = BARS[(x * 8u) / W];
+            sys_fb_put(fb, &fi, x, y, BARS[(x * 8u) / W]);
     }
 
     /* Bottom third: red-to-blue gradient. */
@@ -46,7 +47,7 @@ int main(void)
         for (unsigned int x = 0u; x < W; x++) {
             unsigned int r = (x * 0xFFu) / (W - 1u);
             unsigned int b = 0xFFu - r;
-            fb[y * S + x] = (r << 16) | b;
+            sys_fb_put(fb, &fi, x, y, (r << 16) | b);
         }
     }
 

@@ -36,34 +36,6 @@ _start:
 	mov $0x7C00, %sp
 	mov %dl, boot_drive        # BIOS left the boot drive in DL
 
-	# --- VBE: query controller + a 1024x768 LFB mode (no mode switch yet) ---
-	# Leaves the VBE ModeInfoBlock at MODE_INFO for the kernel to read.
-	cld
-	xor %ax, %ax
-	mov %ax, %es
-	mov $MODE_INFO, %di
-	mov $256, %cx
-	xor %al, %al
-	rep stosb
-	mov $VBE_INFO, %di
-	movl $0x32454256, (%di)    # 'VBE2'
-	mov $0x4F00, %ax
-	int $0x10
-	cmp $0x004F, %ax
-	jne vbe_done
-	xor %ax, %ax
-	mov %ax, %es
-	mov $MODE_INFO, %di
-	mov $0x118, %cx
-	mov $0x4F01, %ax
-	int $0x10
-	cmp $0x004F, %ax
-	jne vbe_done
-	mov $0x4118, %bx           # mode 0x118 | LFB
-	mov $0x4F02, %ax
-	int $0x10
-vbe_done:
-
 	# --- load the rest of the bootblock (sectors 1..BOOTBLOCK_SECTORS-1) ---
 	# Single INT 13h read into 0x0000:LOAD_ADDR. 8 KiB never wraps the
 	# 64 KiB real-mode segment boundary, so no chunked loop needed.
@@ -73,6 +45,13 @@ vbe_done:
 	movl $1,         dap_lba
 	mov $dap, %si
 	call read_dap
+
+	# --- VBE: pick and set a 1024x768 linear-framebuffer mode ---
+	# The routine lives past sector 0 (see vbe_select below), which is
+	# why it runs only now that the tail has been read in. It leaves the
+	# chosen mode's ModeInfoBlock at MODE_INFO for the kernel, or all
+	# zeroes when no usable mode exists (the kernel then stays on serial).
+	call vbe_select
 
 	# --- enable A20 (fast gate, port 0x92) ---
 	in $0x92, %al
@@ -153,6 +132,120 @@ gdt_descriptor:
 
 	.fill 510-(.-_start), 1, 0
 	.word 0xAA55
+
+# ---- 16-bit code that does not fit in sector 0 --------------------------
+# Runs in real mode after the tail of the bootblock has been loaded.
+.code16
+
+.equ VBE_SCRATCH, 0x0800     # ModeInfoBlock used while scanning the mode list
+.equ WANT_W, 1024
+.equ WANT_H, 768
+
+# Walk the controller's mode list looking for WANT_W x WANT_H with a linear
+# framebuffer. 32 bpp is preferred (the kernel copies whole pixels with
+# 32-bit stores); 24 bpp is the fallback. Mode numbers are not portable --
+# 0x118 is 24 bpp on QEMU's BIOS and something else elsewhere -- hence the
+# scan. The fixed number is still tried last, for a BIOS without a usable
+# mode list.
+vbe_select:
+	cld
+	xor %ax, %ax
+	mov %ax, %es
+	mov $MODE_INFO, %di        # start from "no mode"
+	mov $256, %cx
+	rep stosb
+	movw $0, vbe_best32
+	movw $0, vbe_best24
+
+	mov $VBE_INFO, %di
+	movl $0x32454256, (%di)    # 'VBE2': ask for the VBE 2.0+ block
+	mov $0x4F00, %ax
+	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_fixed
+
+	mov VBE_INFO + 14, %si     # VideoModePtr: offset ...
+	mov VBE_INFO + 16, %fs     # ... and segment
+	mov $128, %bp              # never walk more than 128 entries
+vbe_next:
+	mov %fs:(%si), %cx
+	cmp $0xFFFF, %cx
+	je vbe_scan_done
+	add $2, %si
+	xor %ax, %ax
+	mov %ax, %es
+	mov $VBE_SCRATCH, %di
+	mov $0x4F01, %ax
+	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_skip
+	mov VBE_SCRATCH + 0, %ax   # ModeAttributes
+	and $0x0091, %ax           # supported | graphics | linear framebuffer
+	cmp $0x0091, %ax
+	jne vbe_skip
+	cmpw $WANT_W, VBE_SCRATCH + 18
+	jne vbe_skip
+	cmpw $WANT_H, VBE_SCRATCH + 20
+	jne vbe_skip
+	cmpb $6, VBE_SCRATCH + 27  # MemoryModel: direct colour
+	jne vbe_skip
+	mov VBE_SCRATCH + 25, %al  # BitsPerPixel
+	cmp $32, %al
+	jne 1f
+	mov %cx, vbe_best32
+	jmp vbe_scan_done          # best possible: stop looking
+1:	cmp $24, %al
+	jne vbe_skip
+	mov %cx, vbe_best24
+vbe_skip:
+	dec %bp
+	jnz vbe_next
+vbe_scan_done:
+	mov vbe_best32, %cx
+	call vbe_try
+	jnc vbe_ret
+	mov vbe_best24, %cx
+	call vbe_try
+	jnc vbe_ret
+vbe_fixed:
+	mov $0x118, %cx
+	call vbe_try
+vbe_ret:
+	ret
+
+# Try to set mode %cx with its linear framebuffer. On success the mode's
+# ModeInfoBlock is at MODE_INFO and CF is clear; on failure MODE_INFO is
+# zeroed again and CF is set. %cx == 0 means "no candidate".
+vbe_try:
+	test %cx, %cx
+	jz vbe_try_fail
+	xor %ax, %ax
+	mov %ax, %es
+	mov $MODE_INFO, %di
+	mov $0x4F01, %ax
+	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_try_fail
+	mov %cx, %bx
+	or $0x4000, %bx            # bit 14: use the linear framebuffer
+	mov $0x4F02, %ax
+	int $0x10
+	cmp $0x004F, %ax
+	jne vbe_try_fail
+	clc
+	ret
+vbe_try_fail:
+	cld
+	xor %ax, %ax
+	mov %ax, %es
+	mov $MODE_INFO, %di
+	mov $256, %cx
+	rep stosb
+	stc
+	ret
+
+vbe_best32: .word 0
+vbe_best24: .word 0
 
 # ---- 32-bit protected-mode entry (loaded at LOAD_ADDR) ----
 .code32

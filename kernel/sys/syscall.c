@@ -434,9 +434,25 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 42:                                   /* SYS_MAP_FB: -> userland FB base addr */
-		paging_map_fb(fb_phys_base());
-		r->eax = paging_user_fb_base();
+		/* 0 when there is no drawable framebuffer; the app must check. */
+		r->eax = fb_usable()
+		         ? paging_map_fb(fb_phys_base(), fb_size_bytes())
+		         : 0;
 		break;
+	case 98: {                                 /* SYS_FB_INFO: ebx=*{w,h,pitch,bpp} -> 0/-1 */
+		if (!fb_usable() ||
+		    !paging_user_range_writable(r->ebx, 4 * sizeof(unsigned int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		unsigned int *o = (unsigned int *)r->ebx;
+		o[0] = fb_width();
+		o[1] = fb_height();
+		o[2] = fb_pitch();                 /* bytes per row, may exceed w * bpp/8 */
+		o[3] = fb_bpp();                   /* 24 or 32 */
+		r->eax = 0;
+		break;
+	}
 	case 43: {                                 /* SYS_NETINFO: ebx=*struct net_info -> 0 ok, -1 bad ptr */
 		if (!paging_user_range_writable(r->ebx, sizeof(struct net_info))) {
 			r->eax = (unsigned int)-1;
