@@ -14,6 +14,7 @@
 #include "doomkeys.h"
 #include "doomgeneric.h"
 #include "d_event.h"        /* event_t + D_PostEvent prototype */
+#include "doomstat.h"       /* menuactive: is a menu open (letters are typed, not steered)? */
 
 #include "libstink.h"
 
@@ -70,12 +71,13 @@ static unsigned char convert_to_doom_key(unsigned char sc, int extended)
 	case 0x2A: return KEY_RSHIFT;          /* left Shift -> run  */
 	case 0x36: return KEY_RSHIFT;          /* right Shift        */
 
-	/* Movement letters: WASD doubles up as the cursor cluster, which is what
-	 * Chocolate Doom expects when keyboard-only ("alwaysrun" feels right). */
-	case 0x11: return KEY_UPARROW;         /* W */
-	case 0x1F: return KEY_DOWNARROW;       /* S */
-	case 0x1E: return KEY_STRAFE_L;        /* A */
-	case 0x20: return KEY_STRAFE_R;        /* D */
+	/* W A S D move the player during play. While a menu is open they are
+	 * ordinary letters (handled with the rest of the alphabet below), so a
+	 * save-game name can contain them. */
+	case 0x11: if (!menuactive) return KEY_UPARROW;   break;   /* W */
+	case 0x1F: if (!menuactive) return KEY_DOWNARROW; break;   /* S */
+	case 0x1E: if (!menuactive) return KEY_STRAFE_L;  break;   /* A */
+	case 0x20: if (!menuactive) return KEY_STRAFE_R;  break;   /* D */
 
 	/* Function keys (menu shortcuts). */
 	case 0x3B: return KEY_F1;
@@ -103,12 +105,20 @@ static unsigned char convert_to_doom_key(unsigned char sc, int extended)
 	case 0x0C: return KEY_MINUS;
 	case 0x0D: return KEY_EQUALS;
 
-	/* "y" for the "are you sure?" prompts. */
-	case 0x15: return 'y';
-	case 0x31: return 'n';
-
-	default:   return 0;
+	default:   break;
 	}
+
+	/* Every letter key as its lower-case character: "y"/"n" for the
+	 * confirmation prompts, names typed into a save slot, the automap and
+	 * message keys. Only y and n used to be mapped, which left save slots
+	 * nameable with digits alone. Scancode set 1, rows Q-P, A-L, Z-M. */
+	static const char row_q[] = "qwertyuiop";      /* 0x10 .. 0x19 */
+	static const char row_a[] = "asdfghjkl";       /* 0x1E .. 0x26 */
+	static const char row_z[] = "zxcvbnm";         /* 0x2C .. 0x32 */
+	if (sc >= 0x10 && sc <= 0x19) return (unsigned char)row_q[sc - 0x10];
+	if (sc >= 0x1E && sc <= 0x26) return (unsigned char)row_a[sc - 0x1E];
+	if (sc >= 0x2C && sc <= 0x32) return (unsigned char)row_z[sc - 0x2C];
+	return 0;
 }
 
 static void key_queue_push(int pressed, unsigned char doom_key)
