@@ -427,3 +427,178 @@ def fs_remove(image, name):
         kept = [e for e in entries if e[0].upper() != name.upper()]
         _fs_write_dir(f, kept, next_free)
         return len(kept) != len(entries)
+
+
+# ---- reading text off the screen -------------------------------------------
+#
+# The UI font is a fixed 8x16 bitmap (lib/libstink_font.c), so text in a
+# screenshot can be read back exactly by matching glyphs: no fuzzy OCR.
+
+_GLYPHS = None
+
+
+def _load_font():
+    global _GLYPHS
+    if _GLYPHS is None:
+        import re
+        here = os.path.dirname(os.path.abspath(__file__))
+        src = open(os.path.join(here, "..", "..", "lib", "libstink_font.c")).read()
+        table = src[src.index("FONT[95][16]"):]
+        _GLYPHS = {}
+        for i, m in enumerate(re.finditer(r"\{((?:\s*0x[0-9a-fA-F]{2}\s*,?){16})\}", table)):
+            if i >= 95:
+                break
+            rows = tuple(int(v, 16) for v in re.findall(r"0x[0-9a-fA-F]{2}", m.group(1)))
+            if any(rows):
+                _GLYPHS[rows] = chr(32 + i)
+    return _GLYPHS
+
+
+def read_text(img, box, colors):
+    """Lines of text drawn in any of `colors` (RGB tuples) inside `box`
+    (x0, y0, x1, y1). Returns a list of (y, string), top to bottom; runs of
+    more than one empty cell become a single space."""
+    glyphs = _load_font()
+    x0, y0, x1, y1 = box
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(img.size[0], x1), min(img.size[1], y1)
+    px = img.load()
+    colors = set(tuple(c) for c in colors)
+    ink = [[px[x, y] in colors for x in range(x0, x1)] for y in range(y0, y1)]
+    w, h = x1 - x0, y1 - y0
+    def parse(y):
+        found, x, last_end = [], 0, None
+        while x + 8 <= w:
+            rows = tuple(sum((0x80 >> c) for c in range(8) if ink[y + r][x + c]) for r in range(16))
+            ch = glyphs.get(rows)
+            if ch:
+                if last_end is not None and x - last_end >= 8:
+                    found.append(" ")
+                found.append(ch)
+                last_end = x + 8
+                x += 8
+            else:
+                x += 1
+        return "".join(found)
+
+    lines = []
+    y = 0
+    while y + 16 <= h:
+        best = parse(y)
+        if not best.strip():
+            y += 1
+            continue
+        # A stray shape can match one glyph a few rows above a real line of
+        # text: look through the next rows and keep the fullest reading.
+        best_y = y
+        for dy in range(1, 16):
+            if y + dy + 16 > h:
+                break
+            cand = parse(y + dy)
+            if len(cand.replace(" ", "")) > len(best.replace(" ", "")):
+                best, best_y = cand, y + dy
+        lines.append((y0 + best_y, best))
+        y = best_y + 16
+    return lines
+
+
+def screen_text(img, box, colors):
+    """All text in the box as one string, lines joined with newlines."""
+    return "\n".join(s for _, s in read_text(img, box, colors))
+
+
+def find_text(img, box, colors, needle):
+    """Centre (x, y) of the first occurrence of `needle` drawn in `colors`
+    inside `box`, or None. Exact glyph match, any pixel offset."""
+    glyphs = _load_font()
+    blank = (0,) * 16
+    want = [blank if c == " " else next((rows for rows, ch in glyphs.items() if ch == c), None)
+            for c in needle]
+    if not needle.strip() or any(w is None for w in want):
+        return None
+    x0, y0, x1, y1 = box
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(img.size[0], x1), min(img.size[1], y1)
+    px = img.load()
+    colors = set(tuple(c) for c in colors)
+    ink = [[px[x, y] in colors for x in range(x0, x1)] for y in range(y0, y1)]
+    w, h = x1 - x0, y1 - y0
+
+    def cell(x, y):
+        return tuple(sum((0x80 >> c) for c in range(8) if ink[y + r][x + c]) for r in range(16))
+
+    n = len(needle)
+    for y in range(0, h - 15):
+        for x in range(0, w - 8 * n + 1):
+            if all(cell(x + 8 * i, y) == want[i] for i in range(n)):
+                return (x0 + x + 4 * n, y0 + y + 8)
+    return None
+
+
+# Colours text is drawn in (apps/rust/libui palette).
+UI_TEXT = [(0xe6, 0xed, 0xf3), (0x8b, 0x94, 0x9e), (0x57, 0xf2, 0x87),
+           (0xfe, 0xe7, 0x5c), (0xf4, 0x70, 0x67)]
+
+
+class Desktop:
+    """Helpers for scripts that drive the graphical desktop: launch a
+    program by name, follow its window through the kernel's serial trace."""
+
+    PARK = (1012, 700)
+
+    def __init__(self, vm):
+        import re
+        self.vm = vm
+        self._re = re
+        vm.wait_serial("desktop: ready", timeout=60)
+        self.tiles = {}
+        for m in re.finditer(r"desktop: tile (\S+) (\d+) (\d+) (\d+) (\d+)", vm.serial()):
+            x, y, w, h = map(int, m.groups()[1:])
+            self.tiles[m.group(1)] = (x + w // 2, y + h // 2)
+
+    def launch(self, name, timeout=20):
+        """Click a tile and return the pid of the window that appears."""
+        mark = self.vm.mark()
+        self.vm.click(*self.tiles[name])
+        end = self.vm.wait_serial("win: show pid=", timeout=timeout, start=mark)
+        return int(self._re.match(r"(\d+)", self.vm.serial()[end:]).group(1))
+
+    def geom(self, pid):
+        """Latest client rectangle (x, y, w, h) of pid's window."""
+        last = None
+        pat = r"win: (?:show|moved|resize) pid=%d x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+)" % pid
+        for m in self._re.finditer(pat, self.vm.serial()):
+            last = tuple(map(int, m.groups()))
+        return last
+
+    def closed(self, pid, start=0):
+        return ("win: destroy pid=%d " % pid) in self.vm.serial()[start:]
+
+    def wait_closed(self, pid, start=0, timeout=6):
+        self.vm.wait_serial("win: destroy pid=%d " % pid, timeout=timeout, start=start)
+
+    def shot(self, settle=True):
+        """Screenshot with the pointer parked out of the way."""
+        self.vm.mouse_to(*self.PARK)
+        if settle:
+            try:
+                return self.vm.wait_stable(timeout=4)
+            except QaError:
+                pass                             # something is animating: take it as is
+        return self.vm.image()
+
+    def text(self, pid, img=None):
+        """All text in pid's client area."""
+        x, y, w, h = self.geom(pid)
+        img = img or self.shot()
+        return screen_text(img, (x, y, x + w, y + h), UI_TEXT)
+
+    def click_text(self, pid, needle, img=None):
+        """Click the first occurrence of `needle` in pid's window."""
+        x, y, w, h = self.geom(pid)
+        img = img or self.shot()
+        at = find_text(img, (x, y, x + w, y + h), UI_TEXT, needle)
+        if not at:
+            raise QaError("text %r not found in window of pid %d" % (needle, pid))
+        self.vm.click(*at)
+        return at

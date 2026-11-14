@@ -1,9 +1,10 @@
-//! rs-net: network status.
+//! rs-net: what the network stack knows right now.
 //!
-//! Shows the kernel's ARP cache (which IP address is at which MAC address)
-//! and, below it, the process count, uptime and wall clock. Everything is
-//! read from the kernel again once a second; R reads it at once. Esc, Q or
-//! the close box end it.
+//! Two panels, both read from the kernel once a second: the interface
+//! (link, MAC, DHCP state and the addresses the lease gave us) and the ARP
+//! cache. Nothing here is cached or assumed -- with no NIC, or before DHCP
+//! binds, the panel says so. R refreshes at once; Esc, Q or the close box
+//! end it.
 
 #![no_std]
 #![no_main]
@@ -11,219 +12,129 @@
 use libstink::println;
 use libui::*;
 
-/// The PIT ticks at 100 Hz.
-const TICKS_PER_SEC: u32 = 100;
+/// ARP rows the window keeps room for (the kernel's cache holds 16).
+const ARP_ROWS: usize = 8;
+const ARP_CAP: usize = 1024;
 
-/// What `section` takes: caption, rule, spacing.
+const LABEL_W: i32 = 12 * FONT_W;
+const WIN_W: i32 = 2 * PAD + 44 * FONT_W;
 const SECTION_H: i32 = FONT_H + 3 + GAP;
-
-/// ARP rows the window has room for (the kernel's cache holds 16).
-const ARP_ROWS: usize = 16;
-
-/// "AA:BB:CC:DD:EE:FF"
-const MAC_CHARS: usize = 17;
-
-// ARP columns, as pixel offsets from the left margin. A dotted IPv4
-// address is at most 15 characters.
-const IP_W:  i32 = 15 * FONT_W;
-const X_MAC: i32 = 17 * FONT_W;
-
-const WIN_W: i32 = 2 * PAD + X_MAC + MAC_CHARS as i32 * FONT_W + 2 * FONT_W;
-const WIN_H: i32 = PAD + SECTION_H + ROW_H                 // ARP cache: column titles
-                 + ARP_ROWS as i32 * ROW_H
-                 + GAP + SECTION_H + 3 * ROW_H             // System: three fields
+const WIN_H: i32 = PAD + SECTION_H + 7 * ROW_H                 // Interface
+                 + GAP + SECTION_H + (ARP_ROWS as i32 + 1) * ROW_H   // ARP: titles + rows
                  + GAP + STATUS_H;
 
-// ── ARP table text ──────────────────────────────────────────────────────────
-//
-// The kernel sends a title line and then one line per entry: the IP
-// address, padding, the MAC address. The padding is not a fixed width (it
-// can even be missing), so the columns are found from the right: the last
-// 17 characters are the MAC address, what is left is the IP address.
-
-enum ArpLine<'a> {
-    Entry { ip: &'a [u8], mac: &'a [u8] },
-    /// A line that is not an entry; shown as it came.
-    Other(&'a [u8]),
-}
-
-fn is_blank(b: u8) -> bool { b <= b' ' }
-
-/// `s` without leading and trailing blanks.
-fn trim(s: &[u8]) -> &[u8] {
-    let start = s.iter().position(|&b| !is_blank(b)).unwrap_or(s.len());
-    let end = s.iter().rposition(|&b| !is_blank(b)).map_or(start, |i| i + 1);
-    &s[start..end]
-}
-
-fn is_mac(s: &[u8]) -> bool {
-    s.len() == MAC_CHARS
-        && s.iter().enumerate().all(|(i, &b)| if i % 3 == 2 { b == b':' } else { b.is_ascii_hexdigit() })
-}
-
-fn parse_entry(line: &[u8]) -> Option<(&[u8], &[u8])> {
-    if line.len() <= MAC_CHARS {
-        return None;
-    }
-    let (ip, mac) = line.split_at(line.len() - MAC_CHARS);
-    let ip = trim(ip);
-    if ip.is_empty() || !is_mac(mac) {
-        return None;
-    }
-    Some((ip, mac))
-}
-
-/// The lines of the ARP text worth a row: every entry, and any other
-/// non-empty line except the first one, which is the kernel's title line.
-fn arp_lines<'a>(text: &'a [u8]) -> impl Iterator<Item = ArpLine<'a>> + 'a {
-    text.split(|&b| b == b'\n').enumerate().filter_map(|(i, line)| {
-        let line = trim(line);
-        match parse_entry(line) {
-            Some((ip, mac)) => Some(ArpLine::Entry { ip, mac }),
-            None if i == 0 || line.is_empty() => None,
-            None => Some(ArpLine::Other(line)),
-        }
-    })
-}
-
-// ── What is on screen ───────────────────────────────────────────────────────
-
-struct Status {
-    arp:     [u8; 1024],
-    arp_len: usize,              // 0: the kernel gave nothing
-    procs:   Option<u32>,        // None: the process table could not be read
-    uptime:  u32,                // seconds
-    rtc:     RtcTime,
-    rtc_ok:  bool,
-}
-
-impl Status {
-    fn new() -> Status {
-        Status {
-            arp: [0; 1024],
-            arp_len: 0,
-            procs: None,
-            uptime: 0,
-            rtc: RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 },
-            rtc_ok: false,
-        }
-    }
-
-    /// Read everything from the kernel again.
-    fn read(&mut self) {
-        let n = arp_info(&mut self.arp).min(self.arp.len());
-        self.arp_len = text_len(&self.arp[..n]);
-        self.procs = count_processes();
-        self.uptime = ticks() / TICKS_PER_SEC;
-        self.rtc_ok = read_clock(&mut self.rtc);
+fn dhcp_text(state: u8) -> (&'static [u8], u32) {
+    match state {
+        0 => (b"not started\0", FG_DIM),
+        1 => (b"discovering\0", YELLOW),
+        2 => (b"requesting\0", YELLOW),
+        3 => (b"bound\0", ACCENT),
+        4 => (b"failed\0", RED),
+        _ => (b"unknown\0", FG_DIM),
     }
 }
 
-/// Number of rows in the kernel's process table: the lines of its text
-/// that start with a PID. The title line does not.
-fn count_processes() -> Option<u32> {
-    let mut buf = [0u8; 2048];
-    let n = proc_info(&mut buf).min(buf.len());
-    let text = &buf[..text_len(&buf[..n])];
-    if text.is_empty() {
-        return None;
-    }
-    let rows = text.split(|&b| b == b'\n').filter(|line| {
-        let line = trim(line);
-        let digits = line.iter().take_while(|b| b.is_ascii_digit()).count();
-        digits > 0 && (digits == line.len() || is_blank(line[digits]))
-    });
-    Some(rows.count() as u32)
-}
-
-// ── Drawing ─────────────────────────────────────────────────────────────────
-
-/// "HH:MM:SS\0", with as many hour digits as the uptime needs.
-fn fmt_uptime(secs: u32, out: &mut [u8; 16]) {
-    let mut ms = [0u8; 9];
-    fmt_hhmmss(0, (secs / 60) % 60, secs % 60, &mut ms);
-    let hours = secs / 3600;
-    let mut p = 0;
-    if hours < 10 {
-        p = push_str(out, p, b"0\0");
-    }
-    p = push_u32(out, p, hours);
-    push_str(out, p, &ms[2..]);                    // ":MM:SS"
-}
-
-fn draw(win: &Window, st: &Status) {
-    win.clear(BG);
-    let x = PAD;
-    let w = win.w() - 2 * PAD;
-    let ty = (ROW_H - FONT_H) / 2;                 // text offset inside a row
-
-    let mut y = section(win, x, PAD, w, b"ARP cache\0");
-    let arp = &st.arp[..st.arp_len];
-    let total = arp_lines(arp).count();
-    if arp.is_empty() {
-        win.text_fit(x, y + ty, b"The ARP cache could not be read.\0", w, RED);
-    } else if total == 0 {
-        win.text_fit(x, y + ty, b"No entries.\0", w, FG_DIM);
+/// One address row; an all-zero address is shown as "not set".
+fn addr_row(win: &Window, y: i32, label: &[u8], ip: u32) {
+    win.text(PAD, y, label, FG_DIM);
+    if ip == 0 {
+        win.text(PAD + LABEL_W, y, b"not set\0", FG_DIM);
     } else {
-        win.text(x, y + ty, b"IP address\0", FG_DIM);
-        win.text(x + X_MAC, y + ty, b"MAC address\0", FG_DIM);
-        y += ROW_H;
-        // When there are more lines than room, the last row says how many
-        // are missing instead of showing one of them.
-        let shown = if total > ARP_ROWS { ARP_ROWS - 1 } else { total };
-        for line in arp_lines(arp).take(shown) {
-            match line {
-                ArpLine::Entry { ip, mac } => {
-                    win.text_fit(x, y + ty, ip, IP_W, FG);
-                    win.text(x + X_MAC, y + ty, mac, FG);
-                }
-                ArpLine::Other(raw) => {
-                    win.text_fit(x, y + ty, raw, w, FG_DIM);
-                }
+        let mut buf = [0u8; 16];
+        fmt_ip(ip, &mut buf);
+        win.text(PAD + LABEL_W, y, &buf, FG);
+    }
+}
+
+/// The ARP snapshot is text: a title line, then "IP<spaces>MAC" per entry.
+/// Returns the two fields of an entry line, or None for anything else.
+fn arp_entry(line: &[u8]) -> Option<(&[u8], &[u8])> {
+    if line.is_empty() || !line[0].is_ascii_digit() {
+        return None;
+    }
+    let ip_end = line.iter().position(|&b| b == b' ')?;
+    let mac_start = ip_end + line[ip_end..].iter().position(|&b| b != b' ')?;
+    Some((&line[..ip_end], &line[mac_start..]))
+}
+
+fn draw(win: &Window) {
+    win.clear(BG);
+    let w = win.w() - 2 * PAD;
+    let ty = (ROW_H - FONT_H) / 2;
+
+    // ── Interface ──
+    let mut y = section(win, PAD, PAD, w, b"Interface\0");
+    match netinfo() {
+        None => {
+            win.text_fit(PAD, y + ty, b"The kernel did not report the network state.\0", w, RED);
+        }
+        Some(ni) => {
+            win.text(PAD, y + ty, b"Link\0", FG_DIM);
+            if ni.link_up != 0 {
+                win.text(PAD + LABEL_W, y + ty, b"up (e1000)\0", ACCENT);
+            } else {
+                win.text(PAD + LABEL_W, y + ty, b"no network card\0", FG_DIM);
             }
             y += ROW_H;
-        }
-        if total > shown {
-            let mut more = [0u8; 32];
-            let p = push_u32(&mut more, 0, (total - shown) as u32);
-            push_str(&mut more, p, b" more not shown\0");
-            win.text_fit(x, y + ty, &more, w, FG_DIM);
+
+            let mut mac = [0u8; 18];
+            fmt_mac(&ni.mac, &mut mac);
+            win.text(PAD, y + ty, b"MAC\0", FG_DIM);
+            win.text(PAD + LABEL_W, y + ty, &mac, if ni.link_up != 0 { FG } else { FG_DIM });
+            y += ROW_H;
+
+            let (dtext, drgb) = dhcp_text(ni.dhcp_state);
+            win.text(PAD, y + ty, b"DHCP\0", FG_DIM);
+            win.text(PAD + LABEL_W, y + ty, dtext, drgb);
+            y += ROW_H;
+
+            addr_row(win, y + ty, b"Address\0", ni.ip);
+            y += ROW_H;
+            addr_row(win, y + ty, b"Netmask\0", ni.mask);
+            y += ROW_H;
+            addr_row(win, y + ty, b"Gateway\0", ni.gateway);
+            y += ROW_H;
+            addr_row(win, y + ty, b"DNS\0", ni.dns);
         }
     }
 
-    // The second section sits at a fixed place, under the room kept for
-    // the ARP rows.
-    let mut y = PAD + SECTION_H + ROW_H + ARP_ROWS as i32 * ROW_H + GAP;
-    y = section(win, x, y, w, b"System\0");
-    let right = x + 26 * FONT_W;
-
-    match st.procs {
-        Some(n) => {
-            let mut buf = [0u8; 12];
-            fmt_u32(n, &mut buf);
-            field(win, x, y, right, b"Processes\0", &buf, FG);
-        }
-        None => field(win, x, y, right, b"Processes\0", b"unavailable\0", FG_DIM),
-    }
-    y += ROW_H;
-
-    let mut up = [0u8; 16];
-    fmt_uptime(st.uptime, &mut up);
-    field(win, x, y, right, b"Uptime\0", &up, FG);
-    y += ROW_H;
-
-    if st.rtc_ok {
-        let mut buf = [0u8; 9];
-        fmt_hhmmss(st.rtc.hour, st.rtc.minute, st.rtc.second, &mut buf);
-        field(win, x, y, right, b"Clock\0", &buf, FG);
+    // ── ARP cache ──
+    let mut y = section(win, PAD, PAD + SECTION_H + 7 * ROW_H + GAP, w, b"ARP cache\0");
+    let mut raw = [0u8; ARP_CAP];
+    let n = arp_info(&mut raw).min(ARP_CAP);
+    let text = &raw[..text_len(&raw[..n])];
+    if text.is_empty() {
+        win.text_fit(PAD, y + ty, b"The ARP cache could not be read.\0", w, RED);
     } else {
-        field(win, x, y, right, b"Clock\0", b"unavailable\0", FG_DIM);
+        win.text(PAD, y + ty, b"IP address\0", FG_DIM);
+        win.text(PAD + 18 * FONT_W, y + ty, b"MAC address\0", FG_DIM);
+        y += ROW_H;
+        let mut shown = 0usize;
+        let mut total = 0usize;
+        for line in text.split(|&b| b == b'\n') {
+            let Some((ip, mac)) = arp_entry(line) else { continue };
+            total += 1;
+            if shown < ARP_ROWS {
+                win.text_fit(PAD, y + ty, ip, 16 * FONT_W, FG);
+                win.text_fit(PAD + 18 * FONT_W, y + ty, mac, w - 18 * FONT_W, FG);
+                y += ROW_H;
+                shown += 1;
+            }
+        }
+        if total == 0 {
+            win.text_fit(PAD, y + ty, b"empty: nothing has been resolved yet\0", w, FG_DIM);
+        } else if total > shown {
+            // The last row is replaced by a count rather than silently cut.
+            let mut more = [0u8; 40];
+            let p = push_u32(&mut more, 0, (total - shown) as u32);
+            push_str(&mut more, p, b" more entries not shown\0");
+            win.fill(PAD, y - ROW_H, w, ROW_H, BG);
+            win.text_fit(PAD, y - ROW_H + ty, &more, w, FG_DIM);
+        }
     }
 
     status_bar(win, b"R: refresh now   Esc: close\0");
 }
-
-// ── Main ────────────────────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
@@ -233,25 +144,12 @@ pub extern "C" fn main() {
         quit(1);
     };
 
-    let mut st = Status::new();
-    let mut shown_sec: Option<u32> = None;       // uptime second on screen; None forces a read
-
     loop {
-        // Read and redraw once per uptime second, or when R asked for it.
-        let sec = ticks() / TICKS_PER_SEC;
-        if shown_sec != Some(sec) {
-            st.read();
-            draw(&win, &st);
-            win.flush();
-            shown_sec = Some(st.uptime);
-        }
-
-        // Sleep until the uptime changes, or until input arrives.
-        let left = TICKS_PER_SEC - ticks() % TICKS_PER_SEC;
-        match win.wait(left * 10) {
-            Some(Event::Close) | Some(Event::Key(KEY_ESC | b'q' | b'Q')) => break,
-            Some(Event::Key(b'r' | b'R')) => shown_sec = None,
-            _ => {}
+        draw(&win);
+        win.flush();
+        match win.wait(1000) {
+            Some(Event::Close) | Some(Event::Key(KEY_ESC)) | Some(Event::Key(b'q')) => break,
+            _ => {}                            // R, a timeout or anything else: just redraw
         }
     }
 
