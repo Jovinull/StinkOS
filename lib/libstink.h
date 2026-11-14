@@ -1040,6 +1040,23 @@ int isatty(int fd);
  * callers expect. */
 int fflush(FILE *fp);
 
+/* StinkFS has one flat directory and 15-character names. Ported code
+ * builds paths ("./.savegame/doomsav0.dsg"); passed through as they are,
+ * the directory part ate most of the 15 characters and every Doom save
+ * slot collapsed into the same truncated name. The C-library-style entry
+ * points (fopen, open, stat, access, remove, rename, unlink) therefore use
+ * only the last path component. The raw sys_* calls are not affected. */
+static inline const char *stk_flat_name(const char *path)
+{
+    const char *base = path;
+    if (!path)
+        return path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/' || *p == '\\')
+            base = p + 1;
+    return base;
+}
+
 /* --- libstink_math --- */
 double sin(double x);
 double cos(double x);
