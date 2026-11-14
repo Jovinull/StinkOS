@@ -14,6 +14,9 @@
 int cpuid_has_pae(void);
 int cpuid_has_nx(void);
 
+/* Time-stamp counter (EAX=1 EDX bit 4): used only for measurement. */
+int cpuid_has_tsc(void);
+
 /* Logs a one-line serial summary of the features the kernel cares about
  * so a boot trace shows whether PAE / NX support is present on this CPU.
  * Call once from kmain after serial is up. */
