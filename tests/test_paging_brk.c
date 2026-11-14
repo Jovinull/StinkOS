@@ -1,167 +1,131 @@
-/* Host-side test for paging_user_set_brk + paging_user_range_ok in
- * kernel/arch/paging.c. Two pieces:
+/* Host-side model of the program-break contract in kernel/arch/paging.c
+ * (paging_user_set_brk) and of the arithmetic SYS_SBRK wraps around it.
  *
- *   1. set_brk: align UP to PAGE_4KB, clamp to [USER_HEAP_LO,
- *      USER_HEAP_HI], grow page-by-page (mapping fresh frames) until
- *      the break hits the target, OR shrink page-by-page (unmapping)
- *      down to the target. Returns the actual new break. On OOM
- *      mid-growth, returns the partial break.
+ * paging.c itself cannot be linked on the host (privileged instructions,
+ * the kernel direct map), so this file mirrors the rule and checks its
+ * corner cases cheaply. The real code path is exercised end to end by the
+ * ktest cases `heap-switch`, `sbrk-oom`, `munmap-hole` and `badptr`
+ * (tools/qa/ktest.py) -- treat those as the authority; this is the fast
+ * arithmetic check.
  *
- *   2. range_ok: a user buffer is OK only if [addr, addr+len) sits
- *      wholly inside the contiguous code+stack span or wholly inside
- *      the currently-mapped heap region. Address overflow is rejected
- *      (addr + len < addr).
- *
- * Both of those gate raw user memory access from the kernel; off-by-
- * page errors here either leak a page on every shrink/grow or let a
- * userland app trick the kernel into dereferencing unmapped memory.
+ * Contract:
+ *   - the target is rounded UP to a page
+ *   - a target outside [USER_HEAP_LO, USER_HEAP_HI] is refused
+ *   - growing is all-or-nothing: if frames run out half way, every page
+ *     mapped by the call is released and the break does not move
+ *   - shrinking returns one frame per page dropped
  */
 #include <stdio.h>
 
 #define PAGE_4KB         0x1000u
-#define USER_CODE        0x00800000u
-#define USER_STACK_TOP   0x00900000u
-#define USER_HEAP_LO     0x40000000u
-#define USER_HEAP_HI     0x80000000u
+#define USER_HEAP_LO     0x00540000u
+#define USER_HEAP_HI     0x01400000u
 
 static unsigned int user_heap_next;
-static int          frames_left;            /* OOM throttle for the sim */
+static int          frames_left;            /* stand-in for the PMM */
 
-/* Mirror of paging_user_set_brk: pmm_alloc is faked with `frames_left`. */
-static unsigned int set_brk(unsigned int new_brk)
+static int set_brk(unsigned int new_brk)
 {
-	if (new_brk < USER_HEAP_LO) new_brk = USER_HEAP_LO;
-	if (new_brk > USER_HEAP_HI) new_brk = USER_HEAP_HI;
+	if (new_brk < USER_HEAP_LO || new_brk > USER_HEAP_HI)
+		return -1;
 	unsigned int aligned = (new_brk + PAGE_4KB - 1) & ~(PAGE_4KB - 1);
+	unsigned int start = user_heap_next;
 	while (user_heap_next < aligned) {
-		if (frames_left == 0) return user_heap_next;
+		if (frames_left == 0) {
+			while (user_heap_next > start) {
+				user_heap_next -= PAGE_4KB;
+				frames_left++;
+			}
+			return -1;
+		}
 		frames_left--;
 		user_heap_next += PAGE_4KB;
 	}
 	while (user_heap_next > aligned) {
 		user_heap_next -= PAGE_4KB;
-		frames_left++;                      /* unmapped frame returns to pool */
+		frames_left++;
 	}
-	return user_heap_next;
-}
-
-static int range_ok(unsigned int addr, unsigned int len)
-{
-	if (len == 0) return 1;
-	if (addr + len < addr) return 0;
-	unsigned int end = addr + len;
-	if (addr >= USER_CODE && end <= USER_STACK_TOP) return 1;
-	if (addr >= USER_HEAP_LO && end <= user_heap_next) return 1;
 	return 0;
 }
 
-static int expect_u(const char *label, unsigned int got, unsigned int want)
+/* SYS_SBRK: signed delta -> old break, or -1. */
+static unsigned int sbrk(int delta)
 {
-	if (got == want) { printf("ok   %-55s = 0x%x\n", label, got); return 0; }
-	printf("FAIL %s: got 0x%x, want 0x%x\n", label, got, want);
-	return 1;
+	unsigned int old = user_heap_next;
+	unsigned int target;
+	if (delta >= 0) {
+		target = old + (unsigned int)delta;
+		if (target < old)
+			return (unsigned int)-1;
+	} else {
+		unsigned int abs_delta = (unsigned int)(-delta);
+		if (abs_delta > old)
+			return (unsigned int)-1;
+		target = old - abs_delta;
+	}
+	return set_brk(target) != 0 ? (unsigned int)-1 : old;
 }
 
-static int expect_int(const char *label, int got, int want)
+static int failures;
+
+static void expect_u(const char *label, unsigned int got, unsigned int want)
 {
-	if (got == want) { printf("ok   %-55s = %d\n", label, got); return 0; }
-	printf("FAIL %s: got %d, want %d\n", label, got, want);
-	return 1;
+	if (got == want) {
+		printf("ok   %-58s = 0x%x\n", label, got);
+	} else {
+		printf("FAIL %s: got 0x%x, want 0x%x\n", label, got, want);
+		failures++;
+	}
 }
 
 int main(void)
 {
-	int failures = 0;
+	user_heap_next = USER_HEAP_LO;
+	frames_left = 1000;
 
-	/* --- set_brk: clamp below ---------------------------------- */
-	user_heap_next = USER_HEAP_LO; frames_left = 1000;
-	failures += expect_u("set_brk below LO -> snaps to LO",
-	                     set_brk(0), USER_HEAP_LO);
+	expect_u("below the heap is refused", (unsigned int)set_brk(USER_HEAP_LO - 1), (unsigned int)-1);
+	expect_u("above the heap is refused", (unsigned int)set_brk(USER_HEAP_HI + 1), (unsigned int)-1);
+	expect_u("refused: break unchanged", user_heap_next, USER_HEAP_LO);
+	expect_u("refused: no frame consumed", (unsigned int)frames_left, 1000);
 
-	/* --- set_brk: clamp above HI ------------------------------ */
-	user_heap_next = USER_HEAP_LO; frames_left = 100000;
-	/* growing all the way to HI would need (HI-LO)/4KB pages, too
-	 * many for a fast sim. So we test the clamp path: pass an
-	 * obscenely-high target with no headroom -> clamps to HI. */
-	(void)set_brk(USER_HEAP_LO);
-	failures += expect_u("set_brk at LO -> stays LO",
-	                     user_heap_next, USER_HEAP_LO);
+	expect_u("LO+1 rounds up to one page", (unsigned int)set_brk(USER_HEAP_LO + 1), 0);
+	expect_u("  break", user_heap_next, USER_HEAP_LO + PAGE_4KB);
+	expect_u("LO+4096 is still one page", (unsigned int)set_brk(USER_HEAP_LO + 4096), 0);
+	expect_u("  break", user_heap_next, USER_HEAP_LO + PAGE_4KB);
+	expect_u("LO+4097 is two pages", (unsigned int)set_brk(USER_HEAP_LO + 4097), 0);
+	expect_u("  break", user_heap_next, USER_HEAP_LO + 2 * PAGE_4KB);
+	expect_u("  frames left", (unsigned int)frames_left, 998);
 
-	/* --- set_brk: page-aligned grow -------------------------- */
-	user_heap_next = USER_HEAP_LO; frames_left = 1000;
-	failures += expect_u("set_brk LO+4096 -> grows 1 page",
-	                     set_brk(USER_HEAP_LO + PAGE_4KB),
-	                     USER_HEAP_LO + PAGE_4KB);
-	failures += expect_int("after grow: 999 frames left",
-	                       frames_left, 999);
+	expect_u("shrink to LO", (unsigned int)set_brk(USER_HEAP_LO), 0);
+	expect_u("  frames all returned", (unsigned int)frames_left, 1000);
 
-	/* --- set_brk: sub-page round-up -------------------------- */
-	user_heap_next = USER_HEAP_LO; frames_left = 1000;
-	failures += expect_u("set_brk LO+1 -> rounds up to one page",
-	                     set_brk(USER_HEAP_LO + 1),
-	                     USER_HEAP_LO + PAGE_4KB);
-	failures += expect_u("set_brk LO+4095 -> still one page",
-	                     set_brk(USER_HEAP_LO + 4095),
-	                     USER_HEAP_LO + PAGE_4KB);
-	failures += expect_u("set_brk LO+4096 -> still one page",
-	                     set_brk(USER_HEAP_LO + 4096),
-	                     USER_HEAP_LO + PAGE_4KB);
-	failures += expect_u("set_brk LO+4097 -> two pages",
-	                     set_brk(USER_HEAP_LO + 4097),
-	                     USER_HEAP_LO + 2u * PAGE_4KB);
+	/* Out of memory half way through a grow: nothing sticks. */
+	user_heap_next = USER_HEAP_LO + 3 * PAGE_4KB;
+	frames_left = 2;
+	expect_u("grow 5 pages with 2 frames fails", (unsigned int)set_brk(USER_HEAP_LO + 8 * PAGE_4KB), (unsigned int)-1);
+	expect_u("  break did not move", user_heap_next, USER_HEAP_LO + 3 * PAGE_4KB);
+	expect_u("  both frames given back", (unsigned int)frames_left, 2);
 
-	/* --- set_brk: shrink ----------------------------------- */
-	user_heap_next = USER_HEAP_LO; frames_left = 100;
-	(void)set_brk(USER_HEAP_LO + 10u * PAGE_4KB);
-	failures += expect_int("after grow 10: 90 frames left",
-	                       frames_left, 90);
-	failures += expect_u("shrink to LO+3 pages",
-	                     set_brk(USER_HEAP_LO + 3u * PAGE_4KB),
-	                     USER_HEAP_LO + 3u * PAGE_4KB);
-	failures += expect_int("after shrink: 7 frames returned (97 left)",
-	                       frames_left, 97);
+	/* The exact top of the heap is reachable, one byte more is not. */
+	user_heap_next = USER_HEAP_LO;
+	frames_left = 100000;
+	expect_u("grow to exactly HI", (unsigned int)set_brk(USER_HEAP_HI), 0);
+	expect_u("  break == HI", user_heap_next, USER_HEAP_HI);
 
-	/* --- set_brk: OOM mid-grow returns partial break ------- */
-	user_heap_next = USER_HEAP_LO; frames_left = 2;
-	failures += expect_u("grow 5 pages with only 2 frames -> partial",
-	                     set_brk(USER_HEAP_LO + 5u * PAGE_4KB),
-	                     USER_HEAP_LO + 2u * PAGE_4KB);
-
-	/* --- range_ok: zero length always OK ------------------ */
-	user_heap_next = USER_HEAP_LO + 2u * PAGE_4KB;
-	failures += expect_int("range_ok(addr, 0) -> always 1",
-	                       range_ok(0xDEADBEEF, 0), 1);
-
-	/* --- range_ok: addr+len overflow rejected ------------- */
-	failures += expect_int("range_ok overflow -> 0",
-	                       range_ok(0xFFFFFFF0u, 0x20), 0);
-
-	/* --- range_ok: code+stack span (inclusive low, exclusive high) */
-	failures += expect_int("range_ok mid code+stack -> 1",
-	                       range_ok(USER_CODE + 0x100, 64), 1);
-	failures += expect_int("range_ok ending exactly at STACK_TOP -> 1",
-	                       range_ok(USER_STACK_TOP - 4, 4), 1);
-	failures += expect_int("range_ok crossing STACK_TOP -> 0",
-	                       range_ok(USER_STACK_TOP - 4, 16), 0);
-	failures += expect_int("range_ok below USER_CODE -> 0",
-	                       range_ok(USER_CODE - 16, 4), 0);
-
-	/* --- range_ok: heap within currently-mapped portion --- */
-	failures += expect_int("range_ok inside mapped heap -> 1",
-	                       range_ok(USER_HEAP_LO, 128), 1);
-	failures += expect_int("range_ok at exactly heap_next -> 1 (end=next)",
-	                       range_ok(USER_HEAP_LO,
-	                                user_heap_next - USER_HEAP_LO), 1);
-	failures += expect_int("range_ok past heap_next -> 0",
-	                       range_ok(USER_HEAP_LO,
-	                                (user_heap_next - USER_HEAP_LO) + 1), 0);
-	failures += expect_int("range_ok wholly past heap -> 0",
-	                       range_ok(user_heap_next, 16), 0);
-
-	/* --- range_ok: gap between code+stack and heap -> 0 -- */
-	failures += expect_int("range_ok in unmapped gap -> 0",
-	                       range_ok(0x10000000u, 64), 0);
+	/* SYS_SBRK arithmetic. */
+	user_heap_next = USER_HEAP_LO;
+	frames_left = 1000;
+	expect_u("sbrk(0) returns the break", sbrk(0), USER_HEAP_LO);
+	expect_u("sbrk(8192) returns the old break", sbrk(8192), USER_HEAP_LO);
+	expect_u("  break advanced", user_heap_next, USER_HEAP_LO + 2 * PAGE_4KB);
+	expect_u("sbrk(-4096) returns the old break", sbrk(-4096), USER_HEAP_LO + 2 * PAGE_4KB);
+	expect_u("  break dropped a page", user_heap_next, USER_HEAP_LO + PAGE_4KB);
+	expect_u("sbrk below the heap base fails", sbrk(-8192), (unsigned int)-1);
+	expect_u("  break unchanged", user_heap_next, USER_HEAP_LO + PAGE_4KB);
+	expect_u("absurd sbrk fails", sbrk(0x7FF00000), (unsigned int)-1);
+	expect_u("  break unchanged", user_heap_next, USER_HEAP_LO + PAGE_4KB);
+	expect_u("  no frame consumed", (unsigned int)frames_left, 999);
 
 	printf("\n%d failure(s)\n", failures);
-	return failures == 0 ? 0 : 1;
+	return failures ? 1 : 0;
 }
