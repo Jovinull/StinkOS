@@ -23,7 +23,7 @@ from stinkqa import Vm, QaError, fs_put  # noqa: E402
 CASES = [
     "leak-fork", "leak-exec", "pmm-churn", "heap-switch", "cow-kwrite",
     "text-kwrite", "munmap-hole", "kill-reap", "orphan", "sleep-fair",
-    "preempt", "resched", "concurrent", "sbrk-oom", "badptr",
+    "preempt", "resched", "concurrent", "sbrk-oom", "eflags", "badptr",
 ]
 TIMEOUT = {"concurrent": 120, "badptr": 120}
 

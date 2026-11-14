@@ -66,6 +66,8 @@ klongjmp:
 	mov 4(%esp), %eax          # ctx
 	mov 8(%esp), %edx          # val
 	mov 0(%eax), %esp
+	add $4, %esp               # ksetjmp saved ESP at its own return address;
+	                           # a returned call has that slot popped
 	mov 4(%eax), %ebp
 	mov 8(%eax), %ebx
 	mov 12(%eax), %esi

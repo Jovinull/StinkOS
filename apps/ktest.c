@@ -481,6 +481,49 @@ static int t_badptr(void)
 	return 0;
 }
 
+/* Ring-3 EFLAGS must not steer kernel code. With DF set, an unguarded
+ * `rep movs` in the kernel copies backwards (fork's trap-frame clone, the
+ * directory compaction in delete); with NT set, a kernel `iret` attempts a
+ * task switch. Both used to take the machine down. */
+static int t_eflags(void)
+{
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		/* DF=1 across fork and a file create/delete. */
+		__asm__ volatile ("std");
+		int gp = sys_fork();
+		__asm__ volatile ("cld");
+		if (gp == 0) child_exit(5);
+		if (gp < 0 || sys_waitpid(gp) != 5) child_exit(10);
+
+		static unsigned char blob[1500];
+		for (unsigned int i = 0; i < sizeof(blob); i++)
+			blob[i] = (unsigned char)(i * 3);
+		sys_fwrite("KTE1.TMP", blob, sizeof(blob));
+		sys_fwrite("KTE2.TMP", blob, sizeof(blob));
+		__asm__ volatile ("std");
+		int d = sys_fdelete("KTE1.TMP");
+		__asm__ volatile ("cld");
+		static unsigned char back[1500];
+		int n = sys_fread("KTE2.TMP", back, sizeof(back));
+		sys_fdelete("KTE2.TMP");
+		if (d != 0 || n != (int)sizeof(back) || memcmp(blob, back, sizeof(blob)) != 0)
+			child_exit(11);
+
+		/* NT=1 across fork. */
+		__asm__ volatile ("pushf; orl $0x4000, (%esp); popf");
+		gp = sys_fork();
+		__asm__ volatile ("pushf; andl $0xFFFFBFFF, (%esp); popf");
+		if (gp == 0) child_exit(6);
+		if (gp < 0 || sys_waitpid(gp) != 6) child_exit(12);
+		child_exit(1);
+	}
+	int code = sys_waitpid(pid);
+	if (code != 1) FAIL("child reported step %d", code);
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -516,6 +559,7 @@ static const struct ktcase cases[] = {
 	{ "resched",     t_resched },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
+	{ "eflags",      t_eflags },
 	{ "badptr",      t_badptr },
 };
 

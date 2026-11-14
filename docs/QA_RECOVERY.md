@@ -185,7 +185,7 @@ move into the sections above.
 | A1 | P0 | audio | IRQ mixer dereferences user sample pointers under whatever address space is loaded; unmap/exec/another process running halts the kernel | open |
 | A2 | P0 | fs | `SYS_MOUNT` accepts any LBA range: a mount over LBA 0 lets an app overwrite the boot sector and kernel | open |
 | A3 | P1 | pipes | no owner, not closed on exit, not counted across fork | open |
-| A4 | P0 | traps | no `cld` on trap entry (user DF=1 reverses kernel `rep movs`); fork seeds a ring-0 `popf` from user EFLAGS | open |
+| A4 | P0 | traps | no `cld` on trap entry (user DF=1 reverses kernel `rep movs`); fork seeds a ring-0 `popf` from user EFLAGS | **fixed + retested** (`ktest eflags`) |
 | A5 | P1 | input | key queue never flushed: keys typed in an app replay into the menu (can launch apps, delete files) | open |
 | A6 | P1 | video | `SYS_MAP_FB` maps 2 MiB of a 2.25-3 MiB framebuffer; userland assumes 32 bpp, QEMU's mode 0x118 is 24 bpp | open |
 | A7 | P2 | input | mouse accumulators read-and-cleared with IRQs on; cursor save/draw not atomic | open |
@@ -195,7 +195,7 @@ move into the sections above.
 | A11 | P1 | boot | stage 2 reads the kernel from the primary ATA master whatever the BIOS boot drive was | open |
 | A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
 | A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | open |
-| A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | open |
+| A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
 | A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | open |
 | A16 | P2 | signals | PID 1 keeps pending signals and handlers across apps; signal 0 is accepted but unreportable | open |
 | A17 | P2 | paging | W^X only covers the first 2 MiB of the kernel image; nothing asserts `.text`/`.rodata` stay inside | open |
@@ -208,3 +208,14 @@ move into the sections above.
 | A24 | P2 | fs | case-sensitive lookups everywhere except the loader | open |
 | A25 | P2 | vfs | `vfs_seek` adds offsets as signed int with no overflow guard | open |
 | A26 | P2 | misc | unbounded 8042 wait in `SYS_REBOOT` | open |
+| N1 | P0 | net | `tcp_emit_rst` keeps an 11 KiB `struct tcb` on an 8 KiB kernel stack; the TX call chain alone nests four 1.5 KiB buffers | open |
+| N2 | P0 | net | the whole RX path (ARP/IP/TCP, replies included) runs inside the IRQ handler, on top of any syscall using the same structures and static buffers | open |
+| N3 | P0 | net | socket handles have no owner: any process can read, write or close another's connection | open |
+| N4 | P1 | net | e1000 TX slot reused by an IRQ-context send; RX ring cursor raced between poll and IRQ drain | open |
+| N5 | P1 | tcp | `tcp_drain_tx` re-sends unacknowledged bytes under new sequence numbers | open |
+| N6 | P1 | tcp | a pure ACK carrying options has its option bytes delivered as stream data | open |
+| N7 | P1 | tcp | one RST or half-open SYN frees a listening socket | open |
+| N8 | P1 | tcp | window updates ignored unless they also acknowledge data (zero-window stall) | open |
+| N9 | P1 | tcp | FIN handling: jumps holes, close drops unsent data, FIN retransmitted at the wrong sequence | open |
+| N10 | P1 | dhcp | options applied in any state, constant xid, no chaddr check | open |
+| N11 | P2 | net | ARP entry not refreshed by use; DNS/ping state global; UDP/TCP checksum pseudo-header uses the local IP instead of the packet's destination; timers only run when userland polls | open |
