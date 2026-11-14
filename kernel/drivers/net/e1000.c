@@ -196,22 +196,17 @@ int e1000_init(void)
 	return 1;
 }
 
-/* IRQ entry: drains every RX descriptor the chip has marked done and pushes
- * each frame straight into the ethernet dispatcher. Safe to call from any
- * IRQ context, including ones unrelated to this NIC: the ICR read is cheap
- * and self-clearing, and the loop is a no-op when no DD bit is set. */
-void e1000_handle_irq(void)
+/* IRQ entry: acknowledge the NIC and report whether it had anything to
+ * say. Nothing else happens here -- no ring is touched and no frame is
+ * parsed in interrupt context. The caller wakes the network thread, which
+ * drains the RX ring from process context (net.c). Safe to call from any
+ * IRQ, including ones unrelated to this NIC: the ICR read is cheap and
+ * self-clearing. */
+int e1000_handle_irq(void)
 {
 	if (!e1000_initialised)
-		return;
-	(void)e1000_read(E1000_ICR);                /* clear pending bits */
-	while (rx_ring[rx_cursor].status & E1000_RXD_STAT_DD) {
-		unsigned int len = rx_ring[rx_cursor].length;
-		eth_handle_frame(rx_buffers[rx_cursor], len);
-		rx_ring[rx_cursor].status = 0;
-		e1000_write(E1000_RDT, rx_cursor);
-		rx_cursor = (rx_cursor + 1) % RX_RING_COUNT;
-	}
+		return 0;
+	return e1000_read(E1000_ICR) != 0;          /* read clears the causes */
 }
 
 int e1000_present(void) { return e1000_initialised; }
@@ -284,17 +279,24 @@ static void setup_tx(void)
 	e1000_write(E1000_TIPG, 10u | (8u << 10) | (12u << 20));
 }
 
-/* Queues 'len' bytes from 'buf' onto the wire. Blocks (spins) until a TX
- * descriptor is available, then copies into its scratch buffer and bumps
- * the chip's tail pointer. Returns 'len' on success, -1 on bad arguments. */
+/* Queues 'len' bytes from 'buf' onto the wire. Waits a bounded time for
+ * the next TX descriptor to drain, then copies into its scratch buffer and
+ * bumps the chip's tail pointer. Returns 'len' on success, -1 on bad
+ * arguments or if the NIC never released the slot (the frame is dropped;
+ * every caller already has to cope with loss).
+ *
+ * Process context only. */
 int e1000_send_frame(const void *buf, unsigned int len)
 {
 	if (!e1000_initialised || !buf || len == 0 || len > TX_BUF_SIZE)
 		return -1;
 
-	struct tx_desc *d = &tx_ring[tx_cursor];
-	while (!(d->status & E1000_TXD_STAT_DD))
-		;                                  /* wait for slot to drain */
+	volatile struct tx_desc *d = &tx_ring[tx_cursor];
+	unsigned int spins = 0;
+	while (!(d->status & E1000_TXD_STAT_DD)) {
+		if (++spins > 2000000u)
+			return -1;                 /* link down or NIC wedged */
+	}
 
 	const unsigned char *src = (const unsigned char *)buf;
 	unsigned char       *dst = tx_buffers[tx_cursor];
@@ -313,7 +315,7 @@ int e1000_send_frame(const void *buf, unsigned int len)
 	return (int)len;
 }
 
-/* Polls the next RX descriptor for a completed packet. Returns the frame
+/* Process context only. Polls the next RX descriptor for a completed packet. Returns the frame
  * length on success (0..len_max) and copies the payload into 'buf'; returns
  * 0 when no packet is ready. Advances RDT so the chip can refill the slot. */
 unsigned int e1000_poll_receive(void *buf, unsigned int max_len)

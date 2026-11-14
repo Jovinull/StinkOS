@@ -95,6 +95,7 @@ void kmain(void)
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
 	bootdiag_add("net: e1000", e1000_present() ? BOOT_OK : BOOT_ABSENT);
 	net_init();                                /* caches local MAC for L2 emit */
+	net_start();                               /* knet thread: all RX + protocol timers */
 	dhcp_start();                              /* DISCOVER goes out; reply lands via UDP cb */
 	bootdiag_add("net: dhcp", e1000_present() ? BOOT_OK : BOOT_ABSENT);
 	__asm__ volatile ("sti");

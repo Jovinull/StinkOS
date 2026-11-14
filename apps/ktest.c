@@ -524,6 +524,32 @@ static int t_eflags(void)
 	return 0;
 }
 
+/* End to end through the network thread: DHCP has to bind and the
+ * gateway has to answer an echo request. Receive processing runs in the
+ * knet kernel thread, so this also proves a process blocked in a syscall
+ * gets its replies. (QEMU user networking: gateway 10.0.2.2.) */
+static int t_net_ping(void)
+{
+	struct sys_net_info ni;
+	unsigned int t0 = sys_ticks();
+	for (;;) {
+		if (sys_netinfo(&ni) != 0) FAIL("netinfo failed");
+		if (!ni.link_up) FAIL("no NIC");
+		if (ni.dhcp_state == 3)
+			break;                          /* bound */
+		if ((unsigned int)(sys_ticks() - t0) > 800)
+			FAIL("DHCP never bound (state %d)", ni.dhcp_state);
+		sys_sleep_ms(50);
+	}
+	/* The first echo may be spent resolving the gateway's MAC. */
+	int rtt = -1;
+	for (int attempt = 0; attempt < 4 && rtt < 0; attempt++)
+		rtt = sys_ping(sys_ip4(10, 0, 2, 2), 1000);
+	if (rtt < 0) FAIL("gateway did not answer 4 pings");
+	if (rtt > 500) FAIL("ping took %d ms", rtt);
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -560,6 +586,7 @@ static const struct ktcase cases[] = {
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "eflags",      t_eflags },
+	{ "net-ping",    t_net_ping },
 	{ "badptr",      t_badptr },
 };
 

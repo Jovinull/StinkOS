@@ -18,7 +18,7 @@ int eth_send(const unsigned char dst_mac[ETH_ADDR_LEN],
 	if (!dst_mac || (payload_len > 0 && !payload) || payload_len > ETH_MAX_PAYLOAD)
 		return -1;
 
-	unsigned char  frame[ETH_MAX_FRAME];
+	static unsigned char frame[ETH_MAX_FRAME];   /* see net.c: one caller at a time */
 	struct eth_hdr h;
 
 	for (int i = 0; i < ETH_ADDR_LEN; i++)

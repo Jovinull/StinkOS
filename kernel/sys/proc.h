@@ -54,6 +54,7 @@ struct proc {
 	int               vm_fb_mapped;
 
 	unsigned int      kstack_base;       /* lowest address of the kernel stack (canary lives here) */
+	unsigned int      kstack_warned;     /* highest stack usage already reported on serial */
 };
 
 /* Kernel stack size for every process but the boot one (which runs on the
@@ -142,6 +143,11 @@ void           proc_tick(unsigned int now);
  * time inside syscalls would never be preempted. */
 void           proc_request_resched(void);
 void           proc_resched_point(void);
+
+/* Check the running proc's kernel stack: halt with a message if its canary
+ * is gone, and log (once per new high) when more than three quarters of it
+ * have ever been used. Read-only, callable from the PIT handler. */
+void           proc_kstack_audit(void);
 
 /* Give up the CPU if anyone else can use it, otherwise halt until the next
  * interrupt. For kernel polling loops (the menu's idle loop). */

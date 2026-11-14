@@ -52,14 +52,40 @@ static void kstack_check(const struct proc *p)
 		__asm__ volatile ("cli; hlt");
 }
 
-/* Bytes of the stack that have ever been written (pool stacks only). */
+/* Bytes of the stack that have ever been written: everything above the
+ * lowest byte that no longer holds the fill pattern. */
 static unsigned int kstack_peak(const struct proc *p)
 {
 	const unsigned char *base = (const unsigned char *)p->kstack_base;
+	unsigned int size = p->kstack_top - p->kstack_base;
 	unsigned int i = 8;                        /* skip the canary */
-	while (i < KSTACK_SIZE && base[i] == KSTACK_FILL)
+	while (i < size && base[i] == KSTACK_FILL)
 		i++;
-	return KSTACK_SIZE - i;
+	return size - i;
+}
+
+static void kstack_report(struct proc *p)
+{
+	unsigned int size = p->kstack_top - p->kstack_base;
+	unsigned int peak = kstack_peak(p);
+	if (peak <= size * 3u / 4u || peak <= p->kstack_warned)
+		return;
+	p->kstack_warned = peak;
+	serial_write("proc: pid ");
+	serial_write_dec((unsigned int)p->pid);
+	serial_write(" used ");
+	serial_write_dec(peak);
+	serial_write(" of ");
+	serial_write_dec(size);
+	serial_write(" bytes of kernel stack\n");
+}
+
+void proc_kstack_audit(void)
+{
+	if (!running || !running->kstack_base)
+		return;
+	kstack_check(running);
+	kstack_report(running);
 }
 
 static void zero_proc(struct proc *p)
@@ -70,6 +96,7 @@ static void zero_proc(struct proc *p)
 	p->exit_code       = 0;
 	p->kstack_top      = 0;
 	p->kstack_base     = 0;
+	p->kstack_warned   = 0;
 	p->esp             = 0;
 	p->cr3             = 0;
 	p->pending_signals = 0;
@@ -112,7 +139,15 @@ void proc_init(void)
 	boot->parent_pid  = 0;
 	boot->state       = PROC_RUNNING;
 	boot->kstack_top  = gdt_boot_kstack_top();  /* §1: TSS.esp0 follows on switch */
+	/* The boot proc owns the address space paging_init_user built. A zero
+	 * cr3 means "kernel thread" to the scheduler, which would park it on
+	 * the kernel-only tables the first time it is switched back in. */
+	boot->cr3         = (unsigned int)paging_boot_pgdir();
 	boot->kstack_base = gdt_boot_kstack_base();
+	/* Nothing runs on this stack yet (boot is still on the early stack
+	 * from kentry), so it can take the same fill pattern as the pool. */
+	for (unsigned int k = 0; k < boot->kstack_top - boot->kstack_base; k++)
+		((unsigned char *)boot->kstack_base)[k] = KSTACK_FILL;
 	kstack_arm(boot);
 	copy_name(boot, "kinit");
 
@@ -383,16 +418,8 @@ void proc_idle(void)
 static void reap_slot(struct proc *p)
 {
 	kstack_check(p);
-	if (p->kstack_base && p->kstack_base != gdt_boot_kstack_base()) {
-		unsigned int peak = kstack_peak(p);
-		if (peak > KSTACK_SIZE * 3u / 4u) {
-			serial_write("proc: pid ");
-			serial_write_dec((unsigned int)p->pid);
-			serial_write(" used ");
-			serial_write_dec(peak);
-			serial_write(" bytes of kernel stack\n");
-		}
-	}
+	if (p->kstack_base)
+		kstack_report(p);
 	if (p->cr3)
 		paging_destroy_user_pgdir((unsigned int *)p->cr3);
 	proc_free(p);

@@ -208,10 +208,10 @@ move into the sections above.
 | A24 | P2 | fs | case-sensitive lookups everywhere except the loader | open |
 | A25 | P2 | vfs | `vfs_seek` adds offsets as signed int with no overflow guard | open |
 | A26 | P2 | misc | unbounded 8042 wait in `SYS_REBOOT` | open |
-| N1 | P0 | net | `tcp_emit_rst` keeps an 11 KiB `struct tcb` on an 8 KiB kernel stack; the TX call chain alone nests four 1.5 KiB buffers | open |
-| N2 | P0 | net | the whole RX path (ARP/IP/TCP, replies included) runs inside the IRQ handler, on top of any syscall using the same structures and static buffers | open |
-| N3 | P0 | net | socket handles have no owner: any process can read, write or close another's connection | open |
-| N4 | P1 | net | e1000 TX slot reused by an IRQ-context send; RX ring cursor raced between poll and IRQ drain | open |
+| N1 | P0 | net | `tcp_emit_rst` keeps an 11 KiB `struct tcb` on an 8 KiB kernel stack; the TX call chain alone nests four 1.5 KiB buffers | **fixed + retested** (`tools/qa/net_rst.py`: 8048 of 8192 stack bytes used before, audit quiet after) |
+| N2 | P0 | net | the whole RX path (ARP/IP/TCP, replies included) runs inside the IRQ handler, on top of any syscall using the same structures and static buffers | **fixed + retested**: RX and timers moved to the `knet` kernel thread (`ktest net-ping`) |
+| N3 | P0 | net | socket handles have no owner: any process can read, write or close another's connection | fixed (syscalls gate on `tcp_owned_by`); not yet covered by a test |
+| N4 | P1 | net | e1000 TX slot reused by an IRQ-context send; RX ring cursor raced between poll and IRQ drain | fixed by N2 (no ring access from IRQ context); TX wait is bounded |
 | N5 | P1 | tcp | `tcp_drain_tx` re-sends unacknowledged bytes under new sequence numbers | open |
 | N6 | P1 | tcp | a pure ACK carrying options has its option bytes delivered as stream data | open |
 | N7 | P1 | tcp | one RST or half-open SYN frees a listening socket | open |

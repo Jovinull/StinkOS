@@ -230,6 +230,8 @@ void irq_handler(struct regs *r)
 			serial_write("StinkOS: timer tick\n");
 		timer_tick();                       /* fire any expired one-shots */
 		proc_tick(ticks);                   /* wake sleepers that are due */
+		if (ticks % 50 == 0)
+			proc_kstack_audit();        /* canary + high-water mark */
 		/* The kernel does not preempt itself: only a tick that
 		 * interrupted ring 3 may switch processes. Kernel code is
 		 * rescheduled where it explicitly yields or blocks. */
@@ -249,8 +251,13 @@ void irq_handler(struct regs *r)
 	/* PCI INTx lines are shared and the BIOS-assigned vector varies, so
 	 * call the e1000 IRQ entry on every hardware IRQ. The handler reads
 	 * ICR (clears on read) and no-ops when no descriptor is done. */
-	if (r->int_no >= 32 && r->int_no <= 47)
-		e1000_handle_irq();
+	if (r->int_no >= 32 && r->int_no <= 47 && e1000_handle_irq()) {
+		net_irq_wake();                     /* frames are parsed by the knet thread */
+		if (from_user)
+			preempt = 1;                /* ... as soon as this interrupt returns */
+		else
+			proc_request_resched();
+	}
 
 	if (r->int_no >= 40)                        /* from the slave PIC */
 		outb(0xA0, 0x20);
