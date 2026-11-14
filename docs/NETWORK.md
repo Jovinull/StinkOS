@@ -29,9 +29,17 @@ and the public API a userland app uses.
 ```
 
 `net.c` owns the boot init (`net_init`), caches the local MAC + IP, and
-hosts `net_poll_once()` — the single entry point every idle loop must call.
-That function drains one frame off the e1000 RX ring (if any) AND fires the
-TCP retransmit timer (`tcp_tick`), so a quiet wire still gets RTO checks.
+hosts `net_poll_once()`: it drains one frame off the e1000 RX ring (if
+any) and fires the TCP retransmit timer (`tcp_tick`), so a quiet wire
+still gets RTO checks.
+
+Nothing in the stack runs in interrupt context. The e1000 interrupt
+handler only acknowledges the card and wakes `knet`, a kernel thread
+that calls `net_poll_once()` until the ring is empty and otherwise wakes
+on a timer for the protocol clocks. Because the kernel does not preempt
+itself, `knet` and a process inside a socket syscall never touch the
+stack's tables and packet buffers at the same time, and no locks are
+needed. Programs do not have to poll to keep connections alive.
 
 ## Frame flow
 
@@ -166,7 +174,6 @@ cleanly (label compression aware). No record cache yet.
 | TLS    | HTTPS                             | Major effort; not blocking any current use     |
 | NIC    | Drivers other than e1000          | One NIC is enough to validate the stack        |
 | API    | BSD-style `socket(domain, type)`  | Wrapper around the current ints would be nice  |
-| L2     | IRQ-driven RX                     | Polling from `menu_run` is sufficient today    |
 | IP     | IPv6                              | Out of scope until v0.5+                       |
 
 The list mirrors `TODO.md §4`; cross every `⏳` off there as it lands here.

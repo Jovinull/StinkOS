@@ -12,11 +12,11 @@ LBA 0           Boot sector (one 512-byte BIOS-loaded block, jumps to PM)
 LBA 0           Bootblock sector 0 (boot.s real-mode prologue + GDT)
 LBA 1   .. 15   Bootblock tail (boot.s pm_entry + compiled bootmain.c)
 LBA 16  .. 511  Kernel ELF (stripped; 496 sectors = 248 KiB headroom)
-LBA 512 .. 513  StinkFS directory (2 sectors, see "Directory" below)
-LBA 514 .. END  StinkFS data region (~100 MiB by default)
+LBA 512 .. 515  StinkFS directory (4 sectors, see "Directory" below)
+LBA 516 .. END  StinkFS data region (~100 MiB by default)
 ```
 
-`END = FS_DATA_END` in `kernel/fs/fs.c` (`200514` today); the Makefile
+`END = FS_DATA_END` in `kernel/fs/fs.c` (`200516` today); the Makefile
 keeps this in lock-step via `DISK_END = FS_DATA_END * 512`. Resizing the
 filesystem is one constant in each place.
 
@@ -29,11 +29,11 @@ raising `FS_DIR_LBA` in `Makefile` and `kernel/fs/fs.c`.
 Everything is little-endian and packed. There is no FAT, no superblock,
 no metadata outside the directory.
 
-## Directory (2 sectors @ LBA 512)
+## Directory (4 sectors @ LBA 512)
 
 ```c
 #define STINKFS_MAGIC 0x4B4E5453   /* "STNK" little-endian */
-#define FS_MAX_FILES  40
+#define FS_MAX_FILES  80
 
 struct fs_file {
     char         name[16];   /* NUL-padded canonical name (15 visible + NUL) */
@@ -46,13 +46,18 @@ struct fs_dir {
     unsigned int   count;        /* number of populated `files[]` entries     */
     unsigned int   next_free;    /* next unallocated data sector (LBA)        */
     struct fs_file files[FS_MAX_FILES];
-};                               /* 12 + 40 * 24 = 972 bytes, fits in 2 sectors */
+};                               /* 12 + 80 * 24 = 1932 bytes, fits in 4 sectors */
 ```
 
 Magic mismatch on boot means "uninitialised disk" -- the kernel rewrites a
 fresh empty directory at `LBA 512` (count=0, next_free=`FS_DATA_LBA`).
 That is the only place an uninitialised disk gets written without an
 explicit user action.
+
+A directory with the right magic is still checked before it is trusted
+(at boot and at `SYS_MOUNT`): `count` within `FS_MAX_FILES`, `next_free`
+inside the data region, every file's run inside the data region. A
+directory that fails is refused rather than used.
 
 ## Allocation
 
@@ -66,9 +71,11 @@ sweep gaps closed.
 
 ## Operations
 
-All ops resolve files by their 16-byte canonical name -- case-insensitive
-on lookup, case-preserving on store, padded with NUL. Trailing NULs are
-ignored when comparing.
+All ops resolve files by their 16-byte canonical name, padded with NUL.
+Names are compared byte for byte: `fs_file_read("Notes.txt")` does not
+find `NOTES.TXT`. The program loader is the one exception -- it upper-cases
+the name it is given and appends `.ELF`, which is why `run doom1` works.
+Userland that wants forgiving names must normalise them itself.
 
 | Operation             | Returns               | Notes                                   |
 |-----------------------|-----------------------|-----------------------------------------|
@@ -83,8 +90,8 @@ ignored when comparing.
 | `fs_file_info`        | 0 / -1                | walk directory by index                 |
 | `fs_file_lba_sectors` | 0 / -1                | absolute LBA + sector span for loader   |
 
-Every mutating op writes the directory back via `ata_write(LBA 128, 2 sectors)`
-at the end of the call. Data sectors are written through a single
+Every mutating op writes the directory back (`FS_DIR_SECTORS` sectors at
+`FS_DIR_LBA`) at the end of the call. Data sectors are written through a single
 `io_buf[512]` bounce buffer.
 
 ## VFS layer
@@ -100,8 +107,8 @@ change underneath, and reads past EOF still return zero bytes.
 
 The on-disk image is assembled by `tools/make-stinkfs.py`:
 
-1. Boot sector + kernel padded to `IMG_MIN` (64 KiB).
-2. A fresh empty directory at `LBA 128`.
+1. Boot sector + kernel padded to `IMG_MIN` (`FS_DIR_LBA * 512`).
+2. A fresh empty directory at `FS_DIR_LBA`.
 3. App ELFs written in a fixed order (so the menu's positional layout is
    reproducible across builds).
 4. Optional asset files (Freedoom WADs, etc.) packed after the apps.
@@ -116,13 +123,13 @@ sanity-check that the cloned disk matches the source byte-for-byte.
 
 | Limit                       | Today                       | Why                                       |
 |-----------------------------|-----------------------------|-------------------------------------------|
-| Max files                   | 40                          | Fits the directory in 2 sectors           |
+| Max files                   | 80                          | Fits the directory in 4 sectors           |
 | Max file name length        | 15 visible chars + NUL      | Aligns to a 16-byte canonical id          |
 | Data region                 | ~100 MiB                    | Bound by Makefile `DISK_END`              |
 | Permissions                 | none                        | Single-user kernel                        |
 | Directories / hierarchy     | none                        | Flat namespace is enough today            |
 | Journal / crash safety      | none                        | Power loss mid-write can corrupt the dir  |
-| Compaction / defragment     | none                        | Delete leaks the abandoned run            |
+| Compaction / defragment     | none                        | Delete, and any rewrite that grows a file, leaks the abandoned run until the image is rebuilt |
 | Symlinks / hard links       | none                        | Out of scope                              |
 | Extended attributes / xattr | none                        | Out of scope                              |
 

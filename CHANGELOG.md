@@ -6,7 +6,83 @@ for a hobby OS, "major" means a wire-incompatible kernel ABI break.
 
 ## [Unreleased]
 
+A stabilisation pass over the kernel, and the graphical userland rebuilt
+on top of it. `docs/QA_RECOVERY.md` has every finding with the test that
+reproduces it.
+
+### Changed -- behaviour programs can observe
+
+- The kernel no longer preempts itself. A process is switched out on a
+  timer tick in ring 3, on its way out of a syscall, or when a syscall
+  blocks. `SYS_SLEEP_MS`, `SYS_WAIT`, `SYS_WAITPID`, `SYS_PING` and pipe
+  I/O now block (no CPU used) instead of spinning.
+- `SYS_KILL` is a request: the target exits at its next return to ring 3.
+- A failed `SYS_EXEC` returns -1 to the caller, which keeps running.
+- A process that faults reports exit code 139 to `wait`.
+- Syscalls refuse a buffer the caller could not write itself (read-only
+  segments), and unmapped holes inside the user range.
+- Mixer handles and sockets belong to the process that opened them.
+- `SYS_MOUNT` refuses ranges that overlap the boot area or the mounted
+  root, and directories that fail validation.
+- Stock images boot into the desktop (an `AUTORUN` file names it).
+
 ### Added
+
+- Window system in the kernel (`kernel/sys/win.c`): `kwm` thread, back
+  buffer, damage rectangles, title bars / close boxes / taskbar / pointer
+  drawn by the kernel, focus and stacking, move and resize with the
+  mouse, per-window event and key queues, full-screen takeover for
+  programs that draw to the framebuffer directly.
+- Syscalls: windows and clipboard (85-94, 97), `SYS_AUDIO_PLAYING` (95),
+  `SYS_REAP` (96), `SYS_FB_INFO` (98).
+- `lib/libstink_surface.{c,h}`: clipped drawing into a pixel buffer,
+  with a host fuzz test.
+- `apps/rust/libui`, a small toolkit (`Window` / `Surface` / `Event`,
+  buttons, lists, status bars); `rs-desktop` and fourteen windowed
+  programs built on it.
+- Buffered stdio (`lib/libstink_stdio.c`), with a host test.
+- VBE mode selection in the bootloader; 24 bpp framebuffers work.
+- Per-process x87 state; kernel stack canaries with a high-water audit.
+- `apps/ktest.c` + `tools/qa/ktest.py` (kernel cases, one VM each) and the
+  scenario suites under `tools/qa/` (network, input, keyboard, window
+  manager, applications, Doom). Make targets `ktest`, `ktest-lowmem`,
+  `qa-*`, `qa`.
+- `tools/build-cross-toolchain.sh` builds into `~/opt/cross` without
+  sudo.
+
+### Fixed
+
+- Physical memory: frames freed past a fixed count were lost for good;
+  machines with less RAM than the managed range were handed frames that
+  do not exist; machines with 512 MiB hung in ACPI discovery.
+- Processes: address spaces leaked on every exit; a killed or orphaned
+  process was never reaped; kernel stacks overflowed silently; the
+  program break and framebuffer mapping were shared between processes;
+  floating-point registers were shared between processes; `ps` printed
+  no rows; one runnable process could be starved by kernel threads.
+- Traps: the direction flag and the caller's EFLAGS leaked into ring 0.
+- Network: the receive path ran inside the interrupt handler on top of
+  whatever syscall it interrupted, with multi-kilobyte frames on the
+  stack; it now runs in its own thread.
+- Audio: the mixer read samples through user pointers from interrupt
+  context; long sounds never ended; stereo played at double speed.
+- Input: keys typed at one program were replayed into the next; the two
+  Shift keys shared one flag; Caps Lock toggled on key repeat.
+- Video: the kernel assumed where the framebuffer was and that it had 32
+  bits per pixel.
+- Doom: save games failed (path prefix, 15-character names) and wrote one
+  byte per syscall; letter keys did not reach the game.
+
+### Known issues
+
+- TCP: retransmission, option parsing, zero-window and FIN edge cases
+  (N5-N10 in `docs/QA_RECOVERY.md`).
+- Stage 2 loads the kernel from the primary ATA master whatever the BIOS
+  boot drive was.
+- StinkFS names are case-sensitive except in the program loader, and a
+  rewrite that grows a file leaks its old sectors.
+
+### Earlier in this cycle
 
 - `apps/rust/rs-life/` -- Conway's Game of Life in pure Rust: 128x96
   toroidal grid, 8x8 px cells on the linear framebuffer, Gosper glider

@@ -107,9 +107,13 @@ sub-second.
 make run
 ```
 
-You should see the boot diagnostic panel, then the graphical menu. Pick
-an app with the arrow keys + Enter. If `freedoom1.wad` was present at
-build time, the DOOM1 entry will run E1M1 with sound effects.
+You should see the boot diagnostic panel, then the desktop. Click a tile
+(or move with the arrow keys and press Enter) to start a program. If
+`freedoom1.wad` was present at build time, the Doom tile runs E1M1 with
+sound effects.
+
+Ctrl+Q on the desktop drops to the kernel's text menu, which lists every
+program on the disk; `RS-DESKTOP` there starts the desktop again.
 
 To exit QEMU: `Ctrl-A` then `x` (or close the QEMU window).
 
@@ -121,7 +125,9 @@ make test-headless
 
 Boots the same image without a display, intercepts the serial log, and
 asserts that protected mode, the timer IRQ, the keyboard IRQ, and a
-handful of syscalls all worked. This is what CI runs on every push.
+handful of syscalls all worked. `make qa` goes much further (kernel
+cases, the desktop, every windowed program, Doom); CI runs both on every
+push. See `docs/TESTING.md`.
 
 ## 8. Try the installer
 
@@ -129,8 +135,8 @@ handful of syscalls all worked. This is what CI runs on every push.
 make run-install
 ```
 
-Boots the image with a 128 MiB blank disk attached as drive 2. Pick the
-"install" entry from the menu and confirm. The installer clones the
+Boots the image with a 128 MiB blank disk attached as drive 2. Press
+Ctrl+Q for the text menu, pick `INSTALLER` and confirm. The installer clones the
 boot media onto the target.
 
 Once the clone finishes, exit QEMU and run:

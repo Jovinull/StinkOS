@@ -6,8 +6,8 @@ Generated from `kernel/sys/syscall.c`; the C source is the source of truth.
 
 * Vector: `int 0x80` (DPL=3).
 * Arguments: `eax` = syscall number, `ebx` / `ecx` / `edx` / `esi` = up to
-  four positional arguments. Pointer arguments are validated by the kernel
-  via `paging_user_range_ok` before any dereference.
+  four positional arguments. Pointer arguments are validated against the
+  caller's page tables before any dereference (see Pointer-safety rules).
 * Return: result in `eax`. A `-1` (i.e. `0xFFFFFFFF`) indicates failure
   unless a syscall explicitly documents another sentinel.
 * libstink wrappers in `lib/libstink.h` provide a `sys_*` prefix for each
@@ -74,6 +74,60 @@ Generated from `kernel/sys/syscall.c`; the C source is the source of truth.
 | 55 | `SYS_SIGPOLL`       | -                                         | next pending signal number, 0 if none     |
 | 56 | `SYS_MMAP`          | `u32 size`                                | base vaddr, 0 if OOM                      |
 | 57 | `SYS_MUNMAP`        | `void *addr, u32 size`                    | 0 / -1                                    |
+| 85 | `SYS_WIN_CREATE`    | `u32 w, u32 h, u32 flags`                 | 0 / -1 (buffer mapped at `USER_WIN_BASE`) |
+| 86 | `SYS_WIN_SHOW`      | `int x, int y, const char *title`         | 0 / -1 (negative x or y: kernel places it)|
+| 87 | `SYS_WIN_FLUSH`     | -                                         | 0                                         |
+| 88 | `SYS_WIN_DESTROY`   | -                                         | 0                                         |
+| 89 | `SYS_WIN_GET_EVENT` | `struct win_event *out`                   | 0, -1 if the queue is empty               |
+| 90 | `SYS_WIN_RAISE`     | -                                         | 0                                         |
+| 91 | `SYS_WIN_MOVE`      | `int x, int y`                            | 0                                         |
+| 92 | `SYS_CLIP_WRITE`    | `const void *buf, u32 len`                | bytes stored (max 4096), -1               |
+| 93 | `SYS_CLIP_READ`     | `void *buf, u32 max`                      | bytes copied                              |
+| 94 | `SYS_WIN_RESIZE`    | `u32 w, u32 h`                            | 0 / -1 (old buffer kept on failure)       |
+| 95 | `SYS_AUDIO_PLAYING` | `int handle`                              | 1 while the sound plays, else 0           |
+| 96 | `SYS_REAP`          | `int *code` (or 0)                        | pid of an exited child, 0 none yet, -1 none |
+| 97 | `SYS_WIN_WAIT`      | `u32 timeout_ms`                          | 1 event waiting, 0 timeout, -1 no window  |
+| 98 | `SYS_FB_INFO`       | `u32 out[4]` (w, h, pitch bytes, bpp)     | 0 / -1                                    |
+
+The table lists a representative slice; `kernel/sys/syscall.c` has every
+case. Numbers 5-40 and 58-84 cover exit, timing, files, text and pixel
+drawing, audio, sockets, DNS, disk and process control.
+
+## Blocking and scheduling
+
+The kernel does not preempt itself: a syscall runs to completion with
+respect to other processes unless it blocks. `SYS_SLEEP_MS`, `SYS_WAIT`,
+`SYS_WAITPID`, `SYS_PING`, `SYS_WIN_WAIT` and pipe reads/writes block the
+caller (it uses no CPU) and let other processes run. Everything else
+returns without waiting; polling loops should sleep or wait between
+polls rather than spin.
+
+`SYS_KILL` is a request: the target exits by itself the next time it
+returns to ring 3 (exit code 137). `SYS_WAITPID` on it then succeeds.
+
+## Windows
+
+A process owns at most one window. After `SYS_WIN_CREATE` its pixels
+(`w * h` XRGB words, row-major) are mapped read-write at `USER_WIN_BASE`
+(0x12000000); the process draws there and calls `SYS_WIN_FLUSH`. The
+kernel draws the title bar, close box and border around that client area
+and owns the taskbar and pointer.
+
+* Flags: `1` desktop (no chrome, bottom of the stack, not in the
+  taskbar), `2` resizable.
+* `struct win_event { int type, x, y, buttons, key; }`: `1` mouse (client
+  coordinates; `buttons` = state, `key` = buttons that changed), `2` key
+  (`key` = character), `3` close box, `4` resize request (`x`, `y` = new
+  client size; answer with `SYS_WIN_RESIZE`), `5` raw key event,
+  `6` focus (`x` = 1 gained).
+* A window owner's `SYS_GETKEY` / `SYS_GETKEYEVENT` read that window's own
+  key queue (filled only while it has focus); `SYS_GETMOUSE` returns no
+  motion for it. The full-screen drawing calls (`SYS_DRAW`, `SYS_FILLRECT`,
+  `SYS_BLIT`, `SYS_BLIT_SCALED`, `SYS_DRAWTEXT`, `SYS_MAP_FB`) fail with -1
+  for a window owner.
+* A process without a window that uses those drawing calls while windows
+  exist takes the whole screen until it exits.
+* The window is destroyed when its owner exits, is killed or execs.
 
 ## Argument-packing helpers
 
@@ -87,16 +141,20 @@ A few syscalls fold two 16-bit values into one 32-bit register to fit the
 
 ## Pointer-safety rules
 
-Every syscall that takes a userland pointer:
+Every syscall that takes a userland pointer checks the whole range
+`[addr, addr+len)` against the caller's page tables first:
 
-1. Refuses pointers outside the user region.
-2. Refuses pointers whose `[addr, addr+len)` range crosses the user-region
-   boundary.
-3. Returns `-1` (or `0` for SYS_PIPE_READ, matching its EOF sentinel)
-   without partial work.
+1. Every page must be present and user-accessible. Kernel addresses,
+   unmapped holes (after `SYS_MUNMAP`), and ranges that wrap are refused.
+2. If the kernel is going to write there, every page must be writable. A
+   page that is read-only only because it is still shared copy-on-write
+   after `fork` is given its private copy first; pages that are really
+   read-only (`.text`, `.rodata`) are refused.
+3. On refusal the call returns `-1` without partial work.
 
-This means a malicious or buggy app can never coax the kernel into reading
-or writing kernel pages.
+`CR0.WP` is set, so the kernel cannot write through a read-only mapping
+even by mistake. `apps/ktest.c` (`badptr`, `munmap-hole`, `cow-kwrite`,
+`text-kwrite`) exercises these rules.
 
 ## File / VFS notes
 
@@ -109,9 +167,11 @@ or writing kernel pages.
 
 ## Networking notes
 
-* `SYS_SOCK_*` (31-35) operate on TCP handles 0..7. The TCB lifetime ends
-  when both peers have finished the FIN handshake; before that the app
-  must keep polling `SYS_NET_POLL` to drive the RX path.
+* `SYS_SOCK_*` (31-35) operate on TCP handles 0..7, and only on handles
+  the calling process opened. Received frames and the protocol timers are
+  handled by a kernel thread, so an app does not have to call
+  `SYS_NET_POLL` to keep a connection alive (it still may, to process
+  pending frames at once).
 * DHCP runs automatically at boot. Until the DORA completes, `SYS_NETINFO`
   returns the link-local zero state and `SYS_PING` fails. `SYS_NETINFO`'s
   `dhcp_state` matches `enum dhcp_state` (0 init, 1 discover, 2 request,

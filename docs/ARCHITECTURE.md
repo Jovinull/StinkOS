@@ -101,24 +101,49 @@ frame at app exit.
 
 ## Process model
 
-Multitasking is cooperative-preemptive: the round-robin scheduler runs at
-the PIT IRQ tick (100 Hz) so any thread that doesn't disable interrupts gets
-preempted. The data plane lives in `kernel/sys/proc.{c,h}`.
+The kernel is **non-preemptive**: it never switches away from code running
+in ring 0 on its own. A context switch happens in exactly three places:
+
+1. a PIT tick (100 Hz) interrupts ring 3;
+2. a tick landed while the process was inside the kernel, and the process
+   is now on its way back to ring 3 (`proc_resched_point`);
+3. kernel code asks for it: `proc_yield`, `proc_sleep_ticks`, `proc_block`.
+
+Between two such points kernel code sees every kernel data structure in a
+consistent state without locks. Interrupts stay enabled during syscalls;
+interrupt handlers are the only other writers, and they are kept to
+recording input and waking a thread (see the network and window threads
+below). The data plane lives in `kernel/sys/proc.{c,h}`.
 
 * **PCB** (`struct proc`): PID, parent PID, state, exit code, kernel stack
-  top + saved ESP, CR3 (KVA pointer to per-process pgdir; `paging_switch`
-  applies `V2P` before the actual CR3 load), pending-signal bitmap,
-  signal-handler table, per-process VFS descriptor table, name.
+  (8 KiB from a static per-slot pool, with a canary that is checked on
+  every switch), saved ESP, CR3 (KVA pointer to the per-process PDPT),
+  blocking state (wake tick, suspended, killed), the address-space state
+  that lives outside the page tables (program break, framebuffer mapped),
+  the x87 register image, pending signals and handlers, the per-process
+  VFS descriptor table, held pipe ends, name.
 * **Process table**: fixed `PROC_MAX = 16` slots. PID = slot index + 1; PID 1
-  (`kinit`) is the boot process and is non-killable.
-* **States**: UNUSED → EMBRYO → READY ↔ RUNNING → ZOMBIE (reaped by parent).
-* **Context switch**: `boot/context_asm.s` saves the SysV callee-saved regs
-  (EBX/ESI/EDI/EBP) + EFLAGS, swaps ESP, restores them. New stacks are
-  pre-built by `context_init` so the first switch-in `ret`s into the entry
-  function with a clean EFLAGS.
-* **Scheduler** (`proc_yield`): round-robins from current PID forward,
-  swapping in the next PROC_READY slot. No-op when nothing else is ready,
-  so single-process kernels stay bit-identical to the pre-scheduler boot.
+  (`kinit`) is the boot process: it is the kernel menu, and the program
+  the menu launches runs in it. It is non-killable.
+* **States**: UNUSED → EMBRYO → READY ↔ RUNNING ↔ SLEEPING → ZOMBIE. A
+  sleeping process is skipped by the scheduler until the PIT reaches its
+  wake tick or `proc_wake` is called (a child exiting wakes a parent in
+  `wait`).
+* **Scheduler** (`proc_yield`): strict priority, and among processes of the
+  best priority the one that has waited longest since its last turn. With
+  nothing runnable the CPU idles in `hlt` on the blocked process's stack.
+* **Context switch**: `boot/context_asm.s` saves the callee-saved registers
+  and EFLAGS, swaps ESP, restores them; `proc_yield` also swaps CR3,
+  `TSS.esp0`, the heap watermark and the x87 state (`fnsave` / `frstor`).
+* **Exit and reaping**: a process tears down its own resources (window,
+  sockets, mixer channels, pipes) and becomes a ZOMBIE. Its parent's
+  `wait` frees the PCB and the address space; a zombie with no parent left
+  is reaped by the kernel. `SYS_KILL` only sets a flag: the target exits by
+  itself at its next return to ring 3.
+* **Kernel threads** (`proc_kthread_create`): `knet` (network receive path
+  and protocol timers) and `kwm` (window manager). They run on a
+  kernel-only address space at a higher priority than user processes and
+  spend their life blocked.
 
 ### Concurrency primitives
 
@@ -129,9 +154,9 @@ preempted. The data plane lives in `kernel/sys/proc.{c,h}`.
   PCB; `sys_sigpoll()` drains one bit and returns its number. The app calls
   its own registered handler. Avoids the iret-frame surgery of true async
   signals.
-* **Wait/waitpid**: `sys_wait` blocks on `sti+hlt+cli` until any child
-  becomes ZOMBIE, then reaps (frees kernel stack + PCB) and returns the
-  exit code. `sys_waitpid` is the same for a specific PID.
+* **Wait/waitpid**: block the caller until a child is a ZOMBIE, reap it
+  (PCB and address space) and return its exit code. `SYS_REAP` is the
+  non-blocking form.
 
 ## Syscalls
 
@@ -203,8 +228,24 @@ QEMU + asserts a feature-specific invariant. CI runs all five.
   hardcoded to 5 (the value used by essentially every PC firmware
   including QEMU). `sys_shutdown` tries ACPI first, falls back to legacy
   QEMU / Bochs / VirtualBox port-magic paths.
-* **UI** — Linear framebuffer + bitmap font; the menu (`menu.c`) launches
-  apps by ELF name, and the shell is just another app.
+* **Video** — the bootloader scans the VBE mode list for 1024x768 with a
+  linear framebuffer (32 bpp preferred, 24 accepted). The kernel maps the
+  framebuffer through `paging_map_mmio` wherever the card put it.
+* **Window system** (`kernel/sys/win.c`) — one kernel thread, `kwm`, owns
+  the window table, the screen and input routing. It composes into a
+  full-screen back buffer and copies only damaged rectangles to video
+  memory, so nothing is ever left behind by a moved or closed window. It
+  draws the chrome (title bar, close box, border, taskbar, pointer);
+  programs draw only their client area, in pixel buffers the kernel owns
+  and maps into them (`PG_SHARED`). Pointer events go to the window under
+  the pointer (or the one that got the press, until release), keys to the
+  focused window's own queues. Programs without a window that draw to the
+  framebuffer directly take the whole screen while they run. With no
+  windows the thread stays idle and the kernel's text menu owns the
+  screen, exactly as before the window system existed.
+* **Text menu** (`kernel/ui/menu.c`) — lists every program on the disk and
+  launches by ELF name. An `AUTORUN` file names a program to start at
+  boot; stock images name the desktop.
 
 ## App lifecycle
 
@@ -231,7 +272,10 @@ shared frame's refcount. Read-only pages (`.text` / `.rodata` under
 v0.5 W^X) stay shared without `PG_COW`; writes to those remain real
 W^X violations and the trap path kills the offender as before.
 
-The launcher model is "one menu-launched app at a time" but multiple
+The text menu launches one program at a time into PID 1. The desktop
+(`rs-desktop`) is such a program; it starts the others with fork + exec
+and does not wait for them, so any number of windowed programs run side
+by side. From the shell, multiple
 shell-backgrounded apps can run concurrently. Each owns a private
 pgdir; CR3 swaps in the scheduler (`paging_switch` before every
 `context_switch`).
