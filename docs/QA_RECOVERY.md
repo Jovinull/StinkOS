@@ -193,7 +193,7 @@ move into the sections above.
 | A9 | P0 | acpi | firmware table pointers above the 256 MiB direct map fault before the IDT exists (`-m 512`) | **fixed + retested** (`ktest --mem 512`: boot hung at the RSDP line before) |
 | A10 | P1 | video | kernel uses the LFB physical address as a virtual one; only valid at or above 0xFD000000 | open |
 | A11 | P1 | boot | stage 2 reads the kernel from the primary ATA master whatever the BIOS boot drive was | open |
-| A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | open |
+| A12 | P1 | pmm | no RAM detection: with less RAM than `PMM_PHYS_LIMIT` the PMM hands out frames that do not exist | **fixed + retested** (`ktest --mem 24 oom`: a second process was given memory that did not hold data): the PMM range is clamped to the RAM size in CMOS. Not a memory map: reserved holes below the top are still assumed absent |
 | A13 | P1 | boot | one hard-coded VBE mode, set-mode result ignored, no fallback | open |
 | A14 | P2 | menu | `klongjmp` resumes with ESP 4 bytes low (masked by frame pointers) | fixed (latent, no failing run) |
 | A15 | P2 | input | CapsLock toggles on typematic repeat; one flag for both Shifts / both Ctrls; 0xE1 not handled | **fixed + retested** for the two-Shift case (`tools/qa/kbd_test.py`: typed `Xxx`, want `XXx`); Caps Lock repeat and 0xE1 are fixed but QEMU key injection does not reproduce them |
