@@ -1,14 +1,17 @@
 # Testing
 
-StinkOS is tested at four levels. They answer different questions, and
-only the last three run the kernel's own code.
+StinkOS is tested at five levels. They answer different questions, and
+only the last four run the system's own code.
 
 | Level | Command | What it runs | What it can prove |
 |---|---|---|---|
 | Host models | `make unittest` | `tests/test_*.c`, a copy of one piece of kernel logic per file | The arithmetic of that logic, as it was when the copy was made |
 | Host tests on real sources | `make unittest` (`test_pmm`) | The kernel's own `.c` file linked into a host binary | That file's behaviour |
 | Kernel cases in QEMU | `make ktest` | `apps/ktest.c` in ring 3 against the booted kernel, one VM per case | Kernel invariants end to end |
-| Scenarios in QEMU | `make test-headless`, `make smoke-*`, `make qa-net`, `make qa-input` | Scripts driving a booted system through keyboard, mouse, serial and network | Whole-system behaviour |
+| Scenarios in QEMU | `make test-headless`, `make smoke-*`, `make qa-net`, `make qa-input`, `make qa-kbd` | Scripts driving a booted system through keyboard, mouse, serial and network | Whole-system behaviour |
+| The desktop in QEMU | `make qa-wm`, `make qa-apps`, `make qa-doom` | The graphical session driven with pointer and keys, checked on screenshots, the serial log and the disk image | What a person at the machine would see |
+
+`make qa` runs every suite that boots the system.
 
 ## Host models, and their limit
 
@@ -34,6 +37,18 @@ A kernel file that only does arithmetic (no privileged instructions, no
 direct-map dereferences) can be compiled for the host as it is.
 `tests/test_pmm.c` links `kernel/arch/pmm.c` this way, with two serial
 stubs. New host tests should take this form whenever the file allows it.
+
+Two userland libraries are tested the same way, from their real sources:
+
+* `tests/test_surface.c` links `lib/libstink_surface.c` (the drawing
+  code every window uses) and throws over a million calls with hostile
+  coordinates and sizes at a surface surrounded by guard bytes. Any
+  write outside the pixel buffer fails the test.
+* `tests/test_stdio.c` links `lib/libstink_stdio.c` (buffered files, used
+  by Doom) over an in-memory file system that counts syscalls: mixed
+  reads, writes and seeks must produce the same bytes as a reference
+  model, and a byte-at-a-time writer must not turn into one syscall per
+  byte.
 
 ## Kernel cases in QEMU (`make ktest`)
 
@@ -69,9 +84,11 @@ the unfixed kernel first.
 ## Scenarios in QEMU
 
 `tools/qa/stinkqa.py` is the shared driver: QMP keyboard and mouse
-input, the serial log, PNG screenshots, and helpers to add or remove
-files in a private image copy. Scripts built on it wait on serial output
-or on QEMU exiting rather than on fixed sleeps.
+input, the serial log, screenshots, and helpers to add, read or remove
+files in a private image copy. Scripts built on it wait on serial output,
+on the screen changing or on QEMU exiting rather than on fixed sleeps.
+Every wait has a timeout; `STINKQA_TIMEOUT_SCALE=4` multiplies them all
+for slow hosts (CI sets it).
 
 | Script | Scenario |
 |---|---|
@@ -79,9 +96,39 @@ or on QEMU exiting rather than on fixed sleeps.
 | `tools/qa/input_flush.py` | keys typed at an app that never reads them must not be replayed into the menu when it exits |
 | `tools/qa/kbd_test.py` | modifier state key by key: two Shifts, a held Caps Lock, the Pause sequence |
 
-The older `tools/test-headless.py` and `tools/smoke-*.py` predate the
-driver and use fixed paths under `/tmp` and fixed sleeps; do not run two
-of them at once.
+`tools/test-headless.py` and `tools/smoke-*.py` are older scripts that
+boot into the kernel's text menu and check the serial log. They take
+their image from `stinkqa.menu_image()` (a private copy without the
+`AUTORUN` file, so the desktop does not start) and use fixed sleeps; do
+not run two of them at once.
+
+## The desktop in QEMU
+
+These three suites need Python's Pillow for screenshots, and boot the
+stock image, which starts the desktop.
+
+They do not guess where things are. The window manager logs every state
+change on the serial line (`win: show pid=5 x=.. y=.. w=.. h=..`,
+`moved`, `resize`, `focus`, `destroy`, `fullscreen`), and the desktop
+logs where each tile is, so a script clicks "the close box of the
+window owned by pid 5" from what the system reported. What the user
+would see is then read back from a screenshot: `find_text` /
+`read_text` match the kernel's own 8x16 font against the pixels, so a
+test can assert that the calculator's display shows `56`.
+
+| Suite | What it does |
+|---|---|
+| `tools/qa/wm_test.py` | One session: start programs from the desktop, focus, raise, drag (including off every screen edge), resize, close by the close box and by the taskbar, kill a window's owner, eight windows at once, full-screen takeover and return, leave to the text menu and come back. After each step it checks the screen for leftovers: a moved or closed window must leave exactly the pixels that were under it |
+| `tools/qa/apps_test.py` | Every windowed program in its own VM: opens it, uses it for what it is for (a sum in the calculator, typing and saving in the editor, a stroke in the paint program, killing a process from the task manager, ...), checks the result on screen, then checks what reached the disk by reading the image from the host, and for programs that save, boots a second time to see the data come back |
+| `tools/qa/doom_test.py` | Doom from the desktop tile: title screen, new game through the menus, walking, turning and firing with the HUD ammo count checked, a save and a load, sound effects reaching the mixer, quit back to the desktop with the screen restored, and a second run in the same boot |
+
+A failure saves the last screenshot and the serial log under the
+directory the script prints.
+
+To add a case for a new program, add a function to `apps_test.py`: it
+gets a booted desktop, calls `launch("rs-name")` (which returns the
+window's geometry as the kernel reported it), sends input in client
+coordinates and asserts on `read_text` / the disk.
 
 ## Adding a host model
 
@@ -112,7 +159,8 @@ Networking lives in `tests/test_arp_*`, `test_dhcp_*`, `test_dns_*`,
 Process / memory in `test_pmm`, `test_mmap_overflow`, `test_pipe`,
 `test_timer`, `test_sched`. Drivers in `test_rtc_alarm`,
 `test_blit_*`, `test_fb_rect_clip`, `test_utf8_collapse`. Kernel
-state in `test_klog`.
+state in `test_klog`. Userland libraries in `test_surface`,
+`test_stdio`.
 
 For an authoritative list run `make help` and look at the `unittest`
 target, or read the `unittest:` prerequisite list in `Makefile`.
@@ -139,7 +187,8 @@ When you need it:
 | `make run-install` | NO | Installer must write the target disk |
 | `make run-installed` | NO | Interactive use of the installed system |
 | `make run-iso` | NO | Same |
-| `make test-headless` | YES (already set in `tools/test-headless.py`) | CI must be deterministic |
+| `make test-headless`, `make smoke-*` | YES (already set in the scripts) | CI must be deterministic |
+| `make ktest`, `make qa-*` | not needed: each run boots a private copy of the image | Tests add files and reboot on the copy; `os.bin` is opened read-only |
 | `tools/capture-screens.py` | YES (set explicitly in the script) | Screenshots reproducible across reruns |
 | Any ad-hoc debug rerun where you want a clean boot | YES | Bypass disk corruption from prior runs |
 
