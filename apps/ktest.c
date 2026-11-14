@@ -761,6 +761,53 @@ static int t_mount_guard(void)
 	return 0;
 }
 
+/* Take memory until the kernel says no, use every byte of it, give it all
+ * back. Running out must be an orderly "no", every page handed out must be
+ * real memory that holds what was written to it, and nothing may be lost.
+ * Run with less RAM than the allocator's compile-time limit (--mem 24)
+ * this also checks that the kernel sized itself to the machine. */
+static int t_oom(void)
+{
+	enum { CHUNK = 256 * 1024, MAXC = 56 };     /* heap region is ~14.7 MiB */
+	static unsigned char *chunk[MAXC];
+	unsigned int base = free_pages();
+	int n = 0;
+	while (n < MAXC) {
+		unsigned char *p = sys_mmap(CHUNK);
+		if (!p)
+			break;
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			p[off] = (unsigned char)(n * 31 + (off >> 10));
+		chunk[n++] = p;
+	}
+	if (n == 0) FAIL("could not map even 256 KiB (free=%u pages)", base);
+	for (int i = 0; i < n; i++)
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			if (chunk[i][off] != (unsigned char)(i * 31 + (off >> 10)))
+				FAIL("chunk %d of %d lost its contents at offset %u", i, n, off);
+	/* While we hold ours, a second process does the same. Together the
+	 * two ask for more than a small machine has: the second must be told
+	 * no at some point, and until then every page it gets must be real. */
+	int pid = sys_fork();
+	if (pid == 0) { sys_exec("ktmem"); child_exit(99); }
+	if (pid > 0) {
+		int code = sys_waitpid(pid);
+		if (code == 43) FAIL("a second process was given memory that does not hold data");
+		if (code != 42 && code != 44) FAIL("second process ended with %d", code);
+	}
+	for (int i = 0; i < n; i++)
+		for (unsigned int off = 0; off < CHUNK; off += 1024)
+			if (chunk[i][off] != (unsigned char)(i * 31 + (off >> 10)))
+				FAIL("our chunk %d was overwritten while another process ran", i);
+	for (int i = 0; i < n; i++)
+		if (sys_munmap(chunk[i], CHUNK) != 0) FAIL("munmap failed");
+	unsigned int after = free_pages();
+	if (after != base) FAIL("lost %d frames after mapping %d chunks", (int)(base - after), n);
+	sys_printf("ktest: oom: mapped %d KiB before the limit, %u pages free at start",
+	           n * (CHUNK / 1024), base);
+	return 0;
+}
+
 /* A failed sbrk must not keep the frames it grabbed on the way. */
 static int t_sbrk_oom(void)
 {
@@ -806,6 +853,7 @@ static const struct ktcase cases[] = {
 	{ "fair3",       t_fair3 },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
+	{ "oom",         t_oom },
 	{ "eflags",      t_eflags },
 	{ "net-ping",    t_net_ping },
 	{ "audio-unmap", t_audio_unmap },

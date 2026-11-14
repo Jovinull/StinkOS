@@ -68,6 +68,9 @@ jobs:
       - name: Kernel regression suite (ktest)
         run: make ktest
 
+      - name: Kernel regression suite, 24 MiB machine
+        run: make ktest-lowmem
+
       - name: QA -- unsolicited TCP while an app runs
         run: make qa-net
 
