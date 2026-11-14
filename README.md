@@ -76,16 +76,26 @@ Bottom-right: multiprocess proof — shell forks <code>anim</code> into the back
 On boot, StinkOS will:
 
 1. **Load itself from disk** via the BIOS, enable A20, build a GDT, and switch the CPU into 32-bit protected mode. (`boot.s`)
-2. **Set a VBE linear framebuffer** at 1024×768×32 — pixels go straight to video memory. (`vbe.c`, `fb.c`)
+2. **Set a VBE linear framebuffer** — the bootloader scans the card's mode list for 1024×768 (32 bpp, or 24 where that is all there is) instead of trusting a mode number. (`boot.s`, `vbe.c`, `fb.c`)
 3. **Wire up interrupts** — IDT, remap the PIC, configure the PIT at 100 Hz, drive the PS/2 keyboard. (`trap.c`, `keyboard.c`)
 4. **Enable PAE paging with W^X**. 3-level page tables (PDPT → PD → PT, 8-byte entries, NX bit 63). Kernel `.text` is R-X, `.rodata` R-NX, `.data` / `.bss` RW-NX. Userland ELFs honour `p_flags` per segment. (`paging.c`, `pmm.c`, `kentry.s`)
 5. **Locate ACPI tables** (RSDP scan → RSDT/XSDT → FADT + MADT). `sys_shutdown` does a real ACPI S5 port-write; CPU + IOAPIC topology gets logged. (`acpi.c`)
-6. **Install a TSS** and drop into a graphical start menu. (`menu.c`, `gdt.c`)
-7. **Load and run apps in Ring 3** with per-process page directories. `sys_fork` is COW (refcount-based, write-faults privatize). `sys_exec` swaps in a fresh pgdir; multiple ring-3 apps live at once (round-robin scheduler at 100 Hz). The kernel reads a named ELF file from StinkFS (or `B:` mount), copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`, `proc.c`)
+6. **Install a TSS** and start the desktop: a window manager in the kernel (`win.c`) and a launcher in Ring 3 (`rs-desktop`). The kernel's own text menu is still there underneath — Ctrl+Q on the desktop, or an image without an `AUTORUN` file, lands in it. (`menu.c`, `gdt.c`)
+7. **Load and run apps in Ring 3** with per-process page directories. `sys_fork` is COW (refcount-based, write-faults privatize). `sys_exec` swaps in a fresh pgdir; multiple ring-3 apps live at once (preempted at 100 Hz, blocking syscalls sleep instead of spinning). The kernel reads a named ELF file from StinkFS (or `B:` mount), copies it into a fresh user address space, and `iret`s into user code. The app talks to the kernel only through `int 0x80`. When it exits or faults, control returns to the menu — a misbehaving app cannot take down the system. (`elf.c`, `usermode_asm.s`, `proc.c`)
 
 There's also a filesystem of my own design (`fs.c` — "StinkFS") behind a VFS multi-mount table (`A:`/`B:` DOS-style prefixes route to mount slots), a PC speaker + SB16 driver, an ATA disk driver (`ata.c`), and a serial console used for debug output (visible in the QEMU stdio log). The boot path ends with a BIOS-style POST screen reporting each subsystem's status (`bootdiag.c`), and a network stack (e1000 NIC → ARP/IP/ICMP/UDP/TCP/DHCP/DNS) backs the shell's `netinfo` and `ping` commands.
 
-Rust userland is wired up: a nightly toolchain + custom `i686-stinkos` target + shared `libstink` rlib lets `no_std` Rust apps link with the existing C `crt0.s` and call syscalls through `extern "C"` shims. Five Rust apps ship today: `rs-hello` (toolchain proof), `rs-alloc` (`Box`/`Vec` over libstink K&R `malloc`), `rs-stdio` (`println!` / `eprintln!` / `alloc::format!`), `rs-json` (~390 LOC recursive-descent JSON parser, zero crates), `rs-life` (Conway's Game of Life on the framebuffer).
+Rust userland is wired up: a nightly toolchain + custom `i686-stinkos` target + shared `libstink` rlib lets `no_std` Rust apps link with the existing C `crt0.s` and call syscalls through `extern "C"` shims. The desktop and every windowed program are Rust, on a small toolkit of their own (`apps/rust/libui`): files, editor, paint, calculator, hex viewer, to-do list, calendar, clock, system info, network status, task manager, settings. The console-side Rust apps are still there too: `rs-hello`, `rs-alloc`, `rs-stdio`, `rs-json` (a ~390 LOC JSON parser, zero crates), `rs-life`.
+
+## The desktop
+
+Windows are the kernel's business: it owns the pixel buffers, composes them into a back buffer, and copies only what changed to the screen. It draws the title bars, the close boxes, the taskbar and the pointer itself, so every program looks the same and a program that hangs can still be moved, covered or closed. Programs draw their own content into memory the kernel maps for them and say "flush".
+
+* Click a tile (or arrows + Enter) to start a program. Start as many as you like — eight windows at once.
+* Drag a title bar to move; drag the bottom-right corner of the resizable windows (editor, files, hex viewer, vector art) to resize; click anywhere on a window to bring it to the front; click its taskbar button to find it again.
+* Keys go to the focused window, pointer events to the window under the pointer.
+* Programs under "Full screen" (Doom, the games, the shell) take the whole screen while they run, then the desktop comes back as it was.
+* Ctrl+Q leaves the desktop for the text menu; `RS-DESKTOP` in that menu starts it again.
 
 ## Run it (2 minutes)
 
@@ -100,11 +110,17 @@ source ~/.bashrc
 make run
 ```
 
-Want to verify it boots without staring at it?
+Want to verify it works without staring at it?
 
 ```bash
-make test-headless     # boots in qemu, asserts via serial log
+make unittest          # host-side tests, seconds
+make ktest             # kernel invariants, one VM per case
+make qa                # everything that boots: kernel cases, network, input,
+                       # the desktop, every windowed program, Doom
+make test-headless     # the text menu and the console apps
 ```
+
+[`docs/TESTING.md`](docs/TESTING.md) says what each level can and cannot prove.
 
 Other useful targets: `make` (build only), `make hex` (hexdump the disk image), `make dall` (disassemble), `make clean`.
 
@@ -129,12 +145,14 @@ Userland talks to the kernel via `int 0x80`. `eax` = syscall number, args in `eb
 | 13 | `fappend`| `ebx`=name `ecx`=buf `edx`=size   | Append to an existing file |
 | 83 | `fork`  | —                                 | COW fork; parent gets child pid, child gets 0 |
 | 84 | `mount` | `ebx`=(slot<<8)\|drive `ecx`=dir_lba `edx`=data_lba `esi`=data_end | Mount StinkFS at `B:` |
-| 86 | `exit_code` | `ebx`=code | Set exit code (libstink `exit(n)` wrapper) |
+| 85 | `win_create` | `ebx`=w `ecx`=h `edx`=flags | Get a window; its pixels appear in the caller's address space |
+| 87 | `win_flush` | — | Show what was drawn |
+| 97 | `win_wait`  | `ebx`=timeout ms | Sleep until the window has an event |
 
-The table above is a representative slice; the ABI is ~80 calls today — file
-and VFS I/O, on-screen text and blits, audio, TCP/UDP sockets, DNS, `netinfo`
-and `ping`, `exec`, `fork`, `wait`/`waitpid`, signal raise/poll, `mount`,
-and direct framebuffer mapping. C apps don't write `int 0x80` by hand —
+The table above is a representative slice; the ABI is just under 100 calls
+today — file and VFS I/O, on-screen text and blits, audio, TCP/UDP sockets,
+DNS, `netinfo` and `ping`, `exec`, `fork`, `wait`/`waitpid`, signal
+raise/poll, `mount`, direct framebuffer mapping, and windows. C apps don't write `int 0x80` by hand —
 `lib/libstink.h` wraps each call as a `static inline`. Drop it in and call
 `sys_draw(x, y, 0xff00ff)`.
 
@@ -142,7 +160,25 @@ Rust apps go through `lib/libstink_syms.c` (non-inline shims so `extern "C"` res
 
 ## Userland apps
 
-Apps are independent ELF binaries. They live as named ELF files in StinkFS and show up in the start menu at boot. ~28 C/asm apps + 5 Rust apps today:
+Apps are independent ELF binaries. They live as named ELF files in StinkFS; the desktop shows the ones meant for people, and the text menu lists every one of them.
+
+Windowed (Rust, `apps/rust/rs-*`):
+
+| Name | What it is |
+|------|------------|
+| `RS-DESKTOP`  | The launcher: tiles by group, starts programs without waiting for them |
+| `RS-FILES`    | File list with sizes; Enter starts a program or opens a text file in the editor |
+| `RS-EDIT`     | Text editor: resizable, Ctrl+S saves, shows when there are unsaved changes |
+| `RS-PAINT`    | Brush and line tools, sixteen colours, three sizes; saves and reloads its canvas |
+| `RS-CALC`     | Pocket calculator, keyboard or mouse |
+| `RS-HEX`      | Hex + ASCII view of the files on the disk |
+| `RS-TODO`     | A to-do list that survives a reboot |
+| `RS-CAL` / `RS-CLOCK` | Month calendar and a clock, from the RTC |
+| `RS-SYSINFO` / `RS-NET` / `RS-TASKMAN` | Memory and processes, the DHCP lease and ARP cache, a process list that can kill |
+| `RS-SETTINGS` | Keyboard layout (US / ABNT2), PC speaker test |
+| `RS-VEC` / `RS-ABOUT` | Animated Lissajous figures; what this is |
+
+Full screen and console:
 
 | Name | What it is |
 |------|------------|
@@ -162,6 +198,7 @@ Apps are independent ELF binaries. They live as named ELF files in StinkFS and s
 | `WXATTACK`            | Adversarial app proving W^X kills `.data` execution |
 | `COWTEST` / `MOUNTTEST` / `EXITCODE` | End-to-end smokes for fork-COW / VFS-mounts / exit codes |
 | `RS-HELLO` / `RS-ALLOC` / `RS-STDIO` / `RS-JSON` / `RS-LIFE` | Rust apps — toolchain, heap, stdio shim, JSON parser, Conway's Life |
+| `KTEST`               | The kernel's regression cases (`make ktest` runs it, one case per boot) |
 
 ## Write an app
 
@@ -209,6 +246,7 @@ every subsystem header so they need a single include instead of a long list.
 | StinkFS + VFS (multi-mount, `A:`/`B:` routing) | `kernel/fs/{fs,vfs,mbr}.c` |
 | ACPI (RSDP/RSDT/XSDT/FADT/MADT, S5 shutdown) | `kernel/arch/acpi.c` |
 | Process model (fork-COW, exec, wait, signals) | `kernel/sys/proc.c`, `kernel/arch/paging.c` |
+| Window system (compositor, chrome, input routing) | `kernel/sys/win.c`, `lib/libstink_surface.c`, `apps/rust/libui/` |
 | ELF loader + Ring 3 entry            | `kernel/sys/elf.c`, `kernel/ui/menu.c`, `boot/usermode_asm.s` |
 | Userland C library                   | `lib/libstink.h`, `lib/libstink_syms.c`, `apps/crt0.s` |
 | Rust userland (libstink rlib + apps) | `apps/rust/libstink/`, `apps/rust/rs-*/`, `apps/rust/i686-stinkos.json` |
@@ -226,7 +264,8 @@ Deep dives live under `docs/`:
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | How to author a `.stinkpkg` |
 | [`docs/MEMORY.md`](docs/MEMORY.md) | Memory accounting + leak-sweep methodology |
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md) | Build from scratch in 10 steps |
-| [`docs/TESTING.md`](docs/TESTING.md) | Host-mirror unit test contract + how to add one |
+| [`docs/TESTING.md`](docs/TESTING.md) | The five test levels, what each proves, how to add a case |
+| [`docs/QA_RECOVERY.md`](docs/QA_RECOVERY.md) | The 2026-11 stabilisation pass: every finding, fix and how it was checked |
 | [`CREDITS.md`](CREDITS.md) | Third-party code shipped (Doom, Freedoom, cross-toolchain) |
 
 ## Toolchain — why a cross-compiler?
@@ -244,6 +283,7 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 - [x] Interrupts: IDT, PIC remap, PIT timer, PS/2 keyboard
 - [x] **PAE paging + W^X** (v0.5) — PDPT/PD/PT 8-byte entries, NX bit 63, kernel + user per-segment permissions, `wxattack` app proves `.data` execution dies at #PF
 - [x] **Multitasking proper** (v0.4) — per-process page directory, `sys_fork` + `sys_exec`, round-robin scheduler at PIT 100 Hz
+- [x] **Window system** — kernel compositor with damage tracking, server-side chrome, per-window input queues; a Rust desktop and a dozen windowed programs
 - [x] **COW fork** (v0.7) — `PG_COW` PTE bit 9 + 8 KiB PMM refcount table; first writer takes #PF, kernel privatizes
 - [x] **ACPI static tables** (v0.6) — RSDP scan → RSDT/XSDT → FADT (S5 soft-off via PM1a_CNT_BLK) + MADT (CPU/IOAPIC topology)
 - [x] **VFS multi-mount** (v0.8) — `fs_mount` + `fs_ops` dispatch, DOS-style `A:`/`B:` prefix routing, `sys_mount` registers a second StinkFS slot
@@ -267,6 +307,9 @@ The host `gcc` assumes it's producing programs for the host OS. Forcing it to em
 - [ ] Doom music (OPL/MIDI synth backend)
 - [ ] SMP bring-up — IOAPIC + LAPIC + atomic ops in PMM refcount + per-CPU lock for COW
 - [ ] More Rust apps that exploit Rust's safety wins (parsers, protocol decoders)
+- [ ] TCP hardening (retransmission, zero-window and FIN edge cases — listed in `docs/QA_RECOVERY.md`)
+- [ ] A firmware memory map (E820) instead of assuming RAM is contiguous
+- [ ] More than one window per process
 
 ## Doom
 
@@ -292,7 +335,7 @@ make FREEDOOM1_WAD=path/to/doom.wad
 make run
 ```
 
-The boot menu picks up three new entries — `DOOM1`, `DOOM2`, `FREEDM`. Pick one with arrows, Enter, and the engine fires up against the matching IWAD. The disk image grows to ~100 MiB because the WADs live in StinkFS alongside the kernel.
+Click the Doom tile on the desktop (it runs `DOOM1`). `DOOM2` and `FREEDM` are in the text menu and the shell (`run doom2`). Doom takes the whole screen while it runs; quitting from its menu brings the desktop back. The disk image grows to ~100 MiB because the WADs live in StinkFS alongside the kernel.
 
 **Controls (vanilla Doom set):**
 

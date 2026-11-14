@@ -7,20 +7,27 @@ drips frames after every app exit" regressions.
 ## Layer 1: PMM frame counts
 
 The physical memory manager (`kernel/arch/pmm.c`) tracks total and free
-frames over the managed range (1 MiB .. 32 MiB today). Userland reads the
-numbers via `SYS_MEMINFO` (`lib/libstink.h` -> `sys_meminfo`); the shell's
-`mem` command prints them.
+frames over the managed range: from 1 MiB up to `PMM_PHYS_LIMIT` (64 MiB),
+or up to the amount of RAM the firmware reports in CMOS when the machine
+has less. Userland reads the numbers via `SYS_MEMINFO` (`lib/libstink.h`
+-> `sys_meminfo`); the shell's `mem` command and the System Info window
+print them.
 
 ```
 > mem
-phys: 384/8192 pages (1536 KiB used / 32768 KiB total)
+phys: <used>/<total> pages (<used> KiB used / <total> KiB total)
 user brk: 0x540000
 ```
+
+The kernel does not read a firmware memory map: it assumes everything
+between 1 MiB and the top it computed is usable RAM, which holds on QEMU
+and on ordinary PCs with at least 64 MiB.
 
 Out-of-memory is loud: the first allocation past the watermark emits a
 one-shot `pmm: OUT OF MEMORY (all N pages handed out)` line to the serial
 log and `pmm_alloc` returns `0`. Subsequent failures are silent so a
-runaway loop doesn't drown the log.
+runaway loop doesn't drown the log. A process that hits it gets a failure
+from `sbrk` / `mmap` and keeps everything it had (`ktest sbrk-oom`, `oom`).
 
 ## Layer 2: per-app reset audit
 
@@ -42,32 +49,34 @@ assert "after exit, zero user pages remain mapped".
 
 ## Running a sweep
 
-The minimum-effort manual sweep:
+The automated sweep is part of `make ktest`. Each of these cases reads
+the free-frame count, does something many times, and fails if the count
+did not come back:
+
+| Case | Cycle |
+|---|---|
+| `leak-fork` | fork + exit + wait |
+| `leak-exec` | fork + exec a second image + wait |
+| `kill-reap` | fork, kill the child, wait |
+| `orphan` | a child whose parent exits first |
+| `pmm-churn` | allocate and free more frames than exist, repeatedly |
+| `win-leak` | create, resize and destroy windows; exit and exec with a window open |
+| `audio-unmap` | play sounds and let them end, or exit while they play |
+
+The manual version, for chasing a new one:
 
 1. Boot StinkOS with serial logging on:
-   `qemu-system-i386 -drive format=raw,file=os.bin -serial stdio`
+   `qemu-system-i386 -snapshot -drive format=raw,file=os.bin -serial stdio`
 2. Note the `pmm:` and `paging: reclaimed` lines emitted at idle.
 3. Launch an app, exercise it, exit, repeat.
-4. Each cycle should print one matching `reclaimed N` line; the running
-   free-page total visible via `mem` should plateau, not creep downward.
+4. The free-page total visible via `mem` should plateau, not creep
+   downward.
 
-If you see the total trend downward across cycles, the suspect order is:
-
-1. `paging_user_mmap` not paired with `paging_user_munmap` (deliberate --
-   munmap leaves the bump pointer in place; the reset zeros it).
-2. A kernel-side cache that holds a `pmm_alloc`'d frame without freeing
-   on app teardown (e.g. a stale DMA buffer, an open VFS descriptor
-   pinning a sector, an unwound `sys_mmap` mid-allocation).
-3. A page-table allocation in `paging_init_user` that never gets revisited
-   (one-time on boot; shows up as a constant overhead, not a per-cycle
-   drip).
-
-The sweep doesn't ship as a Make target yet because it needs interactive
-input. Adding one is straightforward: spawn / exit an app N times via the
-test-headless harness, parse the serial log for the reclaimed counts, and
-fail if the post-cycle free total dips below the pre-cycle baseline by
-more than tolerance (a small constant drift is expected because the heap
-high-water mark inside an app may not match across runs).
+If the total trends downward across cycles, look for a kernel-side
+owner that outlives the process: every such owner has a release hook
+called from process exit (`win_proc_exit`, `audio_reclaim`,
+`pipe_release_all`, `tcp_close_pid`), and a new kind of
+kernel-owned memory needs one too.
 
 ## Higher-half kernel: why every phys deref goes through P2V
 
@@ -99,8 +108,9 @@ the xv6 pattern:
 - Drivers that hand physical addresses to hardware (audio DMA, e1000
   RX/TX rings + descriptor base registers, ata Bus Master PRDT)
   apply `V2P()` to convert their BSS-resident virt buffers back to
-  phys. MMIO BARs (LFB at `0xFD000000`, e1000 BAR at `~0xFEB80000`)
-  stay in the DEVSPACE identity range and need no conversion.
+  phys. Device memory (the linear framebuffer, the e1000 registers) is
+  mapped explicitly with `paging_map_mmio`, wherever the firmware put
+  it; the kernel never uses a device's physical address as a pointer.
 
 The bug class is now impossible by construction: no kernel deref ever
 touches the `[0, KERNBASE)` virt range, and no user PT ever reaches
