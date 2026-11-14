@@ -23,7 +23,8 @@ from stinkqa import Vm, QaError, fs_put  # noqa: E402
 CASES = [
     "leak-fork", "leak-exec", "pmm-churn", "heap-switch", "cow-kwrite",
     "text-kwrite", "munmap-hole", "kill-reap", "orphan", "sleep-fair",
-    "preempt", "resched", "concurrent", "sbrk-oom", "eflags", "net-ping", "audio-unmap", "audio-modes", "pipes", "mount-guard", "badptr",
+    "preempt", "resched", "fair3", "concurrent", "sbrk-oom", "eflags", "net-ping", "audio-unmap", "audio-modes", "pipes", "mount-guard",
+    "win-leak", "win-limits", "win-unmap", "win-exec-kill", "badptr",
 ]
 TIMEOUT = {"concurrent": 120, "badptr": 120}
 

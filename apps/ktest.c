@@ -378,6 +378,39 @@ static int t_resched(void)
 	return 0;
 }
 
+/* Three CPU-bound processes must all make progress while the kernel's own
+ * high-priority threads wake every tick (a window is open, so the
+ * compositor runs; the NIC keeps the network thread busy). A round-robin
+ * that restarts from the thread's table slot starves all but one of them. */
+static int t_fair3(void)
+{
+	if (sys_win_create(200, 100, 0) != 0 || sys_win_show(-1, -1, "fair") != 0)
+		FAIL("could not open a window");
+	int pids[2];
+	for (int i = 0; i < 2; i++) {
+		pids[i] = sys_fork();
+		if (pids[i] < 0) FAIL("fork failed");
+		if (pids[i] == 0) {
+			unsigned int c = spin_for(60);
+			child_exit(c > 0 ? (int)(c / 256u) + 1 : 0);
+		}
+	}
+	unsigned int mine = spin_for(60);
+	unsigned int share[3] = { mine / 256u + 1, 0, 0 };
+	for (int i = 0; i < 2; i++) {
+		int code = sys_waitpid(pids[i]);
+		if (code <= 0) FAIL("child %d made no progress", i);
+		share[i + 1] = (unsigned int)code;
+	}
+	sys_win_destroy();
+	unsigned int total = share[0] + share[1] + share[2];
+	for (int i = 0; i < 3; i++)
+		if (share[i] * 100u / total < 15u)
+			FAIL("process %d got %u%% of the CPU (shares %u %u %u)", i,
+			     share[i] * 100u / total, share[0], share[1], share[2]);
+	return 0;
+}
+
 /* Two processes hammering the filesystem and the frame allocator at once:
  * every byte each one reads back must be its own, and no frame may go
  * missing. */
@@ -442,6 +475,7 @@ static int t_concurrent(void)
 static const unsigned char fuzz_calls[] = {
 	1, 8, 9, 11, 12, 13, 14, 15, 16, 18, 19, 21, 26, 27, 28, 32, 33, 36, 37,
 	39, 41, 43, 49, 50, 51, 57, 58, 59, 63, 64, 67, 68, 73, 74,
+	85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 98,
 };
 
 static int t_badptr(void)
@@ -741,6 +775,191 @@ static int t_sbrk_oom(void)
 	return 0;
 }
 
+/* ---- windows ---------------------------------------------------------------
+ *
+ * The window manager from the process side: its buffers are real memory
+ * that must be handed back, its mappings must go away with the window, and
+ * a hostile or clumsy caller must get -1, not a broken kernel. Pointer and
+ * keyboard behaviour is covered from outside by tools/qa/wm_test.py.
+ */
+
+#define WINPX ((volatile unsigned int *)USER_WIN_BASE)
+
+/* Create, show, draw, flush; returns 0 or the failing step. */
+static int win_open(unsigned int w, unsigned int h)
+{
+	if (sys_win_create(w, h, 0) != 0)
+		return 1;
+	if (sys_win_show(-1, -1, "ktest") != 0)
+		return 2;
+	for (unsigned int i = 0; i < w * h; i += 97)
+		WINPX[i] = 0x00336699u;
+	WINPX[w * h - 1] = 0x00FFFFFFu;         /* the very last pixel is mapped too */
+	sys_win_flush();
+	return 0;
+}
+
+static int t_win_leak(void)
+{
+	for (int warm = 0; warm < 2; warm++) {
+		int pid = sys_fork();
+		if (pid < 0) FAIL("warm-up fork failed");
+		if (pid == 0) child_exit(win_open(320, 200) == 0 ? 1 : 2);
+		sys_waitpid(pid);
+	}
+	unsigned int base = free_pages();
+	for (int i = 0; i < 16; i++) {
+		int pid = sys_fork();
+		if (pid < 0) FAIL("fork %d failed", i);
+		if (pid == 0) {
+			if (win_open(320, 200) != 0)
+				child_exit(2);
+			if (i % 4 == 1 && sys_win_resize(500, 300) != 0)
+				child_exit(3);
+			if (i % 4 == 2 && sys_win_resize(130, 70) != 0)
+				child_exit(4);
+			sys_sleep_ms(20);
+			if (i % 2)
+				sys_win_destroy();          /* half leave it to the kernel */
+			child_exit(1);
+		}
+		int code = sys_waitpid(pid);
+		if (code != 1) FAIL("child %d failed at step %d", i, code);
+	}
+	unsigned int after = free_pages();
+	if (after != base) FAIL("leaked %d frames over 16 window lifetimes", (int)(base - after));
+	return 0;
+}
+
+static int t_win_limits(void)
+{
+	if (sys_win_create(0, 100, 0) == 0)            FAIL("accepted width 0");
+	if (sys_win_create(100, 0, 0) == 0)            FAIL("accepted height 0");
+	if (sys_win_create(8, 8, 0) == 0)              FAIL("accepted a window smaller than its chrome");
+	if (sys_win_create(4000, 100, 0) == 0)         FAIL("accepted a window wider than the screen");
+	if (sys_win_create(100, 4000, 0) == 0)         FAIL("accepted a window taller than the screen");
+	if (sys_win_create(0x10000u, 0x10000u, 0) == 0) FAIL("accepted w*h that overflows 32 bits");
+	if (sys_win_create(0xFFFFFFFFu, 2, 0) == 0)    FAIL("accepted a huge width");
+	if (sys_win_create(300, 200, 0xF0u) == 0)      FAIL("accepted unknown flags");
+	if (sys_win_show(10, 10, "none") == 0)         FAIL("showed a window that does not exist");
+	if (sys_win_resize(300, 200) == 0)             FAIL("resized a window that does not exist");
+	struct stink_win_event ev;
+	if (sys_win_get_event(&ev) == 0)               FAIL("got an event without a window");
+	if (sys_win_wait(10) != -1)                    FAIL("waited on a window that does not exist");
+	sys_win_destroy();                              /* no window: must be a no-op */
+
+	if (win_open(300, 200) != 0)                   FAIL("could not open a plain window");
+	if (sys_win_create(300, 200, 0) == 0)          FAIL("one process got two windows");
+	if (sys_win_resize(0, 0) == 0)                 FAIL("resize to 0x0 accepted");
+	if (sys_win_resize(5000, 5000) == 0)           FAIL("resize beyond the screen accepted");
+	WINPX[300 * 200 - 1] = 1;                       /* failed resizes left the buffer alone */
+	if (sys_win_resize(640, 400) != 0)             FAIL("valid resize refused");
+	WINPX[640 * 400 - 1] = 1;                       /* new buffer fully mapped */
+	if (sys_win_get_event((struct stink_win_event *)0x80100000u) == 0)
+		FAIL("event written through a kernel pointer");
+	if (sys_win_show(-5000, -5000, (const char *)0xFFFFF000u) != 0)
+		FAIL("an unreadable title pointer broke show");
+	/* A window owner draws into its buffer, not on the screen. */
+	if (__syscall(22, 0, (10 << 16) | 10, 0xFFFFFF) != -1)
+		FAIL("a window owner drew straight to the framebuffer");
+	if (sys_getkey() != 0)                          FAIL("unfocused/idle window read a key");
+	sys_win_destroy();
+	if (win_open(200, 100) != 0)                   FAIL("slot not reusable after destroy");
+	sys_win_destroy();
+
+	/* More processes than window slots: the extra ones are told no. */
+	int pids[10], opened = 0;
+	for (int i = 0; i < 10; i++) {
+		pids[i] = sys_fork();
+		if (pids[i] < 0) FAIL("fork failed");
+		if (pids[i] == 0) {
+			int ok = (win_open(160, 90) == 0);
+			sys_sleep_ms(400);
+			child_exit(ok ? 1 : 2);
+		}
+	}
+	for (int i = 0; i < 10; i++)
+		if (sys_waitpid(pids[i]) == 1)
+			opened++;
+	if (opened != 8) FAIL("%d of 10 processes got a window, the limit is 8", opened);
+	if (win_open(200, 100) != 0) FAIL("slots not released when their owners exited");
+	sys_win_destroy();
+	return 0;
+}
+
+/* The buffer mapping dies with the window (and shrinks with it). */
+static int t_win_unmap(void)
+{
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		if (win_open(300, 200) != 0) child_exit(2);
+		sys_win_destroy();
+		WINPX[0] = 1;                       /* must fault */
+		child_exit(3);
+	}
+	int code = sys_waitpid(pid);
+	if (code != 139) FAIL("write to a destroyed window's buffer did not fault (exit %d)", code);
+
+	pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		if (win_open(600, 400) != 0) child_exit(2);
+		if (sys_win_resize(130, 70) != 0) child_exit(4);
+		WINPX[130 * 70 - 1] = 1;            /* still ours */
+		WINPX[600 * 400 - 1] = 1;           /* gone with the old buffer: must fault */
+		child_exit(3);
+	}
+	code = sys_waitpid(pid);
+	if (code != 139) FAIL("old buffer still mapped after shrinking (exit %d)", code);
+	return 0;
+}
+
+/* exec and kill both take the window with them. */
+static int t_win_exec_kill(void)
+{
+	for (int warm = 0; warm < 2; warm++) {
+		int pid = sys_fork();
+		if (pid < 0) FAIL("warm-up fork failed");
+		if (pid == 0) { win_open(320, 200); sys_exec("ktchild"); child_exit(99); }
+		sys_waitpid(pid);
+	}
+	/* Our own first window allocates the page table for the buffer range,
+	 * which stays with the address space: do that before the baseline. */
+	if (win_open(200, 100) != 0) FAIL("could not open a window");
+	sys_win_destroy();
+	unsigned int base = free_pages();
+	for (int i = 0; i < 6; i++) {
+		int pid = sys_fork();
+		if (pid < 0) FAIL("fork failed");
+		if (pid == 0) {
+			if (win_open(320, 200) != 0) child_exit(2);
+			sys_exec("ktchild");            /* new image: the window must not survive */
+			child_exit(99);
+		}
+		int code = sys_waitpid(pid);
+		if (code != 42) FAIL("exec'd child exit code %d, want 42", code);
+	}
+	for (int i = 0; i < 6; i++) {
+		int pid = sys_fork();
+		if (pid < 0) FAIL("fork failed");
+		if (pid == 0) {
+			if (win_open(320, 200) != 0) child_exit(2);
+			for (;;)
+				sys_win_wait(1000);
+		}
+		sys_sleep_ms(40);
+		if (sys_kill(pid) != 0) FAIL("kill failed");
+		int code = sys_waitpid(pid);
+		if (code != 137) FAIL("killed window owner exit code %d, want 137", code);
+	}
+	if (win_open(200, 100) != 0) FAIL("window slots leaked by exec or kill");
+	sys_win_destroy();
+	unsigned int after = free_pages();
+	if (after != base) FAIL("leaked %d frames over exec/kill of window owners", (int)(base - after));
+	return 0;
+}
+
 /* Not a check by itself: sits for a while without reading any input and
  * then returns to whatever started it. tools/qa/input_flush.py types keys
  * during the pause and verifies they are not replayed into the menu. */
@@ -770,6 +989,7 @@ static const struct ktcase cases[] = {
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },
+	{ "fair3",       t_fair3 },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "eflags",      t_eflags },
@@ -778,6 +998,10 @@ static const struct ktcase cases[] = {
 	{ "audio-modes", t_audio_modes },
 	{ "pipes",       t_pipes },
 	{ "mount-guard", t_mount_guard },
+	{ "win-leak",    t_win_leak },
+	{ "win-limits",  t_win_limits },
+	{ "win-unmap",   t_win_unmap },
+	{ "win-exec-kill", t_win_exec_kill },
 	{ "badptr",      t_badptr },
 	{ "idle-exit",   t_idle_exit },       /* driven by input_flush.py, not by "all" */
 };

@@ -6,6 +6,12 @@ lines appear AND that alive counts evolve over time (proves the
 step() rule is actually firing -- not just a static grid)."""
 import os, signal, socket, subprocess, sys, time, re
 
+# These scripts drive the kernel's text menu; stock images boot into the
+# graphical desktop, so run from a private copy without the AUTORUN file.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_life_ser.log"
 MON = "/tmp/stinkos_life_mon.sock"
 SHELL_MENU_STEPS = 14
@@ -16,7 +22,7 @@ for f in (SER, MON):
 
 qemu = subprocess.Popen(
     ["qemu-system-i386", "-cpu", "Penryn", "-snapshot",
-     "-drive", "format=raw,file=os.bin", "-display", "none",
+     "-drive", "format=raw,file=" + IMAGE, "-display", "none",
      "-serial", "file:" + SER,
      "-monitor", "unix:%s,server,nowait" % MON, "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

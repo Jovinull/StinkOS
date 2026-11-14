@@ -101,3 +101,7 @@ history.txt
 # the freedoom github releases, or any other compatible WAD). Not versioned
 # because they're large binary blobs and not strictly part of the source.
 wads/
+
+# Python bytecode from the QA tools
+__pycache__/
+*.pyc

@@ -12,6 +12,12 @@ path is wired correctly; full ACPI-driven power-off on every platform
 requires the AML interpreter."""
 import os, signal, socket, subprocess, sys, time
 
+# These scripts drive the kernel's text menu; stock images boot into the
+# graphical desktop, so run from a private copy without the AUTORUN file.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_acpi_ser.log"
 MON = "/tmp/stinkos_acpi_mon.sock"
 SHELL_MENU_STEPS = 14   # presses of 's' to reach SHELL (slot 15 in menu)
@@ -21,7 +27,7 @@ for f in (SER, MON):
     except OSError: pass
 
 qemu = subprocess.Popen(
-    ["qemu-system-i386", "-drive", "format=raw,file=os.bin", "-snapshot",
+    ["qemu-system-i386", "-drive", "format=raw,file=" + IMAGE, "-snapshot",
      "-display", "none", "-serial", "file:" + SER,
      "-monitor", "unix:%s,server,nowait" % MON, "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

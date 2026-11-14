@@ -53,7 +53,7 @@ class Vm:
     def __init__(self, image="os.bin", snapshot=True, mem=None, cpu="Penryn",
                  net=False, audio=False, extra=None, display="none",
                  hostfwd=None):
-        self.image = image
+        self.image_path = image
         self.dir = tempfile.mkdtemp(prefix="stinkqa-")
         self.serial_path = os.path.join(self.dir, "serial.log")
         self.qmp_path = os.path.join(self.dir, "qmp.sock")
@@ -408,6 +408,17 @@ def fs_put(image, name, data):
         f.write(data + b"\0" * (sectors * _SECTOR - len(data)))
         entries.append([name, next_free, len(data)])
         _fs_write_dir(f, entries, next_free + sectors)
+
+
+def menu_image(src="os.bin"):
+    """Private copy of the image that boots into the kernel's text menu
+    (no AUTORUN, so no desktop). Deleted when the calling script exits.
+    For the scripts that drive the menu and the legacy full-screen apps."""
+    import atexit
+    img = Vm.copy_image(src)
+    fs_remove(img, "AUTORUN")
+    atexit.register(lambda: os.path.exists(img) and os.remove(img))
+    return img
 
 
 def fs_remove(image, name):
