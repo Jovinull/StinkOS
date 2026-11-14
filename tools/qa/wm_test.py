@@ -5,8 +5,11 @@ booted desktop, checked through the screen and the serial log.
 Covers: opening windows, focus and chrome colours, stacking and raise,
 dragging (and that nothing is left behind where the window was), the
 taskbar, key routing to the focused window only, the close box, a legacy
-full-screen program taking and returning the screen, and that the desktop
-is pixel-identical to its starting state once everything is closed.
+full-screen program taking and returning the screen, a window pushed
+against each screen edge, every window slot in use plus one more program,
+leaving for the text menu with windows open and starting the desktop
+again, and that the desktop is pixel-identical to its starting state once
+everything is closed.
 
     python3 tools/qa/wm_test.py [--shots DIR]
 
@@ -19,7 +22,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from stinkqa import Vm, QaError  # noqa: E402
+from stinkqa import Vm, QaError, count_color, fs_list  # noqa: E402
 
 # Colours from kernel/sys/win.c
 TITLE_BG, TITLE_FOCUS = (0x16, 0x1b, 0x22), (0x1f, 0x29, 0x33)
@@ -27,6 +30,7 @@ BORDER, BORDER_FOCUS = (0x30, 0x36, 0x3d), (0x3d, 0x6b, 0x4f)
 APP_BG = (0x0d, 0x11, 0x17)
 BAR_BG = (0x0b, 0x0f, 0x14)
 TITLE_H, BORDER_W, TASKBAR_H = 24, 1, 28
+WIN_SLOTS = 8                           # WIN_MAX in kernel/sys/win.h
 PARK = (1012, 700)                      # pointer rest position for screenshots
 
 checks = []
@@ -214,6 +218,115 @@ def main(argv):
         img = d.shot("after-churn")
         left = same_outside(img, base, [clock])
         check("desktop is clean after 6 open/close cycles", left == 0, "%d pixels differ" % left)
+
+        # ---- a window cannot be lost off the screen ------------------------
+        pid = d.launch("rs-about")
+        g0 = d.geom(pid)
+        before = d.shot("edges-start")
+        w = g0[2]
+        # (label, where to take hold of the title bar, where to let go, client origin expected)
+        trips = (
+            ("left",   w - 40, (0, 300),    (48 - w, 312)),
+            ("right",  10,     (1023, 300), (1024 - 48, 312)),
+            ("top",    60,     (500, 0),    (440, TITLE_H + BORDER_W)),
+            ("bottom", 60,     (500, 767),  (440, 768 - TASKBAR_H - 4)),
+        )
+        for label, hold_dx, (tx, ty), want in trips:
+            mark = vm.mark()
+            vm.drag(g0[0] + hold_dx, g0[1] - 12, tx, ty, steps=10)
+            vm.wait_serial("win: moved pid=%d" % pid, timeout=5, start=mark)
+            got = d.geom(pid)[:2]
+            check("dragged against the %s edge, the title bar stays reachable" % label,
+                  got == want, "window at %s, want %s" % (got, want))
+            d.shot("edge-" + label)
+            # Pick it up again by the same spot of its title bar (the edge
+            # stopped the window, so that spot is no longer under the
+            # pointer) and put it back.
+            mark = vm.mark()
+            vm.drag(got[0] + hold_dx, got[1] - 12, g0[0] + hold_dx, g0[1] - 12, steps=10)
+            vm.wait_serial("win: moved pid=%d" % pid, timeout=5, start=mark)
+            check("...and came back from the %s edge" % label, d.geom(pid)[:2] == g0[:2],
+                  str(d.geom(pid)))
+        img = d.shot("edges-back")
+        # (the window's own content shows a running clock: compare the rest)
+        client = (g0[0], g0[1], g0[0] + g0[2], g0[1] + g0[3])
+        left = same_outside(img, before, [clock, client])
+        check("the trips to all four edges left nothing behind", left == 0,
+              "%d pixels differ" % left)
+        mark = vm.mark()
+        vm.key("esc")
+        vm.wait_serial("win: destroy pid=%d" % pid, timeout=5, start=mark)
+
+        # ---- every window slot in use, then one more -----------------------
+        # Eight slots, one of them the desktop. Each window is parked at the
+        # bottom edge so the tile stays clickable.
+        pids = []
+        for i in range(WIN_SLOTS - 1):
+            pid = d.launch("rs-about")
+            g = d.geom(pid)
+            mark = vm.mark()
+            vm.drag(g[0] + 60, g[1] - 12, 80 + 110 * i, 767, steps=6)
+            vm.wait_serial("win: moved pid=%d" % pid, timeout=5, start=mark)
+            pids.append(pid)
+        check("seven programs have windows at once", len(set(pids)) == WIN_SLOTS - 1)
+        mark = vm.mark()
+        refused = vm.serial_count("rs-about: could not open a window")
+        vm.click(*d.tiles["rs-about"])
+        vm.wait_serial("rs-about: could not open a window", timeout=10, start=mark)
+        time.sleep(0.5)
+        check("the program that found no slot free said so and ended",
+              vm.serial_count("rs-about: could not open a window") == refused + 1
+              and "win: show" not in vm.serial()[mark:])
+        # The click on the tile gave the keyboard to the desktop. Take each
+        # window by the piece of title bar the later ones leave showing.
+        for i, pid in enumerate(pids):
+            g = d.geom(pid)
+            mark = vm.mark()
+            vm.click(g[0] + 30, g[1] - 12)           # (the last one already has it)
+            vm.key("esc")
+            vm.wait_serial("win: destroy pid=%d" % pid, timeout=5, start=mark)
+        gone = [p for p in pids if ("win: destroy pid=%d " % p) in vm.serial()]
+        check("each of the seven took the focus and closed on Esc", len(gone) == WIN_SLOTS - 1,
+              "%d closed" % len(gone))
+        time.sleep(0.6)
+        img = d.shot("after-full-house")
+        left = same_outside(img, base, [clock])
+        check("desktop is clean after a full house", left == 0, "%d pixels differ" % left)
+
+        # ---- leave the session with windows open, then come back -----------
+        a = d.launch("rs-about")
+        g = d.geom(a)
+        mark = vm.mark()
+        vm.drag(g[0] + 60, g[1] - 12, 200, 767, steps=6)      # off the tiles
+        vm.wait_serial("win: moved pid=%d" % a, timeout=5, start=mark)
+        b = d.launch("rs-clock")
+        mark = vm.mark()
+        vm.click(900, 600)                       # empty desktop: give it the keyboard
+        vm.key("ctrl", "q")
+        vm.wait_serial("menu: ready", timeout=15, start=mark)
+        after = vm.serial()[mark:]
+        check("ending the session closed every window",
+              all(("win: destroy pid=%d " % p) in after for p in (a, b)))
+        menu = vm.wait_stable(timeout=6)
+        check("the text menu owns the screen (no taskbar, no window chrome)",
+              menu.getpixel((40, 768 - 10)) != BAR_BG and count_color(menu, TITLE_FOCUS) == 0)
+        elfs = [e[0] for e in fs_list(vm.image_path) if e[0].endswith(".ELF")]
+        mark = vm.mark()
+        for _ in elfs:
+            vm.key("w", hold=20)                 # to the top of the list, wherever it was
+        for _ in range(elfs.index("RS-DESKTOP.ELF")):
+            vm.key("s", hold=20)
+        vm.key("ret")
+        vm.wait_serial("desktop: ready", timeout=30, start=mark)
+        img = d.shot("desktop-again")
+        left = same_outside(img, base, [clock])
+        check("the desktop started again from the text menu, identical", left == 0,
+              "%d pixels differ" % left)
+        pid = d.launch("rs-about")
+        mark = vm.mark()
+        vm.key("esc")
+        vm.wait_serial("win: destroy pid=%d" % pid, timeout=5, start=mark)
+        check("windows work in the second session", True)
 
         log = vm.serial()
         trouble = [l for l in log.splitlines()
