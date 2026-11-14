@@ -225,12 +225,12 @@ void irq_handler(struct regs *r)
 {
 	int from_user = (r->cs & 3) == 3;
 	int preempt = 0;
+	int input_wake = 0;
 	if (r->int_no == 32) {                     /* IRQ0: PIT timer */
 		ticks++;
 		if (ticks <= 3)
 			serial_write("StinkOS: timer tick\n");
 		timer_tick();                       /* fire any expired one-shots */
-		win_tick();                         /* compositor: ~30fps */
 		proc_tick(ticks);                   /* wake sleepers that are due */
 		if (ticks % 50 == 0)
 			proc_kstack_audit();        /* canary + high-water mark */
@@ -244,17 +244,26 @@ void irq_handler(struct regs *r)
 			proc_request_resched();     /* switch on the way back to ring 3 */
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
+		input_wake = 1;                     /* the compositor routes it */
 	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
 		audio_handle_irq();
 	} else if (r->int_no == 40) {              /* IRQ8: CMOS RTC alarm */
 		rtc_handle_irq();
 	} else if (r->int_no == 44) {              /* IRQ12: PS/2 mouse */
 		mouse_handle(inb(0x60));
+		input_wake = 1;
 	}
 
 	/* PCI INTx lines are shared and the BIOS-assigned vector varies, so
 	 * call the e1000 IRQ entry on every hardware IRQ. The handler reads
 	 * ICR (clears on read) and no-ops when no descriptor is done. */
+	if (input_wake) {
+		win_irq_wake();                     /* kwm thread: pointer, focus, key routing */
+		if (from_user)
+			preempt = 1;                /* run it now rather than at the next tick */
+		else
+			proc_request_resched();
+	}
 	if (r->int_no >= 32 && r->int_no <= 47 && e1000_handle_irq()) {
 		net_irq_wake();                     /* frames are parsed by the knet thread */
 		if (from_user)

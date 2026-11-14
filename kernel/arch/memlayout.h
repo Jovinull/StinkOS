@@ -125,6 +125,12 @@
                               * by the COW fault path. Independent of
                               * PG_NX -- W^X stays orthogonal. */
 
+#define PG_SHARED   0x400u   /* software bit 10: the frame is owned by
+                              * something other than this address space
+                              * (a window's pixel buffer). Tearing the
+                              * address space down drops the mapping but
+                              * does not free the frame. */
+
 /* PG_NX is the high 32 bits' bit 31 of an 8-byte PAE PTE. As a
  * uint64_t literal it sits at bit 63 of the whole entry; the
  * separation into PG_NX_HI lets callers OR it into the upper word

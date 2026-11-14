@@ -1,17 +1,18 @@
-//! rs-desktop: graphical app launcher for StinkOS.
+//! rs-desktop: the StinkOS desktop.
 //!
-//! Displays a grid of application tiles on the framebuffer with mouse cursor
-//! support. Click a tile to launch the app via fork+exec; the desktop resumes
-//! once the child exits. Press Q to quit back to the shell.
+//! A full-screen window without chrome that sits behind every other window
+//! and shows the programs on the disk, grouped by kind. Clicking a tile (or
+//! moving to it with the arrow keys and pressing Enter) starts the program
+//! as its own process; the desktop keeps running and stays responsive, and
+//! collects its children as they exit.
 //!
-//! ## Architecture
+//! Windowed programs appear on top, with a button in the kernel's taskbar.
+//! The entries under "Full screen" are the older programs that draw straight
+//! to the framebuffer: one of those takes over the whole screen until it
+//! exits, then the desktop comes back.
 //!
-//! - No window compositor required: the desktop owns the full framebuffer.
-//! - App launch: fork() → child exec()s the app; parent waitpid()s.
-//! - Redraw strategy: full-screen repaint on any mouse or hover change.
-//!   Each repaint is fast because it uses sys_fillrect (kernel fills memory
-//!   directly) and avoids per-pixel syscalls for the background.
-//!
+//! Ctrl+Q (or the "Text menu" tile) ends the graphical session and returns
+//! to the kernel's text menu.
 
 #![no_std]
 #![no_main]
@@ -19,202 +20,258 @@
 use libstink::println;
 use libui::*;
 
-// ── App catalogue ─────────────────────────────────────────────────────────────
-
-struct AppEntry {
+struct App {
     label: &'static [u8],
     exec:  &'static [u8],
 }
 
-static APPS: &[AppEntry] = &[
-    AppEntry { label: b"Doom\0",       exec: b"doom1\0"      },
-    AppEntry { label: b"Asteroids\0",  exec: b"asteroids\0"  },
-    AppEntry { label: b"Snake\0",      exec: b"snake\0"      },
-    AppEntry { label: b"Pong\0",       exec: b"pong\0"       },
-    AppEntry { label: b"Breakout\0",   exec: b"breakout\0"   },
-    AppEntry { label: b"Animation\0",  exec: b"anim\0"       },
-    AppEntry { label: b"Life (RS)\0",  exec: b"rs-life\0"    },
-    AppEntry { label: b"Files\0",      exec: b"rs-files\0"   },
-    AppEntry { label: b"Edit\0",       exec: b"rs-edit\0"    },
-    AppEntry { label: b"Paint\0",      exec: b"rs-paint\0"   },
-    AppEntry { label: b"Calc\0",       exec: b"rs-calc\0"    },
-    AppEntry { label: b"Sysinfo\0",    exec: b"rs-sysinfo\0" },
-    AppEntry { label: b"Hex View\0",   exec: b"rs-hex\0"     },
-    AppEntry { label: b"Vec Art\0",    exec: b"rs-vec\0"     },
-    AppEntry { label: b"Settings\0",   exec: b"rs-settings\0"},
-    AppEntry { label: b"Net\0",        exec: b"rs-net\0"     },
-    AppEntry { label: b"Taskman\0",    exec: b"rs-taskman\0" },
-    AppEntry { label: b"Clock\0",      exec: b"rs-clock\0"   },
-    AppEntry { label: b"TODO\0",        exec: b"rs-todo\0"    },
-    AppEntry { label: b"Calendar\0",   exec: b"rs-cal\0"     },
-    AppEntry { label: b"About\0",      exec: b"rs-about\0"   },
-    AppEntry { label: b"Shell\0",      exec: b"shell\0"       },
+struct Group {
+    title: &'static [u8],
+    apps:  &'static [App],
+}
+
+/// `exec` value of the tile that ends the session instead of starting a program.
+const EXIT: &[u8] = b"\0";
+
+static GROUPS: &[Group] = &[
+    Group { title: b"Applications\0", apps: &[
+        App { label: b"Files\0",     exec: b"rs-files\0" },
+        App { label: b"Editor\0",    exec: b"rs-edit\0" },
+        App { label: b"Paint\0",     exec: b"rs-paint\0" },
+        App { label: b"Calculator\0", exec: b"rs-calc\0" },
+        App { label: b"Hex View\0",  exec: b"rs-hex\0" },
+        App { label: b"TODO\0",      exec: b"rs-todo\0" },
+        App { label: b"Calendar\0",  exec: b"rs-cal\0" },
+        App { label: b"Clock\0",     exec: b"rs-clock\0" },
+        App { label: b"Vector Art\0", exec: b"rs-vec\0" },
+    ] },
+    Group { title: b"System\0", apps: &[
+        App { label: b"System Info\0", exec: b"rs-sysinfo\0" },
+        App { label: b"Network\0",   exec: b"rs-net\0" },
+        App { label: b"Tasks\0",     exec: b"rs-taskman\0" },
+        App { label: b"Settings\0",  exec: b"rs-settings\0" },
+        App { label: b"About\0",     exec: b"rs-about\0" },
+        App { label: b"Text menu\0", exec: EXIT },
+    ] },
+    Group { title: b"Full screen\0", apps: &[
+        App { label: b"Doom\0",      exec: b"doom1\0" },
+        App { label: b"Shell\0",     exec: b"shell\0" },
+        App { label: b"Asteroids\0", exec: b"asteroids\0" },
+        App { label: b"Snake\0",     exec: b"snake\0" },
+        App { label: b"Pong\0",      exec: b"pong\0" },
+        App { label: b"Breakout\0",  exec: b"breakout\0" },
+        App { label: b"Life\0",      exec: b"rs-life\0" },
+        App { label: b"Animation\0", exec: b"anim\0" },
+    ] },
 ];
 
-// ── Starfield ────────────────────────────────────────────────────────────────
+// ── Layout ──────────────────────────────────────────────────────────────────
 
-const N_STARS: u32 = 180;
+const DESK_W: i32 = SCREEN_W;
+const DESK_H: i32 = SCREEN_H - TASKBAR_H;
 
-fn star_pos(idx: u32) -> (i32, i32) {
-    // Deterministic pseudo-random position from index alone (LCG chain)
-    let h1 = idx.wrapping_mul(1664525).wrapping_add(1013904223);
-    let h2 = h1.wrapping_mul(22695477).wrapping_add(1);
-    let x = (h1 >> 1) % 1024;
-    let y = (h2 >> 1) % (768 - TASKBAR_H as u32) + TASKBAR_H as u32;
-    (x as i32, y as i32)
+const MARGIN:  i32 = 48;
+const TILE_W:  i32 = 146;
+const TILE_H:  i32 = 44;
+const TILE_GAP: i32 = 10;
+const COLS:    i32 = (DESK_W - 2 * MARGIN + TILE_GAP) / (TILE_W + TILE_GAP);
+const HEAD_H:  i32 = 76;            // title block above the first group
+const GROUP_GAP: i32 = 22;
+
+/// Total number of tiles.
+fn count() -> usize {
+    GROUPS.iter().map(|g| g.apps.len()).sum()
 }
 
-fn star_color(idx: u32, frame: u32) -> Option<u32> {
-    // Each star has an independent twinkle phase; ~1/7 bright at any time
-    let phase = idx.wrapping_mul(2654435761).wrapping_add(frame >> 2) % 7;
-    match phase {
-        0 => Some(SURFACE_ALT),
-        1 => Some(0x3a4050),
-        _ => None,
+/// The app behind flat index `i`.
+fn app(i: usize) -> &'static App {
+    let mut k = i;
+    for g in GROUPS {
+        if k < g.apps.len() { return &g.apps[k]; }
+        k -= g.apps.len();
     }
+    &GROUPS[0].apps[0]
 }
 
-fn draw_stars(frame: u32) {
-    for i in 0..N_STARS {
-        let (x, y) = star_pos(i);
-        if let Some(c) = star_color(i, frame) {
-            pixel(x, y, c);
+/// Where tile `i` is drawn. Groups stack vertically; each wraps at COLS.
+fn tile_rect(i: usize) -> Rect {
+    let mut y = HEAD_H;
+    let mut k = i as i32;
+    for g in GROUPS {
+        let n = g.apps.len() as i32;
+        let rows = (n + COLS - 1) / COLS;
+        y += FONT_H + 3 + GAP;                       // the group caption
+        if k < n {
+            return Rect::new(MARGIN + (k % COLS) * (TILE_W + TILE_GAP),
+                             y + (k / COLS) * (TILE_H + TILE_GAP), TILE_W, TILE_H);
+        }
+        k -= n;
+        y += rows * (TILE_H + TILE_GAP) - TILE_GAP + GROUP_GAP;
+    }
+    Rect::new(0, 0, 0, 0)
+}
+
+fn tile_at(x: i32, y: i32) -> Option<usize> {
+    (0..count()).find(|&i| tile_rect(i).contains(x, y))
+}
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+
+fn draw_tile(win: &Window, i: usize, hot: bool, pressed: bool) {
+    let r = tile_rect(i);
+    let a = app(i);
+    let (bg, fg, edge) = if pressed { (ACCENT, BG, ACCENT) }
+                         else if hot { (SURFACE_ALT, FG, ACCENT) }
+                         else { (SURFACE, FG, BORDER) };
+    win.fill_rect(r, bg);
+    win.rect(r, edge);
+    // A small mark on the left: dim for ordinary tiles, accent when hot.
+    win.fill(r.x + 10, r.y + (r.h - 8) / 2, 3, 8, if pressed { BG } else if hot { ACCENT } else { BORDER });
+    win.text_fit(r.x + 22, r.y + (r.h - FONT_H) / 2, a.label, r.w - 30, fg);
+}
+
+fn draw_all(win: &Window, hot: Option<usize>, pressed: Option<usize>, running: u32) {
+    win.clear(BG);
+
+    win.text(MARGIN, 22, b"StinkOS\0", ACCENT);
+    win.text(MARGIN + 8 * FONT_W + 12, 22, b"desktop\0", FG_DIM);
+    win.text(MARGIN, 44, b"Click a tile, or use the arrow keys and Enter.  Ctrl+Q: text menu.\0", FG_DIM);
+
+    let mut status = [0u8; 40];
+    let mut p = push_u32(&mut status, 0, running);
+    p = push_str(&mut status, p, if running == 1 { b" program running\0" } else { b" programs running\0" });
+    let _ = p;
+    win.text_right(DESK_W - MARGIN, 22, &status, FG_DIM);
+
+    let mut idx = 0usize;
+    for g in GROUPS {
+        let first = tile_rect(idx);
+        section(win, MARGIN, first.y - (FONT_H + 3 + GAP), DESK_W - 2 * MARGIN, g.title);
+        for _ in g.apps {
+            draw_tile(win, idx, hot == Some(idx), pressed == Some(idx));
+            idx += 1;
         }
     }
 }
 
-// ── Layout constants ──────────────────────────────────────────────────────────
+// ── Keyboard navigation ─────────────────────────────────────────────────────
 
-const SCREEN_W:   i32 = 1024;
-const SCREEN_H:   i32 = 768;
-
-const TILE_W:     i32 = 160;
-const TILE_H:     i32 = 90;
-const TILE_COLS:  i32 = 5;
-const TILE_GAP_H: i32 = 20;
-const TILE_GAP_V: i32 = 20;
-
-const GRID_W:     i32 = TILE_COLS * TILE_W + (TILE_COLS - 1) * TILE_GAP_H;
-const GRID_X:     i32 = (SCREEN_W - GRID_W) / 2;
-const GRID_Y:     i32 = TASKBAR_H + 28;
-
-// ── Tile helpers ──────────────────────────────────────────────────────────────
-
-fn tile_at(idx: usize) -> Tile {
-    let col = (idx as i32) % TILE_COLS;
-    let row = (idx as i32) / TILE_COLS;
-    Tile {
-        label: APPS[idx].label,
-        exec:  APPS[idx].exec,
-        x: GRID_X + col * (TILE_W + TILE_GAP_H),
-        y: GRID_Y + row * (TILE_H + TILE_GAP_V),
-        w: TILE_W,
-        h: TILE_H,
-    }
+/// Move from tile `i` by one step in a direction, staying on a tile.
+fn step(i: usize, key: u8) -> usize {
+    let n = count() as i32;
+    let i = i as i32;
+    let r = tile_rect(i as usize);
+    let next = match key {
+        KEY_LEFT  => i - 1,
+        KEY_RIGHT => i + 1,
+        // Up/down: the nearest tile in the adjacent row, by position.
+        KEY_UP | KEY_DOWN => {
+            let mut best = i;
+            let mut best_d = i32::MAX;
+            for k in 0..n {
+                let t = tile_rect(k as usize);
+                let above = key == KEY_UP && t.y < r.y;
+                let below = key == KEY_DOWN && t.y > r.y;
+                if !(above || below) { continue; }
+                let dy = (t.y - r.y).abs();
+                let dx = (t.x - r.x).abs();
+                let d = dy * 4 + dx;                 // prefer the closest row, then column
+                if d < best_d { best_d = d; best = k; }
+            }
+            best
+        }
+        _ => i,
+    };
+    clamp(next, 0, n - 1) as usize
 }
 
-fn hovered_idx(mx: i32, my: i32) -> Option<usize> {
-    for i in 0..APPS.len() {
-        if tile_at(i).contains(mx, my) { return Some(i); }
-    }
-    None
-}
-
-// ── Rendering ────────────────────────────────────────────────────────────────
-
-fn redraw(mx: i32, my: i32, frame: u32) {
-    /* Background fill */
-    fill(0, 0, SCREEN_W, SCREEN_H, BG);
-
-    /* Animated starfield */
-    draw_stars(frame);
-
-    /* Taskbar */
-    draw_taskbar(SCREEN_W);
-
-    /* Subtitle */
-    text16(16, TASKBAR_H + 10, b"Choose an app\0", FG_DIM);
-
-    /* Section label */
-    text16(GRID_X, GRID_Y - 20, b"Applications\0", FG_DIM);
-
-    /* App tiles */
-    let hov = hovered_idx(mx, my);
-    for i in 0..APPS.len() {
-        tile_at(i).draw(hov == Some(i));
-    }
-
-}
-
-// ── App launch ────────────────────────────────────────────────────────────────
-
-fn launch(exec_name: &'static [u8]) {
-    let pid = fork();
-    if pid == 0 {
-        /* child: replace with the target app */
-        exec(exec_name);
-        quit(1); /* exec failed */
-    } else if pid > 0 {
-        /* parent: block until child exits, then resume desktop */
-        wait_for(pid);
-    }
-    /* pid < 0 (fork failed): silently ignore */
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Main ────────────────────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-desktop: start");
-    win_init(b"Desktop\0");
+    let Some(mut win) = Window::open(b"Desktop\0", DESK_W, DESK_H, WIN_DESKTOP) else {
+        println!("rs-desktop: no window, giving up");
+        quit(1);
+    };
 
-    let mut mx: i32 = SCREEN_W / 2;
-    let mut my: i32 = SCREEN_H / 2;
-    let mut prev_mx      = mx - 1; /* ensure first draw */
-    let mut prev_my      = my - 1;
-    let mut prev_hov: Option<usize> = None;
-    let mut left_held    = false;
-    let mut prev_frame   = !0u32;
+    // Where every tile is, on the serial console: lets the QA scripts click
+    // a program by name instead of by hard-coded coordinates.
+    for i in 0..count() {
+        let r = tile_rect(i);
+        let e = app(i).exec;
+        let name = core::str::from_utf8(&e[..text_len(e)]).unwrap_or("?");
+        println!("desktop: tile {} {} {} {} {}", if name.is_empty() { "exit" } else { name }, r.x, r.y, r.w, r.h);
+    }
+    println!("desktop: ready");
+
+    let mut hot: Option<usize> = None;       // tile under the pointer or keyboard cursor
+    let mut pressed: Option<usize> = None;   // tile the left button went down on
+    let mut running: u32 = 0;
+    let mut dirty = true;
 
     loop {
-        /* Mouse */
-        let (dx, dy, buttons) = poll_mouse();
-        mx = clamp(mx + dx, 0, SCREEN_W - 1);
-        my = clamp(my + dy, 0, SCREEN_H - 1);
+        if dirty {
+            draw_all(&win, hot, pressed, running);
+            win.flush();
+            dirty = false;
+        }
 
-        /* Keyboard */
-        let k = poll_key();
-        if k == b'q' as i32 { break; }
+        // Children that exited since the last pass.
+        while reap().is_some() {
+            running = running.saturating_sub(1);
+            dirty = true;
+        }
 
-        /* Click: rising edge of left button */
-        let left_now = buttons & 0x01 != 0;
-        if left_now && !left_held {
-            if let Some(idx) = hovered_idx(mx, my) {
-                launch(APPS[idx].exec);
-                /* After launch, force full redraw */
-                prev_mx = mx - 1;
-                prev_frame = !0;
+        let Some(ev) = win.wait(500) else { continue };
+        match ev {
+            Event::Mouse { x, y, .. } => {
+                let over = tile_at(x, y);
+                if ev.left_press().is_some() {
+                    pressed = over;
+                    dirty = true;
+                } else if ev.left_release().is_some() {
+                    // A click counts when press and release land on the same tile.
+                    if pressed.is_some() && pressed == over {
+                        if launch(over.unwrap()) { running += 1; } else if app(over.unwrap()).exec == EXIT { break; }
+                    }
+                    pressed = None;
+                    dirty = true;
+                }
+                if over != hot {
+                    hot = over;
+                    dirty = true;
+                }
             }
+            Event::Key(k) if k == ctrl(b'q') => break,
+            Event::Key(k @ (KEY_LEFT | KEY_RIGHT | KEY_UP | KEY_DOWN)) => {
+                hot = Some(match hot { Some(i) => step(i, k), None => 0 });
+                dirty = true;
+            }
+            Event::Key(KEY_ENTER) => {
+                if let Some(i) = hot {
+                    if launch(i) { running += 1; dirty = true; } else if app(i).exec == EXIT { break; }
+                }
+            }
+            _ => {}
         }
-        left_held = left_now;
-
-        /* Advance starfield animation frame every ~300ms (16ms * 18 ticks) */
-        let frame = ticks() / 30;
-
-        /* Redraw when mouse/hover/animation changed */
-        let hov = hovered_idx(mx, my);
-        if mx != prev_mx || my != prev_my || hov != prev_hov || frame != prev_frame {
-            redraw(mx, my, frame);
-            prev_mx    = mx;
-            prev_my    = my;
-            prev_hov   = hov;
-            prev_frame = frame;
-        }
-
-        win_flush();
-        sleep_ms(16); /* cap at ~60 fps */
     }
 
-    win_done();
+    win.close();
     println!("rs-desktop: exit");
+}
+
+/// Start the program behind tile `i`. False for the exit tile or when the
+/// process could not be created.
+fn launch(i: usize) -> bool {
+    let a = app(i);
+    if a.exec == EXIT {
+        return false;
+    }
+    let pid = spawn(a.exec);
+    if pid < 0 {
+        println!("rs-desktop: could not start a process");
+        return false;
+    }
+    true
 }

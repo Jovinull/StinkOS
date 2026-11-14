@@ -261,8 +261,10 @@ static int exec_run_by_elf(const char *elf_name)
 
 	/* Point of no return: the old image is gone. Anything tied to it
 	 * (mixer channels reading its sample buffers) goes with it. */
-	if (cur)
+	if (cur) {
 		audio_mix_silence_pid(cur->pid);
+		win_proc_exit(cur->pid);           /* the new image starts without a window */
+	}
 	if (old_pgdir != new_pgdir)
 		paging_destroy_user_pgdir(old_pgdir);
 	if (cur) {
@@ -294,7 +296,7 @@ void app_return(void)
 	}
 	tcp_close_pid(pid);
 	pipe_release_all(cur);
-	win_destroy(pid);
+	win_proc_exit(pid);                        /* its window, or the screen if it had taken it */
 
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
 	 * process menu launched. menu_exit's klongjmp would crash the
@@ -305,8 +307,11 @@ void app_return(void)
 		proc_exit_current();               /* does not return */
 
 	/* PID 1 is about to turn back into the shell or the menu, and
-	 * neither waits for the children the dying app left behind. */
+	 * neither waits for the children the dying app left behind. It is
+	 * also the end of the graphical session: whatever still owns a
+	 * window is killed so the compositor lets go of the screen. */
 	proc_abandon_children(cur);
+	win_session_end();
 	if (exec_active) {
 		exec_active = 0;
 		char shell_elf[16] = "SHELL.ELF\0\0\0\0\0\0\0";
@@ -387,13 +392,23 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 2:                                    /* SYS_DRAW: ebx=x ecx=y edx=rgb */
-		if (!win_redirect_putpixel((int)proc_current()->pid, r->ebx, r->ecx, r->edx))
-			fb_putpixel(r->ebx, r->ecx, r->edx);
+		if (!win_legacy_draw(proc_current()->pid)) {
+			r->eax = (unsigned int)-1;         /* window owners draw into their buffer */
+			break;
+		}
+		fb_putpixel(r->ebx, r->ecx, r->edx);
 		r->eax = 0;
 		break;
-	case 3:                                    /* SYS_GETKEY: -> char or 0 */
-		r->eax = (unsigned char)keyboard_getchar();
+	case 3: {                                  /* SYS_GETKEY: -> char or 0 */
+		/* A window owner reads its own window's keys (only the focused
+		 * window is given any); everyone else reads the global queue. */
+		int k;
+		if (win_getkey(proc_current()->pid, &k))
+			r->eax = (unsigned int)k;
+		else
+			r->eax = (unsigned char)keyboard_getchar();
 		break;
+	}
 	case 4:                                    /* SYS_ALLOC: -> user page or 0 */
 		r->eax = paging_user_alloc();
 		break;
@@ -435,7 +450,7 @@ void syscall_dispatch(struct regs *r)
 	}
 	case 42:                                   /* SYS_MAP_FB: -> userland FB base addr */
 		/* 0 when there is no drawable framebuffer; the app must check. */
-		r->eax = fb_usable()
+		r->eax = (fb_usable() && win_legacy_draw(proc_current()->pid))
 		         ? paging_map_fb(fb_phys_base(), fb_size_bytes())
 		         : 0;
 		break;
@@ -657,7 +672,8 @@ void syscall_dispatch(struct regs *r)
 		 * 26 (SYS_BLIT) -- this just brings parity. */
 		unsigned int bytes = src_w * src_h * sizeof(unsigned int);
 		if (src_w == 0 || src_h == 0 || bytes / 4u / src_w != src_h ||
-		    !paging_user_range_ok(r->ebx, bytes)) {
+		    !paging_user_range_ok(r->ebx, bytes) ||
+		    !win_legacy_draw(proc_current()->pid)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -796,24 +812,16 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		struct proc *target = proc_get(pid);
-		if (!target || target->kthread || target->state == PROC_ZOMBIE ||
-		    target->state == PROC_EMBRYO) {
+		/* Kill is a request, not an execution: the target may be parked
+		 * in the middle of a syscall on its own kernel stack, and its
+		 * window, sockets and mappings can only be torn down from its
+		 * own address space. proc_kill flags it and wakes it; it exits
+		 * itself the next time it heads back to ring 3. */
+		if (proc_kill(proc_get(pid)) != 0) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		/* Kill is a request, not an execution: the target may be parked
-		 * in the middle of a syscall on its own kernel stack, and its
-		 * windows, sockets and mappings can only be torn down from its
-		 * own address space. Flag it and wake it; it exits itself the
-		 * next time it heads back to ring 3 (trap.c: die_if_killed). */
-		if (!target->killed) {
-			target->killed    = 1;
-			target->exit_code = 137;       /* SIGKILL exit-code convention */
-		}
-		target->suspended = 0;
 		audio_mix_silence_pid(pid);        /* hush it right away */
-		proc_wake(target);
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
@@ -943,6 +951,10 @@ void syscall_dispatch(struct regs *r)
 			n++;
 		}
 		kbuf[n] = '\0';
+		if (!win_legacy_draw(proc_current()->pid)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
 		fb_text((int)r->ebx, (int)r->ecx, kbuf, r->esi);
 		r->eax = 0;
 		break;
@@ -950,8 +962,11 @@ void syscall_dispatch(struct regs *r)
 	case 22: {                                 /* SYS_FILLRECT: ebx=(x<<16|y) ecx=(w<<16|h) edx=rgb */
 		unsigned int rx = r->ebx >> 16, ry = r->ebx & 0xFFFF;
 		unsigned int rw = r->ecx >> 16, rh = r->ecx & 0xFFFF;
-		if (!win_redirect_fillrect((int)proc_current()->pid, rx, ry, rw, rh, r->edx))
-			fb_rect(rx, ry, rw, rh, r->edx);
+		if (!win_legacy_draw(proc_current()->pid)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		fb_rect(rx, ry, rw, rh, r->edx);
 		r->eax = 0;
 		break;
 	}
@@ -1004,9 +1019,14 @@ void syscall_dispatch(struct regs *r)
 			r->eax = old;
 		break;
 	}
-	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
-		r->eax = keyboard_get_event();
+	case 25: {                                 /* SYS_GETKEYEVENT: -> packed event or 0 */
+		unsigned int ev;
+		if (win_getkeyevent(proc_current()->pid, &ev))
+			r->eax = ev;
+		else
+			r->eax = keyboard_get_event();
 		break;
+	}
 	case 28: {                                 /* SYS_AUDIO_PLAY: ebx=samples ecx=length edx=volume -> handle or -1 */
 		if (!paging_user_range_ok(r->ebx, r->ecx)) {
 			r->eax = (unsigned int)-1;
@@ -1154,9 +1174,13 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		int dx, dy;
-		unsigned char buttons;
-		mouse_consume_delta(&dx, &dy, &buttons);
+		int dx = 0, dy = 0;
+		unsigned char buttons = 0;
+		/* Relative motion is for full-screen programs. A window owner
+		 * gets pointer events with window coordinates instead and must
+		 * not drain the accumulators from under everyone else. */
+		if (!win_has_window(proc_current()->pid))
+			mouse_consume_delta(&dx, &dy, &buttons);
 		*(int *)r->ebx = dx;
 		*(int *)r->ecx = dy;
 		*(int *)r->edx = (int)buttons;
@@ -1177,9 +1201,11 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		if (!win_redirect_blit((int)proc_current()->pid, x, y, w, h,
-		                       (const unsigned int *)r->ebx))
-			fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
+		if (!win_legacy_draw(proc_current()->pid)) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		fb_blit(x, y, w, h, (const unsigned int *)r->ebx);
 		r->eax = 0;
 		break;
 	}
@@ -1285,43 +1311,48 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)child->pid;     /* parent return */
 		break;
 	}
-	/* ── Window / compositor syscalls ──────────────────────────────────── */
-	case 85: {                                /* SYS_WIN_CREATE: ebx=w ecx=h */
-		int pid = (int)proc_current()->pid;
-		r->eax = (unsigned int)win_create(pid, r->ebx, r->ecx);
+	/* ---- window manager (kernel/sys/win.c) ---- */
+	case 85:                                   /* SYS_WIN_CREATE: ebx=w ecx=h edx=flags -> 0/-1 */
+		r->eax = (unsigned int)win_create(proc_current()->pid, r->ebx, r->ecx, r->edx);
+		break;
+	case 86: {                                 /* SYS_WIN_SHOW: ebx=x ecx=y edx=*title -> 0/-1 */
+		/* Copy the title a byte at a time, stopping at the NUL or at
+		 * the end of what the caller has mapped. */
+		char ktitle[40];
+		unsigned int n = 0;
+		const char *ut = (const char *)r->edx;
+		while (ut && n < sizeof(ktitle) - 1 &&
+		       paging_user_range_ok((unsigned int)(ut + n), 1) && ut[n] != '\0') {
+			ktitle[n] = ut[n];
+			n++;
+		}
+		ktitle[n] = '\0';
+		r->eax = (unsigned int)win_show(proc_current()->pid, (int)r->ebx, (int)r->ecx,
+		                                ut ? ktitle : 0);
 		break;
 	}
-	case 86: {                                /* SYS_WIN_SHOW: ebx=x ecx=y edx=*title */
-		int pid = (int)proc_current()->pid;
-		const char *title = 0;
-		if (r->edx && paging_user_range_ok(r->edx, 64))
-			title = (const char *)r->edx;
-		r->eax = (unsigned int)win_show(pid, (int)r->ebx, (int)r->ecx, title);
-		break;
-	}
-	case 87:                                  /* SYS_WIN_FLUSH */
-		win_flush((int)proc_current()->pid);
+	case 87:                                   /* SYS_WIN_FLUSH */
+		win_flush(proc_current()->pid);
 		r->eax = 0;
 		break;
-	case 88:                                  /* SYS_WIN_DESTROY */
-		win_destroy((int)proc_current()->pid);
+	case 88:                                   /* SYS_WIN_DESTROY */
+		win_destroy(proc_current()->pid);
 		r->eax = 0;
 		break;
-	case 89: {                                /* SYS_WIN_GET_EVENT: ebx=*win_event */
-		if (!r->ebx || !paging_user_range_ok(r->ebx, sizeof(struct win_event))) {
+	case 89:                                   /* SYS_WIN_GET_EVENT: ebx=*win_event -> 0, -1 if none */
+		if (!paging_user_range_writable(r->ebx, sizeof(struct win_event))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		r->eax = (unsigned int)win_get_event((int)proc_current()->pid,
-		                                      (struct win_event *)r->ebx);
+		r->eax = (unsigned int)win_get_event(proc_current()->pid,
+		                                     (struct win_event *)r->ebx);
 		break;
-	}
-	case 90:                                  /* SYS_WIN_RAISE */
-		win_raise((int)proc_current()->pid);
+	case 90:                                   /* SYS_WIN_RAISE */
+		win_raise(proc_current()->pid);
 		r->eax = 0;
 		break;
-	case 91:                                  /* SYS_WIN_MOVE: ebx=x ecx=y */
-		win_move((int)proc_current()->pid, (int)r->ebx, (int)r->ecx);
+	case 91:                                   /* SYS_WIN_MOVE: ebx=x ecx=y */
+		win_move(proc_current()->pid, (int)r->ebx, (int)r->ecx);
 		r->eax = 0;
 		break;
 	case 92: {                               /* SYS_CLIP_WRITE: ebx=buf ecx=len */
@@ -1344,9 +1375,32 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)clip_read((char *)r->ebx, umax);
 		break;
 	}
-	case 94: {                               /* SYS_WIN_RESIZE: ebx=w ecx=h -> 0/-1 */
-		r->eax = (unsigned int)win_resize((int)proc_current()->pid,
-		                                  r->ebx, r->ecx);
+	case 94:                                   /* SYS_WIN_RESIZE: ebx=w ecx=h -> 0/-1 */
+		r->eax = (unsigned int)win_resize(proc_current()->pid, r->ebx, r->ecx);
+		break;
+	case 96: {                                 /* SYS_REAP: ebx=*int code (or 0) -> pid, 0, -1 */
+		/* wait() that never blocks: the pid of an exited child (its exit
+		 * code stored through ebx), 0 when children exist but none has
+		 * exited, -1 when there are no children. */
+		if (r->ebx && !paging_user_range_writable(r->ebx, sizeof(int))) {
+			r->eax = (unsigned int)-1;
+			break;
+		}
+		struct proc *z = proc_find_zombie_child(0);
+		if (z) {
+			int zpid = z->pid;
+			int code = proc_reap(z);
+			if (r->ebx)
+				*(int *)r->ebx = code;
+			r->eax = (unsigned int)zpid;
+		} else {
+			r->eax = proc_has_living_child() ? 0u : (unsigned int)-1;
+		}
+		break;
+	}
+	case 97: {                                 /* SYS_WIN_WAIT: ebx=timeout ms -> 1 event, 0 none, -1 */
+		unsigned int ms = r->ebx > 60000u ? 60000u : r->ebx;
+		r->eax = (unsigned int)win_wait_event(proc_current()->pid, (ms + 9) / 10);
 		break;
 	}
 	default:

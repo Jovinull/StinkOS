@@ -222,65 +222,48 @@ int sys_kill(int pid)
 /* SYS_GETPID (43): -> current pid */
 int sys_getpid(void)
 {
-	return __syscall(43, 0, 0, 0);
+	return __syscall(45, 0, 0, 0);
 }
 
-/* SYS_WIN_CREATE (85): ebx=w ecx=h -> 0 or -1 */
-int sys_win_create(unsigned int w, unsigned int h)
+/* SYS_MEMINFO (59): out = { total pages, free pages, caller's break } */
+int stk_meminfo(unsigned int *out3)
 {
-	return __syscall(85, (int)w, (int)h, 0);
+	return __syscall(59, (int)out3, 0, 0);
 }
 
-/* SYS_WIN_SHOW (86): ebx=x ecx=y edx=*title -> 0 or -1 */
-int sys_win_show(int x, int y, const char *title)
+/* SYS_NETINFO (43): fills struct sys_net_info (libstink.h) */
+int stk_netinfo(void *out)
 {
-	return __syscall(86, x, y, (int)title);
+	return __syscall(43, (int)out, 0, 0);
 }
 
-/* SYS_WIN_FLUSH (87) */
-void sys_win_flush(void)
+/* Window manager calls, see libstink.h for the contracts. Rust's
+ * `extern "C"` needs real symbols; the inline wrappers of the same names
+ * in libstink.h serve C callers. */
+int  stk_win_create(unsigned int w, unsigned int h, unsigned int flags)
 {
-	__syscall(87, 0, 0, 0);
+	return __syscall(85, (int)w, (int)h, (int)flags);
 }
-
-/* SYS_WIN_DESTROY (88) */
-void sys_win_destroy(void)
-{
-	__syscall(88, 0, 0, 0);
-}
-
-/* SYS_WIN_GET_EVENT (89): ebx=*event -> 0 or -1 */
-int sys_win_get_event(void *ev)
-{
-	return __syscall(89, (int)ev, 0, 0);
-}
-
-/* SYS_WIN_RAISE (90) */
-void sys_win_raise(void)
-{
-	__syscall(90, 0, 0, 0);
-}
-
-/* SYS_WIN_MOVE (91): ebx=x ecx=y */
-void sys_win_move(int x, int y)
-{
-	__syscall(91, x, y, 0);
-}
+int  stk_win_show(int x, int y, const char *title) { return __syscall(86, x, y, (int)title); }
+void stk_win_flush(void)                            { __syscall(87, 0, 0, 0); }
+void stk_win_destroy(void)                          { __syscall(88, 0, 0, 0); }
+int  stk_win_get_event(void *ev)                    { return __syscall(89, (int)ev, 0, 0); }
+void stk_win_raise(void)                            { __syscall(90, 0, 0, 0); }
+void stk_win_move(int x, int y)                     { __syscall(91, x, y, 0); }
+int  stk_win_resize(unsigned int w, unsigned int h) { return __syscall(94, (int)w, (int)h, 0); }
+int  stk_win_wait(unsigned int timeout_ms)          { return __syscall(97, (int)timeout_ms, 0, 0); }
+int  stk_reap(int *code)                            { return __syscall(96, (int)code, 0, 0); }
+int  stk_audio_playing(int handle)                  { return __syscall(95, handle, 0, 0); }
 
 /* SYS_CLIP_WRITE (92): ebx=buf ecx=len -> bytes stored */
-int sys_clip_write(const void *buf, unsigned int len)
+int stk_clip_write(const void *buf, unsigned int len)
 {
 	return __syscall(92, (int)buf, (int)len, 0);
 }
 
 /* SYS_CLIP_READ (93): ebx=buf ecx=max -> bytes copied */
-int sys_clip_read(void *buf, unsigned int max)
+int stk_clip_read(void *buf, unsigned int max)
 {
 	return __syscall(93, (int)buf, (int)max, 0);
 }
 
-/* SYS_WIN_RESIZE (94): ebx=w ecx=h -> 0 ok / -1 fail */
-int sys_win_resize(unsigned int w, unsigned int h)
-{
-	return __syscall(94, (int)w, (int)h, 0);
-}

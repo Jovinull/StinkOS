@@ -1055,63 +1055,90 @@ void draw_rounded_rect(int x, int y, int w, int h, int r, unsigned int rgb);
  * Call before drawing the widget so the shadow appears behind it. */
 void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb);
 
-/* Height of the titlebar drawn by draw_window_frame().
- * Content must start at y + WIN_TITLEBAR_H to avoid painting over the frame.
- * Matches OY in C apps and DRAG_TITLEBAR_H in the kernel compositor. */
+/* Full-screen programs (the C games, fbdemo) open with a header strip
+ * across the top of the screen: title on the left, nothing clickable.
+ * WIN_TITLEBAR_H is its height; content starts below it.
+ * draw_window_frame clears the given rectangle, draws the strip and a
+ * 1-pixel border, and returns the y coordinate where content starts. */
 #define WIN_TITLEBAR_H 34
-
-/* Draw a titled window frame (titlebar + close button + border).
- * Returns the Y coordinate of the inner content area start. */
 int draw_window_frame(int x, int y, int w, int h, const char *title);
 
-/* --- Compositor / Window syscalls ---
+/* --- Windows -------------------------------------------------------------
  *
- * Each process owns at most one window. After sys_win_create(), the pixel
- * buffer is mapped at USER_WIN_BASE (0x12000000) in the caller's VAS.
- * Write ARGB32 pixels there then call sys_win_flush() to repaint.
+ * A process may own one window. sys_win_create allocates its pixel buffer
+ * (w * h XRGB words, row-major) and maps it at USER_WIN_BASE; the program
+ * draws there with plain memory stores (libstink_surface.h has clipped
+ * primitives) and calls sys_win_flush when a frame is ready. The kernel
+ * draws the title bar, close box and border around it and delivers input
+ * as events. A process that owns a window must not use the full-screen
+ * drawing calls (sys_draw, sys_fillrect, sys_blit, sys_drawtext): they
+ * fail with -1.
  *
- * Event types: 0=none 1=mouse 2=key 3=close 4=resize (x=new_w y=new_h).
+ * Every call that can fail returns -1 and leaves things as they were. In
+ * particular, do not touch USER_WIN_BASE unless sys_win_create returned 0.
  */
+#define USER_WIN_BASE   0x12000000u
+
+#define WIN_F_DESKTOP   0x1u   /* no chrome, bottom of the stack, not in the taskbar */
+#define WIN_F_RESIZABLE 0x2u   /* user can drag the bottom-right corner */
+
+#define WIN_EV_MOUSE    1      /* x, y client coords; buttons = state; key = buttons that changed */
+#define WIN_EV_KEY      2      /* key = character (as sys_getkey) */
+#define WIN_EV_CLOSE    3      /* close box clicked */
+#define WIN_EV_RESIZE   4      /* x, y = requested client size: call sys_win_resize */
+#define WIN_EV_SCAN     5      /* key = raw key event (as sys_get_keyevent) */
+#define WIN_EV_FOCUS    6      /* x = 1 gained, 0 lost */
+
+/* Screen space the kernel keeps for itself. */
+#define WIN_TASKBAR_H   28
+#define WIN_CHROME_W    2      /* left + right border */
+#define WIN_CHROME_H    26     /* title bar + top and bottom border */
+
 struct stink_win_event {
     int type;
-    int x, y;      /* mouse: window-relative */
-    int buttons;   /* mouse button bitmask */
-    int key;       /* key scancode (type==2) */
+    int x, y;
+    int buttons;
+    int key;
 };
 
-#define USER_WIN_BASE 0x12000000u
-
-static inline int sys_win_create(unsigned int w, unsigned int h)
+static inline int sys_win_create(unsigned int w, unsigned int h, unsigned int flags)
 {
-    return __syscall(85, (int)w, (int)h, 0);
+    return __syscall(85, (int)w, (int)h, (int)flags);
 }
+/* Place (x, y = outer top-left corner; negative = let the kernel choose)
+ * and show the window. */
 static inline int sys_win_show(int x, int y, const char *title)
 {
     return __syscall(86, x, y, (int)title);
 }
-static inline void sys_win_flush(void)
-{
-    __syscall(87, 0, 0, 0);
-}
-static inline void sys_win_destroy(void)
-{
-    __syscall(88, 0, 0, 0);
-}
+static inline void sys_win_flush(void)   { __syscall(87, 0, 0, 0); }
+static inline void sys_win_destroy(void) { __syscall(88, 0, 0, 0); }
+/* Next event into *ev: 0, or -1 when the queue is empty. */
 static inline int sys_win_get_event(struct stink_win_event *ev)
 {
     return __syscall(89, (int)ev, 0, 0);
 }
-static inline void sys_win_raise(void)
+/* Sleep until the window has an event or `timeout_ms` passed:
+ * 1 = an event is waiting, 0 = timeout, -1 = no window. */
+static inline int sys_win_wait(unsigned int timeout_ms)
 {
-    __syscall(90, 0, 0, 0);
+    return __syscall(97, (int)timeout_ms, 0, 0);
 }
-static inline void sys_win_move(int x, int y)
-{
-    __syscall(91, x, y, 0);
-}
+static inline void sys_win_raise(void)       { __syscall(90, 0, 0, 0); }
+static inline void sys_win_move(int x, int y) { __syscall(91, x, y, 0); }
+/* Give the window a new client size. The buffer is reallocated (contents
+ * are lost, redraw everything). On failure the old buffer is intact. */
 static inline int sys_win_resize(unsigned int w, unsigned int h)
 {
     return __syscall(94, (int)w, (int)h, 0);
+}
+
+/* wait() that never blocks: pid of an exited child (exit code through
+ * `code` when not NULL), 0 if children exist but none has exited, -1 if
+ * there are no children. */
+static inline int sys_reap(int *code)
+{
+    return __syscall(96, (int)code, 0, 0);
 }
 
 /* Clipboard: one shared kernel buffer (4096 bytes) for cross-app copy-paste. */

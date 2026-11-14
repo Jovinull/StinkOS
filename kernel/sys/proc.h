@@ -184,7 +184,7 @@ void           proc_fpu_reset(void);
 
 /* Name a process after the program it runs ("SNAKE.ELF" -> "SNAKE").
  * fork copies the parent's name; without this every program started from
- * the shell would show up as its launcher. */
+ * the desktop or the shell would show up as its launcher. */
 void           proc_set_name(struct proc *p, const char *elf_name);
 
 /* A process just replaced its program image (exec, or the menu launching

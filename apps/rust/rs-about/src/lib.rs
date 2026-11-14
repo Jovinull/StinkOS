@@ -1,8 +1,8 @@
-//! rs-about: "About StinkOS" information screen.
+//! rs-about: what StinkOS is, plus live uptime and wall clock.
 //!
-//! Shows OS version, architecture, kernel info, and a brief feature list.
-//! Reads live uptime + wall clock from the kernel. Press Q or Esc to exit.
-//! Press F11 to toggle maximize / restore.
+//! The simplest shape of a windowed program: open a window, draw, wait for
+//! the next event with a timeout (so the clock ticks), redraw. Esc, Q or the
+//! close box end it.
 
 #![no_std]
 #![no_main]
@@ -10,111 +10,67 @@
 use libstink::println;
 use libui::*;
 
-const SCREEN_W: i32 = 1024;
-const SCREEN_H: i32 = 768;
-const WIN_W: i32 = 640;
-const WIN_H: i32 = 480;
-const WIN_X: i32 = (SCREEN_W - WIN_W) / 2;
-const WIN_Y: i32 = (SCREEN_H - WIN_H) / 2;
+const WIN_W: i32 = 520;
+const WIN_H: i32 = 372;
 
-const CONTENT_X: i32 = 24;
-const CONTENT_Y: i32 = 52;
-const LINE_H: i32 = 20;
-
-static LINES: &[(&[u8], u32)] = &[
-    (b"StinkOS\0",                              0x57f287),
-    (b"An original x86 32-bit hobby OS\0",      0xe6edf3),
-    (b"\0",                                     0x000000),
-    (b"Architecture   x86 (i686), 32-bit protected mode\0",   0x8b949e),
-    (b"Video          VBE 1024x768 32bpp linear framebuffer\0",0x8b949e),
-    (b"Kernel         Ring 0 C kernel, PAE paging, COW fork\0",0x8b949e),
-    (b"Userland       Ring 3 ELF processes, 80+ syscalls\0",   0x8b949e),
-    (b"Filesystem     StinkFS flat-file raw-sector layout\0",  0x8b949e),
-    (b"Network        TCP/IP stack, Ethernet, UDP\0",          0x8b949e),
-    (b"Audio          PC speaker beeper\0",                    0x8b949e),
-    (b"\0",                                                    0x000000),
-    (b"Built with     i386-elf-gcc cross-compiler + NASM\0",   0x8b949e),
-    (b"Emulation      QEMU (test), bare metal (target)\0",     0x8b949e),
-    (b"\0",                                                    0x000000),
-    (b"Apps           Desktop, Files, Editor, Paint, Calc\0",  0x8b949e),
-    (b"               Sysinfo, Snake, Pong, Asteroids, Doom\0",0x8b949e),
+static FACTS: &[(&[u8], &[u8])] = &[
+    (b"Architecture\0", b"x86, 32-bit protected mode, PAE\0"),
+    (b"Kernel\0",       b"C + assembly, higher half, W^X\0"),
+    (b"Processes\0",    b"ring 3 ELF, fork with copy-on-write\0"),
+    (b"Filesystem\0",   b"StinkFS on ATA\0"),
+    (b"Network\0",      b"e1000, ARP IPv4 ICMP UDP TCP DHCP DNS\0"),
+    (b"Audio\0",        b"Sound Blaster 16 mixer, PC speaker\0"),
+    (b"Video\0",        b"VBE linear framebuffer, kernel compositor\0"),
+    (b"Userland\0",     b"C (libstink) and Rust (libui), no libc\0"),
 ];
 
-fn draw(tick: u32, cw: i32, ch: i32) {
-    fill(0, 0, cw, ch, BG);
-    window_frame(0, 0, cw, ch, b"About StinkOS\0");
+fn draw(win: &Window) {
+    win.clear(BG);
 
-    fill(CONTENT_X - 4, CONTENT_Y - 6, cw - 32, 1, BORDER);
+    win.text(PAD, PAD, b"StinkOS\0", ACCENT);
+    win.text(PAD, PAD + ROW_H, b"An x86 operating system written from scratch.\0", FG);
 
-    let mut y = CONTENT_Y;
-    for (line, color) in LINES.iter() {
-        if !line.is_empty() && line[0] != 0 {
-            text16(CONTENT_X, y, line, *color);
-        }
-        y += LINE_H;
+    let mut y = section(win, PAD, PAD + 3 * ROW_H, win.w() - 2 * PAD, b"System\0");
+    for (label, value) in FACTS {
+        win.text(PAD, y, label, FG_DIM);
+        win.text_fit(PAD + 15 * FONT_W, y, value, win.w() - 2 * PAD - 15 * FONT_W, FG);
+        y += ROW_H;
     }
 
-    let stats_y = ch - 80;
-    fill(8, stats_y - 4, cw - 16, 1, BORDER);
-
-    let uptime_sec = tick / 1000;
-    let mut tbuf = [0u8; 9];
-    fmt_hhmmss(uptime_sec / 3600, (uptime_sec % 3600) / 60, uptime_sec % 60, &mut tbuf);
-    text16(CONTENT_X, stats_y + 4, b"Uptime  \0", FG_DIM);
-    text16(CONTENT_X + 72, stats_y + 4, &tbuf, FG);
+    let y = section(win, PAD, y + GAP, win.w() - 2 * PAD, b"Now\0");
+    // The PIT ticks at 100 Hz.
+    let up = ticks() / 100;
+    let mut buf = [0u8; 9];
+    fmt_hhmmss(up / 3600, (up / 60) % 60, up % 60, &mut buf);
+    field(win, PAD, y, PAD + 30 * FONT_W, b"Uptime\0", &buf, FG);
 
     let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
-    if read_clock(&mut rtc) == 0 {
-        let mut cbuf = [0u8; 9];
-        fmt_hhmmss(rtc.hour, rtc.minute, rtc.second, &mut cbuf);
-        text16(CONTENT_X, stats_y + 24, b"Clock   \0", FG_DIM);
-        text16(CONTENT_X + 72, stats_y + 24, &cbuf, FG);
+    if read_clock(&mut rtc) {
+        fmt_hhmmss(rtc.hour, rtc.minute, rtc.second, &mut buf);
+        field(win, PAD, y + ROW_H, PAD + 30 * FONT_W, b"Clock\0", &buf, FG);
     }
 
-    text16(cw - 128, ch - 24, b"Q close F11 max\0", FG_DIM);
+    status_bar(win, b"Esc: close\0");
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-about: start");
-    win_init_at(b"About StinkOS\0", WIN_W, WIN_H, WIN_X, WIN_Y);
-
-    let mut cw = WIN_W;
-    let mut ch = WIN_H;
-    let mut maximized = false;
-    let mut prev_k = 0i32;
+    let Some(mut win) = Window::open(b"About StinkOS\0", WIN_W, WIN_H, 0) else {
+        println!("rs-about: could not open a window");
+        quit(1);
+    };
 
     loop {
-        draw(ticks(), cw, ch);
-        if let Some(ev) = win_poll_event() {
-            if ev.kind == WIN_EV_RESIZE && win_resize(ev.x, ev.y) {
-                cw = ev.x; ch = ev.y;
-            }
+        draw(&win);
+        win.flush();
+        // Wake once a second for the clock, or sooner for input.
+        match win.wait(1000) {
+            Some(Event::Close) | Some(Event::Key(KEY_ESC)) | Some(Event::Key(b'q')) => break,
+            _ => {}
         }
-
-        win_flush();
-
-        let k = poll_key();
-        if k != 0 && k != prev_k {
-            match k {
-                k if k == b'q' as i32 || k == b'Q' as i32 || k == 27 => break,
-                KEY_F11 => {
-                    maximized = !maximized;
-                    let (nw, nh) = if maximized {
-                        (SCREEN_W_FULL, SCREEN_H_FULL)
-                    } else {
-                        (WIN_W, WIN_H)
-                    };
-                    if win_resize(nw, nh) { cw = nw; ch = nh; }
-                }
-                _ => {}
-            }
-        }
-        prev_k = k;
-
-        sleep_ms(500);
     }
 
-    win_done();
+    win.close();
     println!("rs-about: exit");
 }

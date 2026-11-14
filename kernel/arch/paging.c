@@ -450,30 +450,37 @@ static void unmap_user_page(unsigned int vaddr)
 	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
-/* Map caller-allocated frames contiguously in user VAS starting at base_va.
- * Does NOT take ownership of the frames — caller frees them after unmap. */
-void paging_map_win_buf(unsigned int base_va, unsigned int *frames, int n)
+/* Map `n` caller-owned frames read-write at consecutive pages from
+ * base_va in the active address space. The PTEs carry PG_SHARED: the
+ * frames stay the caller's to free. All or nothing -- if a page table
+ * cannot be allocated half way, everything mapped by this call is undone
+ * and -1 is returned. */
+int paging_map_shared(unsigned int base_va, const unsigned int *frames, int n)
 {
-    for (int i = 0; i < n; i++) {
-        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
-        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 1);
-        if (!pte) continue;
-        *pte = (pae_entry_t)(frames[i] & 0xFFFFF000u) | user_pte_flags(0, 1);
-        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
-    }
+	for (int i = 0; i < n; i++) {
+		unsigned int va = base_va + (unsigned int)i * PAGE_4KB;
+		pae_entry_t *pte = walk_user_pte(page_pdpt, va, 1);
+		if (!pte) {
+			paging_unmap_shared(base_va, i);
+			return -1;
+		}
+		*pte = (pae_entry_t)(frames[i] & 0xFFFFF000u) | user_pte_flags(0, 1) | PG_SHARED;
+		__asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+	}
+	return 0;
 }
 
-/* Unmap window buffer pages from user VAS WITHOUT freeing the physical frames.
- * Caller is responsible for pmm_free on each frame after this returns. */
-void paging_unmap_win_buf(unsigned int base_va, int n)
+/* Drop `n` PG_SHARED mappings starting at base_va. Never frees a frame. */
+void paging_unmap_shared(unsigned int base_va, int n)
 {
-    for (int i = 0; i < n; i++) {
-        unsigned int va = base_va + (unsigned int)(i * PAGE_4KB);
-        pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
-        if (!pte || !(*pte & 1ULL)) continue;
-        *pte = 0;
-        __asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
-    }
+	for (int i = 0; i < n; i++) {
+		unsigned int va = base_va + (unsigned int)i * PAGE_4KB;
+		pae_entry_t *pte = walk_user_pte(page_pdpt, va, 0);
+		if (!pte || !(*pte & 1ULL))
+			continue;
+		*pte = 0;
+		__asm__ volatile ("invlpg (%0)" : : "r"(va) : "memory");
+	}
 }
 
 /* Lay out a fresh user address space into the given PDPT:
@@ -867,7 +874,7 @@ void paging_destroy_user_pgdir(unsigned int *pdpt_raw)
 			pae_entry_t *pt = KVA(pt_phys);
 			for (unsigned int e = 0; e < PT_ENTRIES; e++) {
 				pae_entry_t pte = pt[e];
-				if (pte & 1ULL)
+				if ((pte & 1ULL) && !(pte & PG_SHARED))
 					pmm_free(
 					    (unsigned int)(pte & FRAME_MASK_4KB));
 			}
