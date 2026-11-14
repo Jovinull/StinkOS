@@ -11,6 +11,12 @@
 # run alongside `make test-headless` without doubling QEMU time.
 import os, signal, socket, subprocess, sys, time
 
+# These scripts drive the kernel's text menu; stock images boot into the
+# graphical desktop, so run from a private copy without the AUTORUN file.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_mp_ser.log"
 MON = "/tmp/stinkos_mp_mon.sock"
 SHELL_MENU_STEPS = 14   # presses of 's' to reach the SHELL row (slot 15)
@@ -22,7 +28,7 @@ for f in (SER, MON):
         pass
 
 qemu = subprocess.Popen(
-    ["qemu-system-i386", "-drive", "format=raw,file=os.bin", "-snapshot",
+    ["qemu-system-i386", "-drive", "format=raw,file=" + IMAGE, "-snapshot",
      "-display", "none", "-serial", "file:" + SER,
      "-monitor", "unix:%s,server,nowait" % MON,
      "-audiodev", "none,id=snd0", "-device", "sb16,audiodev=snd0",

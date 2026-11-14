@@ -6,6 +6,15 @@
 # timer and keyboard IRQs fired. Exit 0 on success, 1 on failure.
 import subprocess, socket, time, os, signal, sys
 
+# This test drives the kernel's text menu and the legacy full-screen apps.
+# Stock images boot straight into the graphical desktop (an AUTORUN file
+# names it), so run from a private copy of the image with that file
+# removed. The desktop itself is covered by tools/qa/wm_test.py.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_ser.log"
 MON = "/tmp/stinkos_mon.sock"
 FB = "/tmp/stinkos_fb.ppm"
@@ -27,7 +36,7 @@ qemu = subprocess.Popen(
     # across test re-runs. Without it the test fills FS_MAX_FILES on
     # the third or fourth run and later assertions start failing.
     ["qemu-system-i386", "-cpu", "Penryn", "-snapshot",
-     "-drive", "format=raw,file=os.bin", "-display", "none",
+     "-drive", "format=raw,file=" + IMAGE, "-display", "none",
      "-serial", "file:" + SER, "-monitor", "unix:%s,server,nowait" % MON,
      "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -77,13 +86,13 @@ def pixel_at(width, px, x, y):
     return (px[o], px[o + 1], px[o + 2]) if o + 2 < len(px) else (0, 0, 0)
 
 
-# Wait for either the graphical desktop or the text menu to be ready.
+# Wait for the start menu to be drawn and ready for input.
 for _ in range(80):
-    if "rs-desktop: start" in serial() or "menu: ready" in serial():
+    if "menu: ready" in serial():
         break
     time.sleep(0.1)
 else:
-    fail("kernel did not reach desktop or menu")
+    fail("kernel did not reach 'menu: ready'")
 
 # Open the QEMU monitor socket and consume its banner — needed for all key injection.
 sock = socket.socket(socket.AF_UNIX)
@@ -102,17 +111,6 @@ try:
 except OSError:
     pass
 
-# Normal boot: rs-desktop auto-launches first; send 'q' to close it so the
-# text menu becomes active for the rest of the test.
-if "rs-desktop: start" in serial() and "menu: ready" not in serial():
-    time.sleep(0.5)        # let rs-desktop reach its event loop
-    sock.sendall(b'sendkey q\n')
-    for _ in range(80):
-        if "menu: ready" in serial():
-            break
-        time.sleep(0.1)
-    else:
-        fail("menu did not appear after closing rs-desktop")
 # a,b,c: exercise the keyboard IRQ.  s,w: move the menu cursor and back.
 # ret: launch the highlighted app (HELLO), which draws and waits for a key.
 for key in ("a", "b", "c", "s", "w", "ret"):
@@ -260,7 +258,7 @@ checks = {
     "VBE mode":        "vbe: 1024x768" in out,
     "framebuffer draw": drawn > 100000,
     "text render":     title_drawn,
-    "menu ready":      "menu: ready" in out or "rs-desktop: start" in out,
+    "menu ready":      "menu: ready" in out,
     "menu drawn":      menu_drawn,
     "timer IRQ":       "StinkOS: timer tick" in out,
     "keyboard IRQ":    all(("kbd: " + c) in out for c in "abc"),
@@ -285,7 +283,7 @@ checks = {
     "stinkfs read_at": "fs: read@ seek.txt" in out and "seek: offset read ok" in out,
     "stinkfs write_at":"fs: wrote@ seek.txt" in out and "seek: offset write ok" in out,
     "vfs fd rw":       "hello-vfs" in out and "fd: rw ok" in out,
-    "compositor":      "compositor: self-test ok" in out,
+    "compositor":      "win: compositor ready" in out,
     # wx attack blocked: see tools/smoke-wxattack.py
     # multi-proc fork+exec: see tools/smoke-multiproc.py
 }
@@ -296,4 +294,4 @@ if missing:
     print(out.strip())
     sys.exit(1)
 
-print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu; compositor self-test ok")
+print("PASS: StinkFS ELF loader -> menu -> isolated ring3 apps (asm + C); 44 syscalls; faulting app killed; games + time-anim; PC speaker; StinkFS files + offset I/O + VFS file descriptors (open/write/seek/read/close); collector game saves a high score; back to menu")

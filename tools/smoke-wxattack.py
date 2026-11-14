@@ -9,6 +9,12 @@ W^X gate fired). Replaces the v0.5-era assertion that lived in
 tools/test-headless.py."""
 import os, signal, socket, subprocess, sys, time
 
+# These scripts drive the kernel's text menu; stock images boot into the
+# graphical desktop, so run from a private copy without the AUTORUN file.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_wxa_ser.log"
 MON = "/tmp/stinkos_wxa_mon.sock"
 SHELL_MENU_STEPS = 14
@@ -23,7 +29,7 @@ qemu = subprocess.Popen(
     # wxattack write to .data falls through to a real instruction fetch
     # of byte 0xC3 (ret) -- the test would false-pass.
     ["qemu-system-i386", "-cpu", "Penryn",
-     "-drive", "format=raw,file=os.bin", "-snapshot",
+     "-drive", "format=raw,file=" + IMAGE, "-snapshot",
      "-display", "none", "-serial", "file:" + SER,
      "-monitor", "unix:%s,server,nowait" % MON, "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
