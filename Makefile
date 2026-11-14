@@ -965,8 +965,9 @@ $(TEST_BIN)/test_dhcp_dns2: $(TEST_DIR)/test_dhcp_dns2.c | $(TEST_BIN)
 $(TEST_BIN)/test_arp_ttl: $(TEST_DIR)/test_arp_ttl.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_arp_ttl.c
 
-$(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c | $(TEST_BIN)
-	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_pmm.c
+# Links the real allocator, not a copy: pmm.c is pure address arithmetic.
+$(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c kernel/arch/pmm.h kernel/arch/memlayout.h | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -Ikernel/arch -Ikernel/drivers/misc -o $@ $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c
 
 $(TEST_BIN)/test_bootmain_walk: $(TEST_DIR)/test_bootmain_walk.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_bootmain_walk.c
