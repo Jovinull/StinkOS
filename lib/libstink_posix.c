@@ -58,12 +58,12 @@ int access(const char *path, int mode)
 	/* No permission model on StinkOS, so "can it be opened" is the only
 	 * meaningful check. fs_file_read with size 0 returns 0 when the file
 	 * exists, -1 when it does not. */
-	return sys_fread(path, (void *)0, 0) >= 0 ? 0 : -1;
+	return sys_fread(stk_flat_name(path), (void *)0, 0) >= 0 ? 0 : -1;
 }
 
 int unlink(const char *path)
 {
-	return sys_fdelete(path);
+	return sys_fdelete(stk_flat_name(path));
 }
 
 int open(const char *path, int flags, ...)
@@ -72,7 +72,7 @@ int open(const char *path, int flags, ...)
 	 * else collapses into the underlying create-or-open behaviour. The
 	 * variadic mode arg is parsed and ignored by the caller convention. */
 	int kflags = (flags & O_CREAT) ? SYS_O_CREATE : 0;
-	return sys_open(path, kflags);
+	return sys_open(stk_flat_name(path), kflags);
 }
 
 int stat(const char *path, struct stat *buf)
@@ -80,7 +80,7 @@ int stat(const char *path, struct stat *buf)
 	if (!buf)
 		return -1;
 
-	int fd = sys_open(path, 0);
+	int fd = sys_open(stk_flat_name(path), 0);
 	if (fd < 0)
 		return -1;
 	int size = sys_seek(fd, 0, SYS_SEEK_END);
@@ -113,7 +113,7 @@ int atexit(void (*func)(void))
 
 int remove(const char *path)
 {
-	return sys_fdelete(path);
+	return sys_fdelete(stk_flat_name(path));
 }
 
 int system(const char *command)
@@ -129,6 +129,8 @@ int rename(const char *oldpath, const char *newpath)
 {
 	if (!oldpath || !newpath)
 		return -1;
+	oldpath = stk_flat_name(oldpath);
+	newpath = stk_flat_name(newpath);
 
 	/* StinkFS has no native rename primitive, so synthesise it: read the
 	 * old file in full, write it under the new name (truncating any prior
