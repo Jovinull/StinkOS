@@ -378,10 +378,13 @@ static int t_resched(void)
 	return 0;
 }
 
-/* Three CPU-bound processes must all make progress while the kernel's own
- * high-priority thread keeps waking (the NIC keeps the network thread
- * busy). A round-robin that restarts from the thread's table slot starves
- * all but one of them. */
+/* Three CPU-bound processes must all make progress while a kernel thread
+ * of higher priority keeps waking. A round-robin that restarts from the
+ * thread's table slot can starve all but one of them. Note: on a kernel
+ * with only the network thread (it wakes every other tick) the old
+ * table-order scheduler happened to pass this case; the starvation was
+ * reproduced with a thread waking every tick (the compositor). The case
+ * is here to keep the fairness property pinned either way. */
 static int t_fair3(void)
 {
 	int pids[2];
