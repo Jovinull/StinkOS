@@ -23,7 +23,7 @@ jobs:
           sudo apt-get install -y \
             build-essential bison flex texinfo wget \
             libgmp3-dev libmpc-dev libmpfr-dev libisl-dev \
-            qemu-system-x86 python3 \
+            qemu-system-x86 python3 python3-pil unzip \
             cppcheck
 
       - name: Restore i386-elf cross-toolchain cache
@@ -54,8 +54,20 @@ jobs:
         with:
           components: rust-src
 
+      # Freedoom data for the Doom port (~50 MiB download, cached).
+      - name: Restore Freedoom WADs
+        id: cache-wads
+        uses: actions/cache@v4
+        with:
+          path: wads
+          key: freedoom-${{ hashFiles('tools/fetch-wads.sh') }}
+
+      - name: Fetch Freedoom WADs (cache miss only)
+        if: steps.cache-wads.outputs.cache-hit != 'true'
+        run: bash tools/fetch-wads.sh
+
       - name: Build OS image
-        run: make
+        run: make all
 
       - name: Run host-side unit tests
         run: make unittest
@@ -79,6 +91,23 @@ jobs:
 
       - name: QA -- keyboard modifier state
         run: make qa-kbd
+
+      # The graphical desktop, with real pointer and keyboard input. CI
+      # emulation is slow: stretch every timeout.
+      - name: QA -- window manager scenario
+        run: make qa-wm
+        env:
+          STINKQA_TIMEOUT_SCALE: "4"
+
+      - name: QA -- every windowed program
+        run: make qa-apps
+        env:
+          STINKQA_TIMEOUT_SCALE: "4"
+
+      - name: QA -- Doom end to end
+        run: make qa-doom
+        env:
+          STINKQA_TIMEOUT_SCALE: "4"
 
       # Dedicated smokes split out of test-headless: each spins its
       # own QEMU instance + asserts a single feature end-to-end.
