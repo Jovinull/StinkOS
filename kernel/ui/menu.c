@@ -29,16 +29,47 @@ static struct kctx exit_ctx;     /* where to resume when an app calls SYS_EXIT *
 #define FILES_BTN_W 300
 #define FILES_BTN_H 16
 
-/* Clickable area for menu item i: a horizontal band over its text + arrow. */
+/* Clickable area for the list row r (0 = first visible row): a horizontal
+ * band over its text + arrow. */
 #define ITEM_X 120
-#define ITEM_Y(i) (120 + (i) * 20 - 2)
+#define ITEM_Y(r) (120 + (r) * 20 - 2)
 #define ITEM_W 760
 #define ITEM_H 20
+
+/* Rows of a list that fit in the panel above the hint line. Longer lists
+ * scroll: the view follows the selection (see list_top). */
+#define LIST_ROWS 15
 
 enum { VIEW_MENU = 0, VIEW_FILES = 1, VIEW_INFO = 2 };
 static int view = VIEW_MENU;
 static int selected;
 static int files_selected;
+static int menu_top;             /* first visible app row */
+static int files_top;            /* first visible file row */
+
+/* Keep `sel` inside the LIST_ROWS-row window starting at *top; returns the
+ * (possibly moved) top. */
+static int list_top(int *top, int sel, int count)
+{
+	if (sel < *top)
+		*top = sel;
+	if (sel >= *top + LIST_ROWS)
+		*top = sel - LIST_ROWS + 1;
+	if (*top > count - LIST_ROWS)
+		*top = count - LIST_ROWS;
+	if (*top < 0)
+		*top = 0;
+	return *top;
+}
+
+/* "more above / more below" markers in the right margin of a scrolled list. */
+static void draw_scroll_hints(int top, int count)
+{
+	if (top > 0)
+		fb_text(880, 120, "^", 0xA0A0A0);
+	if (top + LIST_ROWS < count)
+		fb_text(880, 120 + (LIST_ROWS - 1) * 20, "v", 0xA0A0A0);
+}
 
 /* Mouse state from the previous frame, used to detect motion (so the cursor
  * is only redrawn when it actually moves) and left-button edge (a "click" is
@@ -62,14 +93,18 @@ static void draw_clock_from(const struct rtc_time *t)
 	fmt2(t->minute, s + 3); s[5] = ':';
 	fmt2(t->second, s + 6); s[8] = '\0';
 
-	/* 1024 - 8*8 - 8px margin = 944 */
+	/* 1024 - 8*8 - 8px margin = 944. Text is drawn transparent, so wipe
+	 * the previous second first or the digits pile up on each other. */
+	fb_rect(944, 90, 8 * 8, 8, 0x001022);
 	fb_text(944, 90, s, 0x80B0FF);
 }
 
 static unsigned int last_rtc_second = 0xFF;   /* sentinel: invalid second */
 
-/* App list built from StinkFS at boot: only .ELF files shown in the menu. */
-#define MAX_APP_LIST 40
+/* App list built from StinkFS at boot: only .ELF files shown in the menu.
+ * Sized for a full directory (FS_MAX_FILES in fs.c) so no app is ever
+ * silently left out. */
+#define MAX_APP_LIST 80
 static char app_names[MAX_APP_LIST][16];
 static int  app_count;
 
@@ -155,20 +190,23 @@ static void draw(int selected)
 	fb_rect(112, 84, 800, 400, 0x3050C0);
 	fb_text(120, 90, "STINKOS", 0xFFFFFF);
 
-	for (int i = 0; i < app_count; i++) {
+	int top = list_top(&menu_top, selected, app_count);
+	for (int r = 0; r < LIST_ROWS && top + r < app_count; r++) {
+		int i = top + r;
 		char dname[16];
 		display_name(app_names[i], dname);
 		int missing = app_wad_missing(app_names[i]);
 		unsigned int col = missing ? 0x707070 : 0xFFFFFF;
-		fb_text(140, 120 + i * 20, dname, col);
+		fb_text(140, 120 + r * 20, dname, col);
 		if (missing) {
 			int dl = 0;
 			while (dname[dl]) dl++;
-			fb_text(140 + dl * 8 + 8, 120 + i * 20, "(no wad)", 0x707070);
+			fb_text(140 + dl * 8 + 8, 120 + r * 20, "(no wad)", 0x707070);
 		}
 		if (i == selected)
-			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
+			fb_text(124, 120 + r * 20, ">", 0xFFFF00);
 	}
+	draw_scroll_hints(top, app_count);
 
 	fb_text(FILES_BTN_X + 8, FILES_BTN_Y + 4, "f: files   i: disk info", 0xA0A0A0);
 
@@ -205,7 +243,9 @@ static void draw_files(void)
 	fb_text(120, 90, "FILES", 0xFFFFFF);
 
 	int count = fs_file_count();
-	for (int i = 0; i < count; i++) {
+	int top = list_top(&files_top, files_selected, count);
+	for (int r = 0; r < LIST_ROWS && top + r < count; r++) {
+		int i = top + r;
 		char name[16];
 		int size = fs_file_info(i, name);
 		if (size < 0)
@@ -223,10 +263,11 @@ static void draw_files(void)
 			line[p++] = num[j];
 		line[p] = '\0';
 
-		fb_text(140, 120 + i * 20, line, 0xFFFFFF);
+		fb_text(140, 120 + r * 20, line, 0xFFFFFF);
 		if (i == files_selected)
-			fb_text(124, 120 + i * 20, ">", 0xFFFF00);
+			fb_text(124, 120 + r * 20, ">", 0xFFFF00);
 	}
+	draw_scroll_hints(top, count);
 
 	if (count == 0)
 		fb_text(140, 120, "no files", 0xA0A0A0);
@@ -305,9 +346,11 @@ void menu_exit(void)
 	klongjmp(&exit_ctx, 1);                 /* jump back into launch() */
 }
 
-static void launch(int index)
+/* Load `elf_name` (a StinkFS file name, e.g. "SNAKE.ELF") and run it in
+ * ring 3. Returns when the app exits or could not be started. */
+static void launch_elf(const char *elf_name)
 {
-	if (app_wad_missing(app_names[index])) {
+	if (app_wad_missing(elf_name)) {
 		fb_text(140, 500, "missing WAD - cannot launch this app", 0xFF6060);
 		serial_write("menu: refused launch, WAD missing\n");
 		return;
@@ -317,7 +360,7 @@ static void launch(int index)
 		return;                         /* app called SYS_EXIT: back to menu */
 
 	unsigned int lba, sectors;
-	if (fs_file_lba_sectors(app_names[index], &lba, &sectors) != 0) {
+	if (fs_file_lba_sectors(elf_name, &lba, &sectors) != 0) {
 		serial_write("loader: app not found in fs\n");
 		return;
 	}
@@ -358,6 +401,11 @@ static void launch(int index)
 	enter_user_mode(entry, paging_user_stack_top());
 }
 
+static void launch(int index)
+{
+	launch_elf(app_names[index]);
+}
+
 /* Boot-time autorun: a one-line AUTORUN file in StinkFS names an app
  * ("KTEST" or "KTEST.ELF") to launch before the menu takes over. Images
  * built by `make` carry no AUTORUN, so the default boot path is unchanged;
@@ -390,17 +438,18 @@ static void autorun(void)
 			want[len + k] = sfx[k];
 		want[len + 4] = '\0';
 	}
-	for (int i = 0; i < app_count; i++) {
-		if (!ci_eq(app_names[i], want))
-			continue;
-		serial_write("menu: autorun ");
-		serial_write(app_names[i]);
-		serial_putc('\n');
-		launch(i);
-		__asm__ volatile ("sti");  /* longjmp skipped the syscall's iret */
+	for (int k = 0; want[k]; k++)
+		if (want[k] >= 'a' && want[k] <= 'z')
+			want[k] -= 32;
+	if (fs_file_size(want) < 0) {
+		serial_write("menu: autorun target not found\n");
 		return;
 	}
-	serial_write("menu: autorun target not found\n");
+	serial_write("menu: autorun ");
+	serial_write(want);
+	serial_putc('\n');
+	launch_elf(want);
+	__asm__ volatile ("sti");          /* longjmp skipped the syscall's iret */
 }
 
 void menu_run(void)
@@ -495,9 +544,9 @@ void menu_run(void)
 				redraw();
 			} else if (clicked) {
 				int hit = -1;
-				for (int i = 0; i < count; i++)
-					if (point_in_box(mx, my, ITEM_X, ITEM_Y(i), ITEM_W, ITEM_H))
-						hit = i;
+				for (int r = 0; r < LIST_ROWS && files_top + r < count; r++)
+					if (point_in_box(mx, my, ITEM_X, ITEM_Y(r), ITEM_W, ITEM_H))
+						hit = files_top + r;
 				if (hit >= 0) {
 					files_selected = hit;
 					redraw();
@@ -543,9 +592,9 @@ void menu_run(void)
 			redraw();
 		} else if (clicked) {
 			int hit = -1;
-			for (int i = 0; i < app_count; i++)
-				if (point_in_box(mx, my, ITEM_X, ITEM_Y(i), ITEM_W, ITEM_H))
-					hit = i;
+			for (int r = 0; r < LIST_ROWS && menu_top + r < app_count; r++)
+				if (point_in_box(mx, my, ITEM_X, ITEM_Y(r), ITEM_W, ITEM_H))
+					hit = menu_top + r;
 			if (hit >= 0) {
 				selected = hit;
 				redraw();
