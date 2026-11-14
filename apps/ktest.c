@@ -458,6 +458,46 @@ static int t_fair3(void)
 	return 0;
 }
 
+/* Floating-point registers are per-process state. Each worker parks two
+ * values on the x87 stack, lets the scheduler run the other one for a few
+ * ticks, and takes them back: they must be its own. */
+static int fpu_worker(double seed, int rounds)
+{
+	for (int r = 0; r < rounds; r++) {
+		double a = seed + r, b = (seed + r) * 3.0;
+		double ra = 0, rb = 0;
+		__asm__ volatile ("fldl %0\n\tfldl %1" : : "m"(a), "m"(b));
+		unsigned int t0 = sys_ticks();
+		while ((unsigned int)(sys_ticks() - t0) < 3)
+			;                               /* integer-only: nothing here touches the FPU */
+		__asm__ volatile ("fstpl %0\n\tfstpl %1" : "=m"(rb), "=m"(ra));
+		if (ra != a || rb != b)
+			return r + 1;
+	}
+	return 0;
+}
+
+static int t_fpu(void)
+{
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0)
+		child_exit(fpu_worker(1000.25, 20) == 0 ? 1 : 2);
+	int mine = fpu_worker(7.5, 20);
+	int theirs = sys_waitpid(pid);
+	if (mine) FAIL("parent's x87 registers changed under it (round %d)", mine);
+	if (theirs != 1) FAIL("child's x87 registers changed under it");
+
+	/* A fresh image starts with a clean FPU, whatever its parent left. */
+	__asm__ volatile ("fld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1\n\tfld1");   /* fill the stack */
+	pid = sys_fork();
+	if (pid == 0) { sys_exec("ktchild"); child_exit(99); }
+	__asm__ volatile ("fninit");
+	int code = sys_waitpid(pid);
+	if (code != 42) FAIL("exec'd child failed (%d)", code);
+	return 0;
+}
+
 /* Two processes hammering the filesystem and the frame allocator at once:
  * every byte each one reads back must be its own, and no frame may go
  * missing. */
@@ -899,6 +939,7 @@ static const struct ktcase cases[] = {
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },
 	{ "fair3",       t_fair3 },
+	{ "fpu",         t_fpu },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "oom",         t_oom },

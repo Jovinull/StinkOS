@@ -219,3 +219,6 @@ move into the sections above.
 | N9 | P1 | tcp | FIN handling: jumps holes, close drops unsent data, FIN retransmitted at the wrong sequence | open |
 | N10 | P1 | dhcp | options applied in any state, constant xid, no chaddr check | open |
 | N11 | P2 | net | ARP entry not refreshed by use; DNS/ping state global; UDP/TCP checksum pseudo-header uses the local IP instead of the packet's destination; timers only run when userland polls | open |
+| K15 | P1 | sched | x87 registers were not saved across context switches: two processes using floating point corrupted each other's values; the FPU was never initialised | **fixed + retested** (`ktest fpu`: "parent's x87 registers changed under it") |
+| K16 | P1 | proc | `SYS_PROC_INFO` returned only its header line (padding loop never advanced): `ps` showed no processes | **fixed + retested** (`ktest procinfo`) |
+| K17 | P1 | sched | round-robin restarted from the slot of whichever high-priority thread ran last, starving all but one lower-priority process | **fixed + retested** (`ktest fair3`, `win-exec-kill` on the userland branch hung) |
