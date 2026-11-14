@@ -4,6 +4,12 @@ extern "C" main() actually executed sys_log via the libstink_syms
 shims. First milestone of the Rust userland (Tier 1.1)."""
 import os, signal, socket, subprocess, sys, time
 
+# These scripts drive the kernel's text menu; stock images boot into the
+# graphical desktop, so run from a private copy without the AUTORUN file.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "qa"))
+from stinkqa import menu_image  # noqa: E402
+IMAGE = menu_image()
+
 SER = "/tmp/stinkos_rs_ser.log"
 MON = "/tmp/stinkos_rs_mon.sock"
 SHELL_MENU_STEPS = 14
@@ -14,7 +20,7 @@ for f in (SER, MON):
 
 qemu = subprocess.Popen(
     ["qemu-system-i386", "-cpu", "Penryn",
-     "-drive", "format=raw,file=os.bin", "-snapshot",
+     "-drive", "format=raw,file=" + IMAGE, "-snapshot",
      "-display", "none", "-serial", "file:" + SER,
      "-monitor", "unix:%s,server,nowait" % MON, "-no-reboot"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
