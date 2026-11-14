@@ -88,6 +88,7 @@ typedef unsigned long long pae_entry_t;
  * already pass around -- only the internal interpretation changed
  * from "PD pointer" to "PDPT pointer". */
 static pae_entry_t *page_pdpt;          /* KVA of active PDPT (4 entries used) */
+static pae_entry_t *kernel_only_pdpt;   /* address space for kernel threads: no user half */
 static unsigned int user_heap_next;
 static int          fb_pde_mapped;
 
@@ -258,6 +259,14 @@ void paging_init(void)
 	pae_entry_t *pdpt = KVA(pdpt_phys);
 	wire_kernel_pdpt(pdpt);
 	pdpt[0] = 0;          /* no user space until paging_init_user */
+
+	/* Kernel threads get their own PDPT with the user gigabyte left
+	 * empty. They must not run on whichever process's page tables were
+	 * loaded last: that process can exit and have them freed. */
+	unsigned int kpdpt_phys = pmm_alloc();
+	zero_frame(kpdpt_phys);
+	kernel_only_pdpt = KVA(kpdpt_phys);
+	wire_kernel_pdpt(kernel_only_pdpt);
 
 	page_pdpt = pdpt;
 	/* PAE was already enabled by kentry; just swap CR3 to the runtime
@@ -766,7 +775,7 @@ unsigned int *paging_create_user_pgdir(void)
 void paging_switch(unsigned int *pdpt_raw)
 {
 	if (!pdpt_raw)
-		return;
+		pdpt_raw = (unsigned int *)kernel_only_pdpt;   /* kernel thread */
 	page_pdpt = (pae_entry_t *)pdpt_raw;
 	__asm__ volatile ("mov %0, %%cr3" : :
 	                  "r"(V2P((unsigned int)pdpt_raw)) : "memory");

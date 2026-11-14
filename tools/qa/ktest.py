@@ -23,7 +23,7 @@ from stinkqa import Vm, QaError, fs_put  # noqa: E402
 CASES = [
     "leak-fork", "leak-exec", "pmm-churn", "heap-switch", "cow-kwrite",
     "text-kwrite", "munmap-hole", "kill-reap", "orphan", "sleep-fair",
-    "preempt", "resched", "concurrent", "sbrk-oom", "eflags", "badptr",
+    "preempt", "resched", "concurrent", "sbrk-oom", "eflags", "net-ping", "badptr",
 ]
 TIMEOUT = {"concurrent": 120, "badptr": 120}
 
@@ -34,7 +34,9 @@ def run_case(name, image="os.bin", mem=None, verbose=False):
     try:
         fs_put(img, "AUTORUN", "KTEST\n")
         fs_put(img, "KTEST.ARG", name + "\n")
-        with Vm(image=img, snapshot=True, mem=mem) as vm:
+        # NIC attached for every case: the network thread and its interrupt
+        # are part of the kernel under test, not just of the net-ping case.
+        with Vm(image=img, snapshot=True, mem=mem, net=True, audio=True) as vm:
             exited = vm.wait_exit(TIMEOUT.get(name, 60))
             log = vm.serial()
     finally:

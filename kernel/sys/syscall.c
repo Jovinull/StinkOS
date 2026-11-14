@@ -789,22 +789,29 @@ void syscall_dispatch(struct regs *r)
 		const char payload[] = "stinkos-ping";
 
 		icmp_ping_arm(id, seq);
-		if (icmp_send_echo_request((ipv4_t)r->ebx, id, seq,
-		                           payload, sizeof(payload) - 1) < 0) {
-			r->eax = (unsigned int)-1;
-			break;
-		}
 
 		unsigned int start = pit_ticks();
 		unsigned int limit = (r->ecx + 9) / 10;   /* ms -> 100 Hz ticks, round up */
 		if (limit == 0)
 			limit = 1;
 
+		/* The echo cannot leave until the next hop's MAC is known; the
+		 * send fails (after kicking off an ARP request) until the reply
+		 * is in the cache. Keep trying inside the caller's timeout
+		 * instead of reporting a host as down because ARP was cold. */
 		int rtt = -1;
+		int sent = 0;
+		unsigned int sent_at = start;
 		while ((unsigned int)(pit_ticks() - start) <= limit) {
+			if (!sent &&
+			    icmp_send_echo_request((ipv4_t)r->ebx, id, seq,
+			                           payload, sizeof(payload) - 1) >= 0) {
+				sent = 1;
+				sent_at = pit_ticks();
+			}
 			net_poll_once();               /* poll RX so the reply is seen */
-			if (icmp_ping_replied()) {
-				rtt = (int)((pit_ticks() - start) * 10);   /* ticks -> ms */
+			if (sent && icmp_ping_replied()) {
+				rtt = (int)((pit_ticks() - sent_at) * 10);   /* ticks -> ms */
 				break;
 			}
 			if (proc_current()->killed)
@@ -984,7 +991,8 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 32: {                                 /* SYS_SOCK_SEND: ebx=h ecx=buf edx=len */
-		if (!paging_user_range_ok(r->ecx, r->edx)) {
+		if (!tcp_owned_by((int)r->ebx, proc_current()->pid) ||
+		    !paging_user_range_ok(r->ecx, r->edx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -992,7 +1000,8 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 33: {                                 /* SYS_SOCK_RECV: ebx=h ecx=buf edx=max */
-		if (!paging_user_range_writable(r->ecx, r->edx)) {
+		if (!tcp_owned_by((int)r->ebx, proc_current()->pid) ||
+		    !paging_user_range_writable(r->ecx, r->edx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1000,11 +1009,15 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 34:                                   /* SYS_SOCK_CLOSE: ebx=h */
-		tcp_close((int)r->ebx);
+		if (tcp_owned_by((int)r->ebx, proc_current()->pid))
+			tcp_close((int)r->ebx);
 		r->eax = 0;
 		break;
 	case 35:                                   /* SYS_SOCK_STATE: ebx=h -> state */
-		r->eax = (unsigned int)tcp_get_state((int)r->ebx);
+		/* Someone else's handle reads as closed, same as a free slot. */
+		r->eax = tcp_owned_by((int)r->ebx, proc_current()->pid)
+		         ? (unsigned int)tcp_get_state((int)r->ebx)
+		         : (unsigned int)TCP_CLOSED;
 		break;
 	case 36: {                                 /* SYS_DNS_REQUEST: ebx=name (string) */
 		/* dns_resolve walks the name with no length bound, so we have

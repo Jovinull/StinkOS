@@ -108,4 +108,10 @@ struct tcp_info {
  * -1 if idx is out of range or out is NULL. */
 int tcp_get_info(int idx, struct tcp_info *out);
 
+/* True when handle `h` names a live connection opened by process `pid`.
+ * The syscall layer gates every per-connection call on this: a handle is
+ * just a small index, and without the check any process could read, write
+ * or close another's socket. */
+int tcp_owned_by(tcp_handle_t h, int pid);
+
 #endif

@@ -51,7 +51,8 @@ class QaError(RuntimeError):
 
 class Vm:
     def __init__(self, image="os.bin", snapshot=True, mem=None, cpu="Penryn",
-                 net=False, audio=False, extra=None, display="none"):
+                 net=False, audio=False, extra=None, display="none",
+                 hostfwd=None):
         self.image = image
         self.dir = tempfile.mkdtemp(prefix="stinkqa-")
         self.serial_path = os.path.join(self.dir, "serial.log")
@@ -69,7 +70,11 @@ class Vm:
         if mem:
             args += ["-m", str(mem)]
         if net:
-            args += ["-netdev", "user,id=net0", "-device", "e1000,netdev=net0"]
+            # hostfwd: [(host_port, guest_port), ...] TCP forwards into the guest
+            netdev = "user,id=net0"
+            for hp, gp in (hostfwd or []):
+                netdev += ",hostfwd=tcp:127.0.0.1:%d-:%d" % (hp, gp)
+            args += ["-netdev", netdev, "-device", "e1000,netdev=net0"]
         if audio:
             args += ["-audiodev", "none,id=snd0", "-device", "sb16,audiodev=snd0"]
         if extra:
