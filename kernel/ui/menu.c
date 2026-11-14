@@ -358,6 +358,51 @@ static void launch(int index)
 	enter_user_mode(entry, paging_user_stack_top());
 }
 
+/* Boot-time autorun: a one-line AUTORUN file in StinkFS names an app
+ * ("KTEST" or "KTEST.ELF") to launch before the menu takes over. Images
+ * built by `make` carry no AUTORUN, so the default boot path is unchanged;
+ * the QA harness drops one into a private image copy to start a test app
+ * without scripting its way through the menu. Returns when the app exits. */
+static void autorun(void)
+{
+	char want[16];
+	int n = fs_file_read("AUTORUN", want, 11);
+	if (n <= 0)
+		return;
+	int len = 0;
+	while (len < n && want[len] > ' ')
+		len++;
+	want[len] = '\0';
+	if (len == 0)
+		return;
+	const char *sfx = ".ELF";
+	int has_ext = 0;
+	if (len >= 4) {
+		has_ext = 1;
+		for (int k = 0; k < 4; k++) {
+			char c = want[len - 4 + k];
+			if (c >= 'a' && c <= 'z') c -= 32;
+			if (c != sfx[k]) has_ext = 0;
+		}
+	}
+	if (!has_ext) {
+		for (int k = 0; k < 4; k++)
+			want[len + k] = sfx[k];
+		want[len + 4] = '\0';
+	}
+	for (int i = 0; i < app_count; i++) {
+		if (!ci_eq(app_names[i], want))
+			continue;
+		serial_write("menu: autorun ");
+		serial_write(app_names[i]);
+		serial_putc('\n');
+		launch(i);
+		__asm__ volatile ("sti");  /* longjmp skipped the syscall's iret */
+		return;
+	}
+	serial_write("menu: autorun target not found\n");
+}
+
 void menu_run(void)
 {
 	selected = 0;
@@ -382,6 +427,7 @@ void menu_run(void)
 	}
 
 	load_app_list();
+	autorun();
 	mouse_get_state(&last_mouse_x, &last_mouse_y, &last_mouse_buttons);
 	redraw();
 	serial_write("menu: ready\n");
