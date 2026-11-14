@@ -84,6 +84,12 @@
  * map. */
 #define KERNEL_DEVSPACE     0xFD000000u   /* identity-mapped MMIO    */
 
+/* Kernel virtual window for device memory mapped on request
+ * (paging_map_mmio): the framebuffer, the NIC registers. Drivers used to
+ * treat the device's physical address as a virtual one, which only works
+ * for devices that happen to sit at or above KERNEL_DEVSPACE. */
+#define KERNEL_MMIO_BASE    0xC0000000u   /* .. KERNEL_DEVSPACE      */
+
 #ifndef __ASSEMBLER__
 #define P2V(phys) ((unsigned int)(phys) + KERNBASE)
 #define V2P(virt) ((unsigned int)(virt) - KERNBASE)

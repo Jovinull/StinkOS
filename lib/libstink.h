@@ -84,20 +84,47 @@ static inline void *sys_sbrk(int delta)
  * no matching app is found in the disk TOC. */
 static inline int sys_exec(const char *name) { return __syscall(41, (int)name, 0, 0); }
 
-/* Map the VBE linear framebuffer directly into userland (no kernel call per
- * pixel). Returns the virtual address of the framebuffer base or 0 on error.
- * The mapping is 4 MiB wide (PSE page, PG_USER) at a fixed high virtual
- * address. Call once per process; the kernel tears it down on app switch. */
-static inline volatile unsigned int *sys_map_fb(void)
+/* Direct framebuffer access for full-screen programs.
+ *
+ * sys_fb_info reports the mode the bootloader set: width and height in
+ * pixels, pitch in BYTES per row (it can be larger than width * bpp / 8)
+ * and bits per pixel, which is 32 or 24 depending on the video BIOS.
+ * sys_map_fb maps the whole framebuffer into the process and returns the
+ * address of its first byte, or 0 when there is none. Pixels are B, G, R
+ * (, X) in memory. Do not assume 32 bpp: use sys_fb_put below, or branch on
+ * info.bpp yourself. */
+struct sys_fb_info {
+    unsigned int width;
+    unsigned int height;
+    unsigned int pitch;
+    unsigned int bpp;
+};
+static inline int sys_fb_info(struct sys_fb_info *out)
 {
-    unsigned int base = (unsigned int)__syscall(42, 0, 0, 0);
-    return base ? (volatile unsigned int *)base : (volatile unsigned int *)0;
+    return __syscall(98, (int)out, 0, 0);
+}
+static inline volatile unsigned char *sys_map_fb(void)
+{
+    return (volatile unsigned char *)(unsigned int)__syscall(42, 0, 0, 0);
+}
+/* Store one 0xRRGGBB pixel at (x, y) of a framebuffer mapped by sys_map_fb. */
+static inline void sys_fb_put(volatile unsigned char *fb, const struct sys_fb_info *fi,
+                              unsigned int x, unsigned int y, unsigned int rgb)
+{
+    volatile unsigned char *p = fb + y * fi->pitch + x * (fi->bpp / 8u);
+    if (fi->bpp == 32) {
+        *(volatile unsigned int *)p = rgb;
+    } else {
+        p[0] = (unsigned char)rgb;
+        p[1] = (unsigned char)(rgb >> 8);
+        p[2] = (unsigned char)(rgb >> 16);
+    }
 }
 
-/* Screen geometry guaranteed by the boot-time VBE mode (1024x768 32bpp). */
+/* Screen size the bootloader asks for. Programs that map the framebuffer
+ * should take the real values from sys_fb_info. */
 #define SYS_FB_W      1024u
 #define SYS_FB_H       768u
-#define SYS_FB_STRIDE 1024u   /* pixels per row (pitch / 4 bytes) */
 
 /* Returns the next raw PS/2 key event, or 0 if the queue is empty. The result
  * has bit 31 set (so non-zero unambiguously means "got an event"), with:
