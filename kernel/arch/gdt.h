@@ -11,5 +11,7 @@ void tss_set_kernel_stack(unsigned int esp0);  /* ring0 stack for ring3 traps */
  * for forked children. Without this, both procs use the same kstack and
  * the SECOND-to-enter-kernel one overwrites the FIRST's saved frame. */
 unsigned int gdt_boot_kstack_top(void);
+/* Lowest address of the same array (the proc layer keeps a canary there). */
+unsigned int gdt_boot_kstack_base(void);
 
 #endif

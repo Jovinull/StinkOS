@@ -31,12 +31,6 @@
 #include "cpuid.h"
 #include "serial.h"
 
-/* NX bit lives at bit 63 of an 8-byte PTE/PDE (Intel SDM Vol 3A §4.6.2).
- * On 32-bit literals: split as two halves so the constant is well-formed
- * in C without 64-bit suffixes -- we shift into place below. */
-#define PG_NX_HI 0x80000000u
-#define PG_NX    (((pae_entry_t)PG_NX_HI) << 32)
-
 /* Set once at paging_init from CPUID + EFER state. When 0, setting bit 63
  * in a PTE while IA32_EFER.NXE=0 triggers a reserved-bit page fault on
  * access -- so we must skip stamping NX on CPUs that don't advertise it
@@ -75,7 +69,10 @@ static int g_nx_enabled;
 
 #define USER_STACK_PAGES  64u
 #define USER_STACK_LO     USER_CODE_END
-#define USER_STACK_TOP    (USER_STACK_LO + USER_STACK_PAGES * PAGE_4KB)
+/* USER_STACK_TOP itself comes from memlayout.h; the page counts above
+ * have to add up to it. */
+_Static_assert(USER_STACK_LO + USER_STACK_PAGES * PAGE_4KB == USER_STACK_TOP,
+               "user code + stack page counts disagree with USER_STACK_TOP");
 
 #define USER_HEAP_LO      USER_STACK_TOP
 #define USER_HEAP_HI      USER_END
@@ -267,6 +264,16 @@ void paging_init(void)
 	 * PDPT. CR3 reload also flushes the TLB so the kernel image PT
 	 * supersedes the bootstrap PSE PDE in time for the next fetch. */
 	load_cr3_active();
+
+	/* CR0.WP: make ring 0 honour read-only PTEs too. Without it the
+	 * kernel writes straight through a COW-shared or read-only user page
+	 * when a syscall hands it such a buffer -- corrupting the frame for
+	 * every process that shares it -- and its own .text/.rodata are only
+	 * nominally read-only. */
+	unsigned int cr0;
+	__asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+	cr0 |= 0x00010000u;
+	__asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
 }
 
 /* Walk the active PDPT and return a pointer (KVA) to the PTE backing
@@ -312,12 +319,19 @@ static pae_entry_t user_pte_flags(int exec, int write)
 	return f;
 }
 
-static void map_user_page(unsigned int vaddr, unsigned int frame)
+/* Map `frame` RW+NX at `vaddr` in the active address space. The frame is
+ * zeroed first: memory handed to ring 3 never carries another process's
+ * (or the kernel's) old contents. Returns 0, or -1 if the page table for
+ * `vaddr` could not be allocated (the frame is NOT freed -- caller's). */
+static int map_user_page(unsigned int vaddr, unsigned int frame)
 {
 	pae_entry_t *pte = walk_user_pte(page_pdpt, vaddr, 1);
 	if (!pte)
-		return;
+		return -1;
+	zero_frame(frame);
 	*pte = (pae_entry_t)(frame & 0xFFFFF000u) | user_pte_flags(0, 1);
+	__asm__ volatile ("invlpg (%0)" : : "r"(vaddr) : "memory");
+	return 0;
 }
 
 /* COW fault resolution. The #PF handler routes a write to a PG_COW
@@ -439,6 +453,7 @@ int paging_init_user_pgdir(unsigned int *pdpt_raw)
 		unsigned int frame = pmm_alloc();
 		if (!frame)
 			return -1;
+		zero_frame(frame);
 		unsigned int va = USER_CODE + i * PAGE_4KB;
 		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
 		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
@@ -448,6 +463,7 @@ int paging_init_user_pgdir(unsigned int *pdpt_raw)
 		unsigned int frame = pmm_alloc();
 		if (!frame)
 			return -1;
+		zero_frame(frame);
 		unsigned int va = USER_STACK_LO + i * PAGE_4KB;
 		pae_entry_t *pde_slot = &pd0[PD_IDX(va)];
 		pae_entry_t *pt = KVA((unsigned int)(*pde_slot & FRAME_MASK_4KB));
@@ -470,6 +486,18 @@ void paging_activate(unsigned int *pdpt_raw)
 unsigned int *paging_boot_pgdir(void)
 {
 	return (unsigned int *)page_pdpt;
+}
+
+void paging_vm_save(unsigned int *heap_next, int *fb_mapped)
+{
+	*heap_next = user_heap_next;
+	*fb_mapped = fb_pde_mapped;
+}
+
+void paging_vm_load(unsigned int heap_next, int fb_mapped)
+{
+	user_heap_next = heap_next ? heap_next : USER_HEAP_LO;
+	fb_pde_mapped  = fb_mapped;
 }
 
 /* Copy USER pages from src PDPT into dst PDPT under copy-on-write. No
@@ -614,7 +642,10 @@ unsigned int paging_user_alloc(void)
 	if (!frame)
 		return 0;
 	unsigned int v = user_heap_next;
-	map_user_page(v, frame);
+	if (map_user_page(v, frame) != 0) {
+		pmm_free(frame);
+		return 0;
+	}
 	user_heap_next += PAGE_4KB;
 	return v;
 }
@@ -635,13 +666,14 @@ unsigned int paging_user_mmap(unsigned int size)
 	unsigned int base = user_heap_next;
 	for (unsigned int i = 0; i < pages; i++) {
 		unsigned int frame = pmm_alloc();
-		if (!frame) {
+		if (!frame || map_user_page(user_heap_next, frame) != 0) {
+			if (frame)
+				pmm_free(frame);
 			for (unsigned int j = 0; j < i; j++)
 				unmap_user_page(base + j * PAGE_4KB);
 			user_heap_next = base;
 			return 0;
 		}
-		map_user_page(user_heap_next, frame);
 		user_heap_next += PAGE_4KB;
 	}
 	return base;
@@ -686,27 +718,34 @@ int paging_user_munmap(unsigned int addr, unsigned int size)
 	return 0;
 }
 
-unsigned int paging_user_set_brk(unsigned int new_brk)
+int paging_user_set_brk(unsigned int new_brk)
 {
-	if (new_brk < USER_HEAP_LO)
-		new_brk = USER_HEAP_LO;
-	if (new_brk > USER_HEAP_HI)
-		new_brk = USER_HEAP_HI;
+	if (new_brk < USER_HEAP_LO || new_brk > USER_HEAP_HI)
+		return -1;
 
 	unsigned int aligned = (new_brk + PAGE_4KB - 1) & ~(PAGE_4KB - 1);
+	unsigned int start   = user_heap_next;
 
+	/* Growing is all-or-nothing: if memory runs out half way, everything
+	 * mapped by this call is released again and the break stays put. */
 	while (user_heap_next < aligned) {
 		unsigned int frame = pmm_alloc();
-		if (!frame)
-			return user_heap_next;
-		map_user_page(user_heap_next, frame);
+		if (!frame || map_user_page(user_heap_next, frame) != 0) {
+			if (frame)
+				pmm_free(frame);
+			while (user_heap_next > start) {
+				user_heap_next -= PAGE_4KB;
+				unmap_user_page(user_heap_next);
+			}
+			return -1;
+		}
 		user_heap_next += PAGE_4KB;
 	}
 	while (user_heap_next > aligned) {
 		user_heap_next -= PAGE_4KB;
 		unmap_user_page(user_heap_next);
 	}
-	return user_heap_next;
+	return 0;
 }
 
 /* Allocate a fresh per-process PDPT. PDPT[1..3] inherit the shared
@@ -742,9 +781,11 @@ void paging_destroy_user_pgdir(unsigned int *pdpt_raw)
 	if (pdpte & 1ULL) {
 		unsigned int pd0_phys = (unsigned int)(pdpte & FRAME_MASK_4KB);
 		pae_entry_t *pd0 = KVA(pd0_phys);
-		unsigned int first = PD_IDX(USER_BASE);
-		for (unsigned int p = 0; p < USER_PDES_2MB; p++) {
-			pae_entry_t pde = pd0[first + p];
+		/* Every PDE, not just the code/stack/heap window: a page table
+		 * allocated on demand anywhere in the low gigabyte belongs to
+		 * this address space and goes back with it. */
+		for (unsigned int p = 0; p < PD_ENTRIES; p++) {
+			pae_entry_t pde = pd0[p];
 			if (!(pde & 1ULL))
 				continue;
 			if (pde & 0x80ULL)
@@ -765,17 +806,66 @@ void paging_destroy_user_pgdir(unsigned int *pdpt_raw)
 	pmm_free(V2P((unsigned int)pdpt_raw));
 }
 
-int paging_user_range_ok(unsigned int addr, unsigned int len)
+/* Can the kernel touch [addr, addr+len) on behalf of the current process?
+ *
+ * Decided from the page tables, not from address-range bookkeeping: every
+ * page must be present and user-accessible right now. That rejects holes
+ * left by munmap, the gap between stack and heap, and anything outside
+ * PDPT[0] (the kernel half) without a list of special cases.
+ *
+ * For write access each page must also be writable. A page that is
+ * read-only only because it is still COW-shared after fork is privatized
+ * here, exactly as a ring-3 write fault would do, so the kernel's write
+ * lands in this process's own copy. Genuinely read-only pages (.text,
+ * .rodata) are refused. */
+static int user_range_check(unsigned int addr, unsigned int len, int write)
 {
 	if (len == 0)
 		return 1;
-	if (addr + len < addr)
+	unsigned int end = addr + len;
+	if (end < addr)
+		return 0;                              /* wraps past 4 GiB */
+	if (addr < USER_BASE || PDPT_IDX(end - 1u) != 0)
 		return 0;
 
-	unsigned int end = addr + len;
-	if (addr >= USER_CODE && end <= USER_STACK_TOP)
-		return 1;
-	if (addr >= USER_HEAP_LO && end <= user_heap_next)
-		return 1;
-	return 0;
+	pae_entry_t pdpte = page_pdpt[0];
+	if (!(pdpte & 1ULL))
+		return 0;
+	pae_entry_t *pd = KVA((unsigned int)(pdpte & FRAME_MASK_4KB));
+
+	unsigned int va = addr & ~(PAGE_4KB - 1u);
+	while (va < end) {
+		pae_entry_t pde = pd[PD_IDX(va)];
+		if ((pde & 0x5ULL) != 0x5ULL)              /* present + user */
+			return 0;
+		if (pde & 0x80ULL) {                       /* 2 MiB page (framebuffer) */
+			if (write && !(pde & 0x2ULL))
+				return 0;
+			unsigned int next = (va & ~(PAGE_2MB - 1u)) + PAGE_2MB;
+			if (next <= va)
+				break;
+			va = next;
+			continue;
+		}
+		pae_entry_t *pt  = KVA((unsigned int)(pde & FRAME_MASK_4KB));
+		pae_entry_t  pte = pt[PT_IDX(va)];
+		if ((pte & 0x5ULL) != 0x5ULL)
+			return 0;
+		if (write && !(pte & 0x2ULL)) {
+			if (!(pte & PG_COW) || !paging_handle_cow_fault(va))
+				return 0;
+		}
+		va += PAGE_4KB;
+	}
+	return 1;
+}
+
+int paging_user_range_ok(unsigned int addr, unsigned int len)
+{
+	return user_range_check(addr, len, 0);
+}
+
+int paging_user_range_writable(unsigned int addr, unsigned int len)
+{
+	return user_range_check(addr, len, 1);
 }

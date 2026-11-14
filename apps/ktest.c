@@ -346,6 +346,38 @@ static int t_preempt(void)
 	return 0;
 }
 
+/* A process that lives almost entirely inside syscalls must still be
+ * preempted: timer ticks that land in kernel mode have to turn into a
+ * switch on the way back to ring 3. */
+static int t_resched(void)
+{
+	sys_fdelete("KTR.TMP");
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		char one = 'x';
+		child_exit(sys_fwrite("KTR.TMP", &one, 1) == 0 ? 1 : 2);
+	}
+	/* Poll with back-to-back syscalls and no sleep: the child only gets
+	 * the CPU if the kernel reschedules us at a syscall boundary. */
+	unsigned int t0 = sys_ticks();
+	int seen = 0;
+	char b;
+	while ((unsigned int)(sys_ticks() - t0) < 100) {
+		if (sys_fread("KTR.TMP", &b, 1) == 1) {
+			seen = 1;
+			break;
+		}
+	}
+	unsigned int waited = sys_ticks() - t0;
+	int code = sys_waitpid(pid);
+	sys_fdelete("KTR.TMP");
+	if (!seen) FAIL("child never ran while the parent spun in syscalls for 1 s");
+	if (code != 1) FAIL("child exit code %d, want 1", code);
+	if (waited > 20) FAIL("child needed %u ticks to get scheduled", waited);
+	return 0;
+}
+
 /* Two processes hammering the filesystem and the frame allocator at once:
  * every byte each one reads back must be its own, and no frame may go
  * missing. */
@@ -481,6 +513,7 @@ static const struct ktcase cases[] = {
 	{ "orphan",      t_orphan },
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
+	{ "resched",     t_resched },
 	{ "concurrent",  t_concurrent },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "badptr",      t_badptr },

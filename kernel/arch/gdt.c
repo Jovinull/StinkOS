@@ -60,6 +60,11 @@ unsigned int gdt_boot_kstack_top(void)
 	return (unsigned int)(kernel_stack + sizeof(kernel_stack));
 }
 
+unsigned int gdt_boot_kstack_base(void)
+{
+	return (unsigned int)kernel_stack;
+}
+
 void gdt_init(void)
 {
 	set_gate(0, 0, 0, 0, 0);                       /* null */

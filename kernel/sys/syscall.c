@@ -74,7 +74,7 @@ static int fs_syscall_read(unsigned int uname, unsigned int ubuf, unsigned int m
 	char kname[16];
 	if (copy_user_name(uname, kname) != 0)
 		return -1;
-	if (!paging_user_range_ok(ubuf, maxsize))
+	if (!paging_user_range_writable(ubuf, maxsize))
 		return -1;
 	int n = fs_file_read(kname, (void *)ubuf, maxsize);
 	if (n >= 0) {
@@ -91,7 +91,7 @@ static int fs_syscall_read_at(unsigned int uname, unsigned int ubuf,
 	char kname[16];
 	if (copy_user_name(uname, kname) != 0)
 		return -1;
-	if (!paging_user_range_ok(ubuf, maxsize))
+	if (!paging_user_range_writable(ubuf, maxsize))
 		return -1;
 	int n = fs_file_read_at(kname, (void *)ubuf, maxsize, offset);
 	if (n >= 0) {
@@ -128,7 +128,7 @@ static int vfs_syscall_open(unsigned int uname, int flags)
 
 static int vfs_syscall_read(int fd, unsigned int ubuf, unsigned int n)
 {
-	if (!paging_user_range_ok(ubuf, n))
+	if (!paging_user_range_writable(ubuf, n))
 		return -1;
 	return vfs_read(fd, (void *)ubuf, n);
 }
@@ -225,12 +225,16 @@ static int exec_run_by_elf(const char *elf_name)
 	if (fs_file_lba_sectors(elf_name, &lba, &sectors) != 0)
 		return -1;
 
-	audio_mix_silence_all();
-
 	struct proc   *cur        = proc_current();
 	unsigned int  *old_pgdir  = cur ? (unsigned int *)cur->cr3 : 0;
 	if (!old_pgdir)
 		old_pgdir = paging_boot_pgdir();
+
+	/* The caller's break / framebuffer mapping, in case we have to put
+	 * its address space back. */
+	unsigned int old_heap;
+	int          old_fb;
+	paging_vm_save(&old_heap, &old_fb);
 
 	unsigned int *new_pgdir = paging_create_user_pgdir();
 	if (!new_pgdir)
@@ -243,12 +247,17 @@ static int exec_run_by_elf(const char *elf_name)
 
 	unsigned int entry;
 	if (elf_load(lba, sectors, &entry) != 0) {
-		/* Roll back: restore old CR3, drop the half-baked new pgdir. */
+		/* Roll back: the caller's image was never touched. */
 		paging_activate(old_pgdir);
+		paging_vm_load(old_heap, old_fb);
 		paging_destroy_user_pgdir(new_pgdir);
 		return -1;
 	}
 
+	/* Point of no return: the old image is gone. Anything tied to it
+	 * (mixer channels reading its sample buffers) goes with it. */
+	if (cur)
+		audio_mix_silence_pid(cur->pid);
 	if (old_pgdir != new_pgdir)
 		paging_destroy_user_pgdir(old_pgdir);
 	if (cur)
@@ -276,13 +285,14 @@ void app_return(void)
 	/* §1 step 5.5: fork()ed child (any PID > 1) is NOT the foreground
 	 * process menu launched. menu_exit's klongjmp would crash the
 	 * scheduler -- it switches to the menu kernel stack but the child's
-	 * CR3 stays loaded. Mark ZOMBIE and yield instead; the parent's
-	 * sys_wait reaps. */
-	if (cur && cur->pid > 1) {
-		cur->state = PROC_ZOMBIE;
-		proc_yield();
-		for (;;) __asm__ volatile ("hlt");   /* unreachable */
-	}
+	 * CR3 stays loaded. It becomes a zombie instead; its parent's wait
+	 * (or the orphan reaper) frees the PCB and the address space. */
+	if (cur && cur->pid > 1)
+		proc_exit_current();               /* does not return */
+
+	/* PID 1 is about to turn back into the shell or the menu, and
+	 * neither waits for the children the dying app left behind. */
+	proc_abandon_children(cur);
 	if (exec_active) {
 		exec_active = 0;
 		char shell_elf[16] = "SHELL.ELF\0\0\0\0\0\0\0";
@@ -290,6 +300,31 @@ void app_return(void)
 		/* shell missing or unloadable: fall through to the menu */
 	}
 	menu_exit();                               /* does not return */
+}
+
+/* SYS_WAIT / SYS_WAITPID. pid <= 0 waits for any child. Blocks until a
+ * matching child has exited, reaps it and returns its exit code; -1 when
+ * there is no such child to wait for (or the caller was killed). */
+static int wait_for_child(int pid)
+{
+	struct proc *cur = proc_current();
+	for (;;) {
+		struct proc *z = proc_find_zombie_child(pid > 0 ? pid : 0);
+		if (z)
+			return proc_reap(z);
+		if (pid > 0) {
+			struct proc *c = proc_get(pid);
+			if (!c || c->parent_pid != cur->pid)
+				return -1;             /* not our child */
+		} else if (!proc_has_living_child()) {
+			return -1;
+		}
+		if (cur->killed)
+			return -1;
+		/* The child's exit wakes us. The timeout only bounds the damage
+		 * of a wake-up that got lost. */
+		proc_block(100);
+	}
 }
 
 /* System calls: eax = number, ebx = arg. Result returned in eax. */
@@ -364,10 +399,19 @@ void syscall_dispatch(struct regs *r)
 		serial_write("exec: ");
 		serial_write(kname);
 		serial_putc('\n');
-		exec_active = 1;                   /* child returns to a shell, not the menu */
+		/* "Return to a fresh shell when this app ends" only describes
+		 * the foreground app in PID 1; a forked child exec'ing must not
+		 * flip it. */
+		int foreground = proc_current()->pid == 1;
+		int was_active = exec_active;
+		if (foreground)
+			exec_active = 1;
 		exec_run_by_elf(elf_name);         /* replaces the caller; returns only on error */
-		exec_active = 0;                   /* image was bad: user region is trashed */
-		menu_exit();                       /* bail to the menu; does not return */
+		/* The new image was staged in a separate address space and
+		 * dropped, so the caller is intact: report the failure to it. */
+		if (foreground)
+			exec_active = was_active;
+		r->eax = (unsigned int)-1;
 		break;
 	}
 	case 42:                                   /* SYS_MAP_FB: -> userland FB base addr */
@@ -375,7 +419,7 @@ void syscall_dispatch(struct regs *r)
 		r->eax = paging_user_fb_base();
 		break;
 	case 43: {                                 /* SYS_NETINFO: ebx=*struct net_info -> 0 ok, -1 bad ptr */
-		if (!paging_user_range_ok(r->ebx, sizeof(struct net_info))) {
+		if (!paging_user_range_writable(r->ebx, sizeof(struct net_info))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -410,7 +454,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 63: {                                 /* SYS_MBR_READ: ebx=drive ecx=*struct mbr_partition[4] -> 0 / -1 */
-		if (!paging_user_range_ok(r->ecx, 4 * sizeof(struct mbr_partition))) {
+		if (!paging_user_range_writable(r->ecx, 4 * sizeof(struct mbr_partition))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -428,7 +472,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 64: {                                 /* SYS_RTC_READ: ebx=*struct rtc_time -> 0 / -1 */
-		if (!paging_user_range_ok(r->ebx, sizeof(struct rtc_time))) {
+		if (!paging_user_range_writable(r->ebx, sizeof(struct rtc_time))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -472,7 +516,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 73: {                                 /* SYS_PROC_INFO: ebx=buf ecx=cap -> bytes */
-		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+		if (!paging_user_range_writable(r->ebx, r->ecx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -480,7 +524,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 74: {                                 /* SYS_ARP_INFO: ebx=buf ecx=cap -> bytes */
-		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+		if (!paging_user_range_writable(r->ebx, r->ecx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -532,24 +576,26 @@ void syscall_dispatch(struct regs *r)
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		target->state = PROC_SLEEPING;
+		target->suspended = 1;                /* scheduler skips it from now on */
 		audio_mix_silence_pid(pid);           /* hush its mixer channels */
 		r->eax = 0;
+		if (target == proc_current())
+			proc_yield();                 /* suspending yourself takes effect now */
 		break;
 	}
 	case 70: {                                 /* SYS_RESUME: ebx=pid -> 0 / -1 */
 		int pid = (int)r->ebx;
 		struct proc *target = proc_get(pid);
-		if (!target || target->state != PROC_SLEEPING) {
+		if (!target || !target->suspended) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		target->state = PROC_READY;
+		target->suspended = 0;
 		r->eax = 0;
 		break;
 	}
 	case 68: {                                 /* SYS_KLOG_READ: ebx=buf ecx=cap -> bytes copied */
-		if (!paging_user_range_ok(r->ebx, r->ecx)) {
+		if (!paging_user_range_writable(r->ebx, r->ecx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -587,7 +633,7 @@ void syscall_dispatch(struct regs *r)
 		outb(0x64, 0xFE);                       /* command 0xFE = CPU reset */
 		for (;;) __asm__ volatile ("cli; hlt"); /* unreachable on a real CPU */
 	case 59: {                                 /* SYS_MEMINFO: ebx=*meminfo -> 0 / -1 */
-		if (!paging_user_range_ok(r->ebx, 3 * sizeof(unsigned int))) {
+		if (!paging_user_range_writable(r->ebx, 3 * sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -599,7 +645,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 58: {                                 /* SYS_NETSTAT: ebx=idx ecx=*tcp_info -> 0 / -1 */
-		if (!paging_user_range_ok(r->ecx, sizeof(struct tcp_info))) {
+		if (!paging_user_range_writable(r->ecx, sizeof(struct tcp_info))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -669,7 +715,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 49: {                                 /* SYS_PIPE: ebx=int fds[2] -> 0 ok, -1 fail */
-		if (!paging_user_range_ok(r->ebx, 2 * sizeof(int))) {
+		if (!paging_user_range_writable(r->ebx, 2 * sizeof(int))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -678,7 +724,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 50: {                                 /* SYS_PIPE_READ: ebx=h ecx=buf edx=n -> bytes or -1 */
-		if (!paging_user_range_ok(r->ecx, r->edx)) {
+		if (!paging_user_range_writable(r->ecx, r->edx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -696,44 +742,12 @@ void syscall_dispatch(struct regs *r)
 	case 52:                                   /* SYS_PIPE_CLOSE: ebx=h -> 0 or -1 */
 		r->eax = (unsigned int)pipe_close((int)r->ebx);
 		break;
-	case 47: {                                 /* SYS_WAIT: -> exit_code of any reaped child, or -1 */
-		for (;;) {
-			struct proc *z = proc_find_zombie_child(0);
-			if (z) {
-				r->eax = (unsigned int)proc_reap(z);
-				break;
-			}
-			if (!proc_has_living_child()) {
-				r->eax = (unsigned int)-1;
-				break;
-			}
-			/* No zombie yet but children still alive. Sleep one tick at a
-			 * time -- sti+hlt lets the PIT IRQ fire and the scheduler hand
-			 * the CPU to whichever child might be ready to exit. */
-			__asm__ volatile ("sti; hlt; cli");
-		}
+	case 47:                                   /* SYS_WAIT: -> exit_code of any reaped child, or -1 */
+		r->eax = (unsigned int)wait_for_child(0);
 		break;
-	}
-	case 48: {                                 /* SYS_WAITPID: ebx=pid -> exit_code, or -1 */
-		int target_pid = (int)r->ebx;
-		for (;;) {
-			struct proc *z = proc_find_zombie_child(target_pid);
-			if (z) {
-				r->eax = (unsigned int)proc_reap(z);
-				break;
-			}
-			/* Bail when the requested PID is neither a zombie child nor a
-			 * living child -- prevents waitpid() on a foreign PID looping
-			 * forever. */
-			struct proc *anyone = proc_get(target_pid);
-			if (!anyone || anyone->parent_pid != proc_current()->pid) {
-				r->eax = (unsigned int)-1;
-				break;
-			}
-			__asm__ volatile ("sti; hlt; cli");
-		}
+	case 48:                                   /* SYS_WAITPID: ebx=pid -> exit_code, or -1 */
+		r->eax = (unsigned int)wait_for_child((int)r->ebx);
 		break;
-	}
 	case 46: {                                 /* SYS_KILL: ebx=pid -> 0 or -1 */
 		int pid = (int)r->ebx;
 		if (pid <= 1) {                    /* PID 1 (kinit) is not killable */
@@ -741,14 +755,23 @@ void syscall_dispatch(struct regs *r)
 			break;
 		}
 		struct proc *target = proc_get(pid);
-		if (!target) {
+		if (!target || target->state == PROC_ZOMBIE ||
+		    target->state == PROC_EMBRYO) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
-		target->state     = PROC_ZOMBIE;
-		target->exit_code = 137;           /* SIGKILL exit-code convention */
-		audio_mix_silence_pid(pid);        /* hush its mixer channels */
-		tcp_close_pid(pid);                /* reap any sockets it left open */
+		/* Kill is a request, not an execution: the target may be parked
+		 * in the middle of a syscall on its own kernel stack, and its
+		 * windows, sockets and mappings can only be torn down from its
+		 * own address space. Flag it and wake it; it exits itself the
+		 * next time it heads back to ring 3 (trap.c: die_if_killed). */
+		if (!target->killed) {
+			target->killed    = 1;
+			target->exit_code = 137;       /* SIGKILL exit-code convention */
+		}
+		target->suspended = 0;
+		audio_mix_silence_pid(pid);        /* hush it right away */
+		proc_wake(target);
 		serial_write("proc: killed pid ");
 		serial_write_dec(pid);
 		serial_putc('\n');
@@ -784,11 +807,9 @@ void syscall_dispatch(struct regs *r)
 				rtt = (int)((pit_ticks() - start) * 10);   /* ticks -> ms */
 				break;
 			}
-			/* The syscall arrived through an interrupt gate (IF cleared), so
-			 * without this window the PIT would never tick and the timeout
-			 * below could never fire -- the same sti+hlt+cli pattern SYS_SLEEP
-			 * uses to wait on the timer without losing an IRQ. */
-			__asm__ volatile ("sti; hlt; cli");
+			if (proc_current()->killed)
+				break;
+			proc_sleep_ticks(1);           /* let others run between polls */
 		}
 		r->eax = (unsigned int)rtt;
 		break;
@@ -810,7 +831,7 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)fs_file_count();
 		break;
 	case 11:                                   /* SYS_FINFO: ebx=index ecx=name buf */
-		if (!paging_user_range_ok(r->ecx, 16)) {
+		if (!paging_user_range_writable(r->ecx, 16)) {
 			r->eax = (unsigned int)-1;
 		} else {
 			r->eax = (unsigned int)fs_file_info((int)r->ebx, (char *)r->ecx);
@@ -885,10 +906,17 @@ void syscall_dispatch(struct regs *r)
 		 * the timer IRQ would never fire if we just spun on `ticks`. Open
 		 * a window with sti+hlt: the CPU guarantees IF stays clear for one
 		 * instruction after sti, making the pair atomic against IRQs. */
-		unsigned int delta = (r->ebx + 9) / 10;
+		unsigned int ms = r->ebx;
+		if (ms > 0x7FFFFFFFu - 9u)
+			ms = 0x7FFFFFFFu - 9u;             /* keep (ms + 9) from wrapping */
+		unsigned int delta = (ms + 9) / 10;
+		/* A real sleep: the scheduler skips this process until the
+		 * deadline (or a kill) instead of handing it a time slice per
+		 * tick to spin on hlt with. */
 		unsigned int start = pit_ticks();
-		while ((unsigned int)(pit_ticks() - start) < delta)
-			__asm__ volatile ("sti; hlt; cli");
+		while ((unsigned int)(pit_ticks() - start) < delta &&
+		       !proc_current()->killed)
+			proc_sleep_ticks(delta - (pit_ticks() - start));
 		r->eax = 0;
 		break;
 	}
@@ -912,13 +940,12 @@ void syscall_dispatch(struct regs *r)
 			target = old - abs_delta;
 		}
 
-		unsigned int got = paging_user_set_brk(target);
-		if ((delta > 0 && got < target) ||
-		    (delta < 0 && got > target)) {
-			r->eax = (unsigned int)-1;         /* OOM or hit USER_HEAP_HI */
-		} else {
+		/* All or nothing: on failure (out of memory, outside the heap
+		 * region) the break has not moved and nothing stays mapped. */
+		if (paging_user_set_brk(target) != 0)
+			r->eax = (unsigned int)-1;
+		else
 			r->eax = old;
-		}
 		break;
 	}
 	case 25:                                   /* SYS_GETKEYEVENT: -> packed event or 0 */
@@ -965,7 +992,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 33: {                                 /* SYS_SOCK_RECV: ebx=h ecx=buf edx=max */
-		if (!paging_user_range_ok(r->ecx, r->edx)) {
+		if (!paging_user_range_writable(r->ecx, r->edx)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1005,7 +1032,7 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 37: {                                 /* SYS_DNS_POLL: ebx=*ipv4 -> 1 if ready */
-		if (!paging_user_range_ok(r->ebx, sizeof(ipv4_t))) {
+		if (!paging_user_range_writable(r->ebx, sizeof(ipv4_t))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1021,8 +1048,8 @@ void syscall_dispatch(struct regs *r)
 		r->eax = (unsigned int)net_poll_once();
 		break;
 	case 39: {                                 /* SYS_DISK_INFO: ebx=drive ecx=model[41] edx=*sectors */
-		if (!paging_user_range_ok(r->ecx, 41) ||
-		    !paging_user_range_ok(r->edx, sizeof(unsigned int))) {
+		if (!paging_user_range_writable(r->ecx, 41) ||
+		    !paging_user_range_writable(r->edx, sizeof(unsigned int))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1059,9 +1086,9 @@ void syscall_dispatch(struct regs *r)
 		break;
 	}
 	case 27: {                                 /* SYS_GETMOUSE: ebx=*dx ecx=*dy edx=*buttons */
-		if (!paging_user_range_ok(r->ebx, sizeof(int)) ||
-		    !paging_user_range_ok(r->ecx, sizeof(int)) ||
-		    !paging_user_range_ok(r->edx, sizeof(int))) {
+		if (!paging_user_range_writable(r->ebx, sizeof(int)) ||
+		    !paging_user_range_writable(r->ecx, sizeof(int)) ||
+		    !paging_user_range_writable(r->edx, sizeof(int))) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -1131,32 +1158,27 @@ void syscall_dispatch(struct regs *r)
 		struct proc *child = proc_alloc(parent->name);
 		if (!child)  { r->eax = (unsigned int)-1; break; }
 
-		unsigned int kpage = pmm_alloc();
-		if (!kpage) {
-			proc_free(child);
-			r->eax = (unsigned int)-1;
-			break;
-		}
-		/* P2V: pmm_alloc returns phys; kstack_top is dereferenced as a
-		 * virt pointer (regs clone below, TSS.esp0 on context switch).
-		 * Higher-half mirror routes the deref away from any user PT. */
-		child->kstack_top = P2V(kpage) + 4096u;
-
+		/* proc_alloc already gave the child its kernel stack (static
+		 * pool, see proc.c). */
 		unsigned int *parent_pgdir = (unsigned int *)parent->cr3;
 		if (!parent_pgdir) parent_pgdir = paging_boot_pgdir();
 		unsigned int *child_pgdir = paging_create_user_pgdir();
 		if (!child_pgdir) {
-			pmm_free(kpage); proc_free(child);
+			proc_free(child);
 			r->eax = (unsigned int)-1;
 			break;
 		}
 		if (paging_copy_user_pgdir(child_pgdir, parent_pgdir) != 0) {
 			paging_destroy_user_pgdir(child_pgdir);
-			pmm_free(kpage); proc_free(child);
+			proc_free(child);
 			r->eax = (unsigned int)-1;
 			break;
 		}
 		child->cr3 = (unsigned int)child_pgdir;
+		/* Same program break as the parent; the framebuffer PDE is not
+		 * copied, so the child starts without it. */
+		paging_vm_save(&child->vm_heap_next, &child->vm_fb_mapped);
+		child->vm_fb_mapped = 0;
 
 		/* Lay out child's kernel stack. Top-down:
 		 *   [HIGH] struct regs (clone of *r, eax=0)

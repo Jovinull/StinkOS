@@ -38,7 +38,29 @@ struct proc {
 	struct vfs_fd     fd_table[VFS_FD_MAX];       /* per-process open files */
 	int               priority;          /* 0 = highest .. 31 = lowest; default 16 */
 	char              name[PROC_NAME_LEN];
+
+	/* Blocking. A SLEEPING proc is skipped by the scheduler until
+	 * proc_wake() (an event: child exit, kill) or, when sleep_timed is
+	 * set, until the PIT reaches wake_tick. */
+	unsigned int      wake_tick;
+	int               sleep_timed;
+	int               suspended;         /* SYS_SUSPEND: not schedulable until resumed */
+	int               killed;            /* SYS_KILL: exits at its next safe point */
+
+	/* Address-space state that is not in the page tables themselves:
+	 * the program break and whether the framebuffer PDE is mapped. Saved
+	 * and restored around every context switch (see paging_vm_save). */
+	unsigned int      vm_heap_next;
+	int               vm_fb_mapped;
+
+	unsigned int      kstack_base;       /* lowest address of the kernel stack (canary lives here) */
 };
+
+/* Kernel stack size for every process but the boot one (which runs on the
+ * static stack in gdt.c). Stacks come from a static pool indexed by PCB
+ * slot, so they are never fragmented and never share a frame with user
+ * data. */
+#define KSTACK_SIZE     8192u
 
 /* Initialise the process table and reserve PID 1 for the kernel boot process,
  * which is what every existing kernel path is implicitly running as today. */
@@ -83,15 +105,65 @@ unsigned int   context_init(unsigned int kstack_top, void (*entry)(void));
  * is full or out of memory. */
 struct proc   *proc_kthread_create(const char *name, void (*entry)(void));
 
-/* Round-robin yield: pick the next PROC_READY slot after the current proc's
- * index and context_switch into it. If no other ready thread exists, returns
- * immediately so the current proc keeps the CPU. Safe to call from IRQ
- * context (the PIT tick uses it) as well as voluntarily from kernel code. */
-void           proc_yield(void);
+/* ---- Scheduling model ----
+ *
+ * The kernel does not preempt itself. A context switch happens only
+ *   (a) when the PIT interrupts ring-3 code (trap.c), or
+ *   (b) at an explicit proc_yield() / proc_sleep_ticks() / proc_block().
+ * Code running in the kernel between two such points therefore sees every
+ * kernel data structure in a consistent state without locks; interrupt
+ * handlers are the only other writers and must stick to their own small
+ * buffers. A syscall that has to wait must use the calls below instead of
+ * spinning on hlt, or nothing else gets to run. */
 
-/* Release a ZOMBIE proc: free its kernel-stack frame back to the PMM and mark
- * the slot UNUSED. Returns the proc's exit_code. Safe to call only on a
- * ZOMBIE; returns -1 if the slot is in any other state. */
+/* Hand the CPU to the next runnable proc. Returns 1 if another proc ran in
+ * between, 0 if nothing else was runnable (the caller keeps the CPU). */
+int            proc_yield(void);
+
+/* Block the caller for `ticks` PIT ticks (10 ms each), or until it is
+ * woken early by proc_wake(). Other procs run meanwhile; with none
+ * runnable the CPU idles in hlt. */
+void           proc_sleep_ticks(unsigned int ticks);
+
+/* Block the caller until proc_wake(), with a `max_ticks` safety timeout
+ * (0 = no timeout). The caller re-checks its condition afterwards. */
+void           proc_block(unsigned int max_ticks);
+
+/* Make a SLEEPING proc runnable again. Safe from IRQ context. */
+void           proc_wake(struct proc *p);
+
+/* Called by the PIT handler every tick: wakes timed sleepers that are due. */
+void           proc_tick(unsigned int now);
+
+/* A tick that interrupts kernel code cannot switch processes, so it leaves
+ * a note instead (proc_request_resched, from the PIT handler). The trap
+ * exit path calls proc_resched_point() just before returning to ring 3 and
+ * the switch happens there. Without this a process that spends most of its
+ * time inside syscalls would never be preempted. */
+void           proc_request_resched(void);
+void           proc_resched_point(void);
+
+/* Give up the CPU if anyone else can use it, otherwise halt until the next
+ * interrupt. For kernel polling loops (the menu's idle loop). */
+void           proc_idle(void);
+
+/* Turn the caller into a ZOMBIE and never return: hands zombie children to
+ * the reaper, orphans living ones, wakes a parent blocked in wait. The
+ * caller must already have released its own resources (sockets, audio). */
+void           proc_exit_current(void) __attribute__((noreturn));
+
+/* Detach every child of `p` (reap the zombies, orphan the living) without
+ * exiting. Used when the boot proc's app ends and it becomes the menu
+ * again: nobody would ever wait for those children. */
+void           proc_abandon_children(struct proc *p);
+
+/* Free every ZOMBIE that has no parent left to wait for it. Never touches
+ * the caller. Process context only. */
+void           proc_reap_orphans(void);
+
+/* Release a ZOMBIE proc: destroy its address space, mark the slot UNUSED.
+ * Returns the proc's exit_code. Safe to call only on a ZOMBIE that is not
+ * the caller; returns -1 otherwise. */
 int            proc_reap(struct proc *p);
 
 /* Find a ZOMBIE child of the caller. If `pid` > 0, return that PID only when

@@ -467,7 +467,7 @@ void menu_run(void)
 			 * completes and any background TCP/UDP work makes progress
 			 * without needing a dedicated kernel thread. */
 			(void)net_poll_once();
-			__asm__ volatile ("hlt");
+			proc_idle();                /* run background procs, else hlt */
 			continue;
 		}
 

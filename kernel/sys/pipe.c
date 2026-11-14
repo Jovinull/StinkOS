@@ -81,8 +81,11 @@ int pipe_read(int handle, void *dst, unsigned int n)
 		return 0;
 
 	/* Block while empty as long as a writer might still produce bytes. */
-	while (p->count == 0 && p->writers > 0)
-		__asm__ volatile ("sti; hlt; cli");
+	while (p->count == 0 && p->writers > 0) {
+		if (proc_current()->killed)
+			return -1;
+		proc_sleep_ticks(1);
+	}
 
 	if (p->count == 0)
 		return 0;                          /* writers all closed: EOF */
@@ -110,8 +113,11 @@ int pipe_write(int handle, const void *src, unsigned int n)
 
 	while (written < n) {
 		/* Block while full as long as a reader might still drain. */
-		while (p->count == PIPE_BUFSZ && p->readers > 0)
-			__asm__ volatile ("sti; hlt; cli");
+		while (p->count == PIPE_BUFSZ && p->readers > 0) {
+			if (proc_current()->killed)
+				return -1;
+			proc_sleep_ticks(1);
+		}
 		if (p->readers == 0)
 			return -1;                 /* EPIPE: no one will ever read */
 
