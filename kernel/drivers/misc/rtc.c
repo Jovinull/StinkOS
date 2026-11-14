@@ -24,15 +24,33 @@
 /* Status B bit 5: alarm interrupt enable. */
 #define CMOS_STATUSB_AIE      0x20
 
+/* Index-then-data is two port accesses; the RTC interrupt handler does the
+ * same dance on the same index register, so the pair runs with interrupts
+ * off (and is a no-op change when called from the handler itself). */
 static unsigned char cmos_read(unsigned char reg)
 {
+	unsigned int flags;
+	__asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
 	outb(CMOS_ADDR, reg);
-	return inb(CMOS_DATA);
+	unsigned char v = inb(CMOS_DATA);
+	if (flags & 0x200u)
+		__asm__ volatile ("sti");
+	return v;
 }
 
 static int update_in_progress(void)
 {
 	return cmos_read(CMOS_REG_STATUSA) & 0x80;
+}
+
+/* Wait for the once-a-second register update to finish, but not forever:
+ * an absent or stuck RTC must not hang every caller (the menu reads the
+ * clock on each idle pass). The update itself takes about 2 ms. */
+static void wait_update_done(void)
+{
+	for (unsigned int spins = 0; spins < 200000u; spins++)
+		if (!update_in_progress())
+			return;
 }
 
 static unsigned int bcd_to_bin(unsigned char v)
@@ -68,15 +86,13 @@ void rtc_read(struct rtc_time *out)
 	/* The chip updates its registers about once a second; reading mid
 	 * update tears the value, so wait it out and keep re-reading until
 	 * two consecutive snapshots agree. */
-	while (update_in_progress())
-		;
+	wait_update_done();
 	read_raw(&prev);
-	for (;;) {
-		while (update_in_progress())
-			;
+	for (int tries = 0; ; tries++) {
+		wait_update_done();
 		read_raw(&cur);
-		if (raw_equal(&prev, &cur))
-			break;
+		if (raw_equal(&prev, &cur) || tries >= 8)
+			break;                         /* 8 mismatches: take what we have */
 		prev = cur;
 	}
 
@@ -158,8 +174,12 @@ void rtc_clear_alarm(void)
 
 int rtc_alarm_fired(void)
 {
+	unsigned int flags;
+	__asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
 	int fired = alarm_pending;
 	alarm_pending = 0;
+	if (flags & 0x200u)
+		__asm__ volatile ("sti");
 	return fired;
 }
 

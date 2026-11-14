@@ -86,4 +86,11 @@ int    net_poll_once(void);
  * once after e1000_init succeeds. */
 void   net_init(void);
 
+/* Start the network thread (no-op without a NIC). Call once interrupts
+ * and the process table are up. */
+void net_start(void);
+
+/* Called from the NIC interrupt: there is RX work, wake the thread. */
+void net_irq_wake(void);
+
 #endif

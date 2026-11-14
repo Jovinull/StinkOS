@@ -79,7 +79,15 @@ int  audio_mix_play(const unsigned char *samples, unsigned int length, int volum
  * implicitly assumes. Returns the channel handle or -1 if no slot is free. */
 int  audio_mix_play_rate(const unsigned char *samples, unsigned int length,
                          int volume, unsigned int src_rate);
+/* Stop / adjust / query one sound. All three ignore a handle that is
+ * stale (its sound already ended) or that belongs to another process.
+ * audio_mix_playing returns 1 while the sound is still being mixed. */
 void audio_mix_stop(int handle);
+int  audio_mix_playing(int handle);
+
+/* Give back the sample frames of channels the interrupt has finished with.
+ * Cheap when there is nothing to do; process context only. */
+void audio_reclaim(void);
 void audio_mix_set_volume(int handle, int volume);
 void audio_mix_silence_all(void);
 

@@ -70,6 +70,12 @@
  * for legacy drivers (fb LFB, e1000 BAR) -- xv6 does the same. */
 #define KERNBASE            0x80000000u
 #define KERNEL_DIRECT_MAP   0x10000000u   /* 256 MiB direct map      */
+
+/* Top of the physical range the PMM hands frames out of. Everything the
+ * PMM sizes statically (refcounts, free-list links) derives from this, and
+ * it must not exceed KERNEL_DIRECT_MAP: the kernel reaches every managed
+ * frame through the direct map. The machine needs at least this much RAM. */
+#define PMM_PHYS_LIMIT      0x04000000u   /* 64 MiB                  */
 /* KERNEL_DEVSPACE must sit BELOW the lowest MMIO BAR we want to keep
  * identity-mapped. QEMU places the Bochs/Cirrus VBE LFB at 0xFD000000
  * and the e1000 BAR around 0xFEB80000; anchoring DEVSPACE at 0xFD000000

@@ -63,6 +63,17 @@ jobs:
       - name: Run headless boot test
         run: make test-headless
 
+      # Adversarial kernel cases run from ring 3 (apps/ktest.c), one VM
+      # each: a case that takes the kernel down cannot hide the others.
+      - name: Kernel regression suite (ktest)
+        run: make ktest
+
+      - name: QA -- unsolicited TCP while an app runs
+        run: make qa-net
+
+      - name: QA -- keys typed at an app are not replayed into the menu
+        run: make qa-input
+
       # Dedicated smokes split out of test-headless: each spins its
       # own QEMU instance + asserts a single feature end-to-end.
       # Cheaper per-assertion than the menu sweep, less prone to

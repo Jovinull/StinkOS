@@ -3,6 +3,7 @@
  * (int 0x80) lives in syscall.c; this file just routes there. */
 #include "defs.h"
 #include "paging.h"
+#include "memlayout.h"
 #include "win.h"
 
 /* ---- assembly stubs ---- */
@@ -143,10 +144,25 @@ static volatile unsigned int ticks = 0;        /* PIT ticks since boot */
 
 unsigned int pit_ticks(void) { return ticks; }
 
+/* A killed process never gets back to ring 3: called on the way out of
+ * every trap that came from user mode. The process tears itself down in
+ * its own context (its address space, its kernel stack), which is the only
+ * place that is safe to do from. */
+static void die_if_killed(void)
+{
+	struct proc *cur = proc_current();
+	if (cur && cur->killed && cur->pid > 1) {
+		__asm__ volatile ("sti");
+		app_return();                      /* does not return */
+	}
+}
+
 void isr_handler(struct regs *r)
 {
 	if (r->int_no == 128) {                    /* int 0x80 syscall */
 		syscall_dispatch(r);
+		proc_resched_point();              /* a tick came in while we were in here */
+		die_if_killed();                   /* ... or a SYS_KILL */
 		return;
 	}
 
@@ -171,11 +187,28 @@ void isr_handler(struct regs *r)
 		serial_write(", cr2=0x");
 		serial_write_hex(cr2);
 		serial_write(")\n");
+		struct proc *dead = proc_current();
+		if (dead)
+			dead->exit_code = 128 + 11;    /* what a parent's wait() sees: "killed by a fault" */
 		app_return();                      /* back to the shell or menu (no return) */
 	}
 
 	unsigned int cr2 = 0;
 	__asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+
+	/* Ring-0 write to a present user page that is read-only because it is
+	 * still COW-shared (CR0.WP makes the kernel fault on those too).
+	 * Syscalls privatize their output buffers up front through
+	 * paging_user_range_writable, so reaching this is a missed call site:
+	 * resolve it the same way a user fault would be, and say so. */
+	if (r->int_no == 14 && (r->err_code & 0x7u) == 0x3u &&
+	    cr2 < KERNBASE && paging_handle_cow_fault(cr2)) {
+		serial_write("paging: kernel-mode COW fault at eip=0x");
+		serial_write_hex(r->eip);
+		serial_write(" (unvalidated user write)\n");
+		return;
+	}
+
 	serial_write("StinkOS: kernel exception ");
 	serial_write_dec(r->int_no);
 	serial_write(" at eip=0x");
@@ -190,6 +223,7 @@ void isr_handler(struct regs *r)
 
 void irq_handler(struct regs *r)
 {
+	int from_user = (r->cs & 3) == 3;
 	int preempt = 0;
 	if (r->int_no == 32) {                     /* IRQ0: PIT timer */
 		ticks++;
@@ -197,7 +231,17 @@ void irq_handler(struct regs *r)
 			serial_write("StinkOS: timer tick\n");
 		timer_tick();                       /* fire any expired one-shots */
 		win_tick();                         /* compositor: ~30fps */
-		preempt = 1;                        /* let the scheduler reshuffle */
+		proc_tick(ticks);                   /* wake sleepers that are due */
+		if (ticks % 50 == 0)
+			proc_kstack_audit();        /* canary + high-water mark */
+		if (from_user)
+			audio_reclaim();            /* no kernel code interrupted: PMM is safe */
+		/* The kernel does not preempt itself: only a tick that
+		 * interrupted ring 3 may switch processes. Kernel code is
+		 * rescheduled where it explicitly yields or blocks. */
+		preempt = from_user;
+		if (!from_user)
+			proc_request_resched();     /* switch on the way back to ring 3 */
 	} else if (r->int_no == 33) {              /* IRQ1: keyboard */
 		keyboard_handle();
 	} else if (r->int_no == 37) {              /* IRQ5: Sound Blaster 16 */
@@ -211,17 +255,22 @@ void irq_handler(struct regs *r)
 	/* PCI INTx lines are shared and the BIOS-assigned vector varies, so
 	 * call the e1000 IRQ entry on every hardware IRQ. The handler reads
 	 * ICR (clears on read) and no-ops when no descriptor is done. */
-	if (r->int_no >= 32 && r->int_no <= 47)
-		e1000_handle_irq();
+	if (r->int_no >= 32 && r->int_no <= 47 && e1000_handle_irq()) {
+		net_irq_wake();                     /* frames are parsed by the knet thread */
+		if (from_user)
+			preempt = 1;                /* ... as soon as this interrupt returns */
+		else
+			proc_request_resched();
+	}
 
 	if (r->int_no >= 40)                        /* from the slave PIC */
 		outb(0xA0, 0x20);
 	outb(0x20, 0x20);                           /* end of interrupt */
 
 	/* EOI must precede the yield: context_switch may not return for many ticks,
-	 * and the PIC won't deliver further IRQs until the current one is acked.
-	 * proc_yield() is a no-op until a second kernel thread exists, so the
-	 * single-process boot path stays bit-identical to the pre-scheduler code. */
+	 * and the PIC won't deliver further IRQs until the current one is acked. */
 	if (preempt)
 		proc_yield();
+	if (from_user)
+		die_if_killed();
 }

@@ -105,6 +105,7 @@ isr128:
 # Save full state, switch to kernel data segment, call the C handler, restore.
 isr_common:
 	pusha
+	cld                        # C code assumes DF=0; ring 3 may have left it set
 	xor %eax, %eax
 	mov %ds, %ax
 	push %eax                  # save data segment selector
@@ -127,6 +128,7 @@ isr_common:
 
 irq_common:
 	pusha
+	cld                        # same: never run kernel string ops with a user DF
 	xor %eax, %eax
 	mov %ds, %ax
 	push %eax

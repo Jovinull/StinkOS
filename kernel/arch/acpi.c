@@ -154,6 +154,7 @@ static int rsdp_valid(const struct rsdp_v1 *r)
 	if (!sum_zero(r, sizeof(*r)))     return 0;
 	if (r->revision >= 2) {
 		const struct rsdp_v2 *v2 = (const struct rsdp_v2 *)r;
+		if (v2->length < sizeof(*r) || v2->length > 4096u) return 0;
 		if (!sum_zero(v2, v2->length)) return 0;
 	}
 	return 1;
@@ -193,10 +194,27 @@ static const struct rsdp_v1 *find_rsdp(void)
 	return scan_for_rsdp(BIOS_AREA_LO, BIOS_AREA_HI);
 }
 
+/* Largest table we are willing to checksum. Real ones are a few KiB; the
+ * bound keeps a corrupt length field from walking off the direct map. */
+#define SDT_MAX_LEN  (256u * 1024u)
+
+/* The kernel reaches firmware tables through the direct map, which covers
+ * physical [0, KERNEL_DIRECT_MAP). Firmware on a machine with more RAM
+ * puts them near the top of memory: such a table is simply not reachable
+ * (ACPI is reported absent) instead of faulting before the IDT exists. */
+static int phys_reachable(unsigned int phys, unsigned int len)
+{
+	return phys != 0 && len <= KERNEL_DIRECT_MAP &&
+	       phys <= KERNEL_DIRECT_MAP - len;
+}
+
 static const struct sdt_hdr *table_at_phys(unsigned int phys)
 {
+	if (!phys_reachable(phys, SDT_HDR_SIZE))
+		return 0;
 	const struct sdt_hdr *h = (const struct sdt_hdr *)P2V(phys);
-	if (h->length < SDT_HDR_SIZE) return 0;
+	if (h->length < SDT_HDR_SIZE || h->length > SDT_MAX_LEN) return 0;
+	if (!phys_reachable(phys, h->length)) return 0;
 	if (!sum_zero(h, h->length))  return 0;
 	return h;
 }

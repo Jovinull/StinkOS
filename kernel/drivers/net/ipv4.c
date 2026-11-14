@@ -171,7 +171,7 @@ int ipv4_send(ipv4_t dst, unsigned char protocol,
 		}
 	}
 
-	unsigned char  packet[ETH_MAX_PAYLOAD];
+	static unsigned char packet[ETH_MAX_PAYLOAD];   /* see net.c: one caller at a time */
 	struct ipv4_hdr *h = (struct ipv4_hdr *)packet;
 
 	h->ver_ihl        = 0x45;                /* IPv4, IHL = 5 dwords */

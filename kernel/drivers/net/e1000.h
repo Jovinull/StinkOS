@@ -42,6 +42,6 @@ int e1000_send_frame(const void *buf, unsigned int len);
  * dispatch each frame via eth_handle_frame. Called from trap.c on every
  * hardware IRQ -- the ICR read is cheap and self-clearing so it's safe to
  * fire when no e1000 interrupt is actually pending. */
-void e1000_handle_irq(void);
+int  e1000_handle_irq(void);
 
 #endif

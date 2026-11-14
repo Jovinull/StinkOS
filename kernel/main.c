@@ -29,7 +29,7 @@ void kmain(void)
 	serial_write("gdt: kernel+user segments and tss loaded\n");
 	bootdiag_add("cpu: gdt+tss", BOOT_OK);
 
-	pmm_init(V2P((unsigned int)__bss_end), 0x4000000);   /* kernel-end .. 64 MiB */
+	pmm_init(V2P((unsigned int)__bss_end), PMM_PHYS_LIMIT);
 	paging_init();
 	paging_init_user();                     /* isolated 4 KiB userland region */
 	serial_write("paging: enabled\n");
@@ -98,6 +98,7 @@ void kmain(void)
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
 	bootdiag_add("net: e1000", e1000_present() ? BOOT_OK : BOOT_ABSENT);
 	net_init();                                /* caches local MAC for L2 emit */
+	net_start();                               /* knet thread: all RX + protocol timers */
 	dhcp_start();                              /* DISCOVER goes out; reply lands via UDP cb */
 	bootdiag_add("net: dhcp", e1000_present() ? BOOT_OK : BOOT_ABSENT);
 	__asm__ volatile ("sti");

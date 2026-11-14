@@ -34,4 +34,15 @@ int  pipe_read(int handle, void *dst, unsigned int n);
  * actually written, or -1 on a bad handle. */
 int  pipe_write(int handle, const void *src, unsigned int n);
 
+struct proc;
+
+/* fork: the child holds the same ends as its parent (bitmask `ends`);
+ * take one reference per end so each side can close its copy. */
+void pipe_fork(unsigned int ends);
+
+/* Process exit: drop every end the process still holds. Without this a
+ * dead writer leaves its reader blocked forever and the slot is never
+ * freed. */
+void pipe_release_all(struct proc *p);
+
 #endif

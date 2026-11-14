@@ -12,6 +12,8 @@ help:
 	@echo "  make run-iso       -- boot stinkos-install.iso (USB-stick layout)"
 	@echo "  make test-headless -- boot, run, capture serial, diff a baseline"
 	@echo "  make unittest      -- run every host-side regression test"
+	@echo "  make ktest         -- kernel regression cases in QEMU (one VM per case)"
+	@echo "  make qa-net qa-input -- host-driven network / input scenarios"
 	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
 	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
 	@echo "  make clean         -- delete build/ os.bin stinkos-install.iso"
@@ -61,7 +63,11 @@ KINCLUDES = -Ikernel -Ikernel/arch -Ikernel/drivers/video -Ikernel/drivers/input
 # --gc-sections drops any function/data section the entry point can't reach,
 # which (paired with -ffunction-sections / -fdata-sections above) means an app
 # only pays the on-disk cost of the libstink helpers it actually calls.
-APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections
+# -z noexecstack: state it outright. Objects without a .note.GNU-stack
+# section (everything our C toolchain emits) otherwise make ld warn about an
+# "implied executable stack" when linked with Rust objects that carry the
+# note. The kernel maps every user stack NX regardless.
+APP_LDFLAGS = -T apps/app.ld -N -s --no-warn-rwx-segments --gc-sections -z noexecstack
 
 # Userland support library objects: malloc/free allocator, snprintf family,
 # FILE*-based stdio, POSIX glue (errno, gettimeofday, open/stat...) and the
@@ -262,6 +268,17 @@ $(BUILD)/exitcode.elf: apps/crt0.s apps/exitcode.c lib/libstink.h apps/app.ld $(
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(CC) $(CFLAGS) -c apps/exitcode.c -o $(BUILD)/exitcode_app.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/exitcode.elf $(BUILD)/crt0.o $(BUILD)/exitcode_app.o $(LIBSTINK_OBJS)
+
+# Kernel regression apps driven by tools/qa/ktest.py (see docs/TESTING.md).
+$(BUILD)/ktest.elf: apps/crt0.s apps/ktest.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/ktest.c -o $(BUILD)/ktest_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktest.elf $(BUILD)/crt0.o $(BUILD)/ktest_app.o $(LIBSTINK_OBJS)
+
+$(BUILD)/ktchild.elf: apps/crt0.s apps/ktchild.c lib/libstink.h apps/app.ld $(LIBSTINK_OBJS) | $(BUILD)
+	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
+	$(CC) $(CFLAGS) -c apps/ktchild.c -o $(BUILD)/ktchild_app.o
+	$(LD) $(APP_LDFLAGS) -o $(BUILD)/ktchild.elf $(BUILD)/crt0.o $(BUILD)/ktchild_app.o $(LIBSTINK_OBJS)
 
 # Rust userland (v0.9+). Cargo is invoked through the user's standard
 # rustup install (~/.cargo/bin); add it to PATH if your shell hasn't.
@@ -646,7 +663,13 @@ $(BUILD)/freedm.elf: apps/crt0.s apps/app.ld $(DOOM_CORE_OBJS) $(BUILD)/doom/sti
 	$(AS) -O0 apps/crt0.s -o $(BUILD)/crt0.o
 	$(LD) $(APP_LDFLAGS) -o $(BUILD)/freedm.elf $(BUILD)/crt0.o $(DOOM_CORE_OBJS) $(BUILD)/doom/stink_freedm.o $(LIBSTINK_OBJS) $(LIBGCC)
 
-os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/breakout.elf $(BUILD)/exitcode.elf
+# What the kernel menu starts at boot (kernel/ui/menu.c autorun): the
+# graphical desktop. When it exits, the text menu takes over. Test
+# harnesses overwrite or remove this file in their private image copies.
+$(BUILD)/autorun.txt: | $(BUILD)
+	printf 'RS-DESKTOP\n' > $@
+
+os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/hello.elf $(BUILD)/box.elf $(BUILD)/fault.elf $(BUILD)/game.elf $(BUILD)/hi.elf $(BUILD)/anim.elf $(BUILD)/beep.elf $(BUILD)/save.elf $(BUILD)/files.elf $(BUILD)/ls.elf $(BUILD)/del.elf $(BUILD)/play.elf $(BUILD)/seek.elf $(BUILD)/fd.elf $(BUILD)/shell.elf $(BUILD)/arrows.elf $(BUILD)/snake.elf $(BUILD)/pong.elf $(BUILD)/asteroids.elf $(BUILD)/installer.elf $(BUILD)/edit.elf $(BUILD)/fbdemo.elf $(BUILD)/stinkpkg.elf $(BUILD)/doom1.elf $(BUILD)/doom2.elf $(BUILD)/freedm.elf $(BUILD)/wxattack.elf $(BUILD)/cowtest.elf $(BUILD)/mounttest.elf $(BUILD)/rs-hello.elf $(BUILD)/rs-alloc.elf $(BUILD)/rs-stdio.elf $(BUILD)/rs-json.elf $(BUILD)/rs-life.elf $(BUILD)/rs-desktop.elf $(BUILD)/rs-sysinfo.elf $(BUILD)/rs-files.elf $(BUILD)/rs-calc.elf $(BUILD)/rs-settings.elf $(BUILD)/rs-net.elf $(BUILD)/rs-taskman.elf $(BUILD)/rs-clock.elf $(BUILD)/rs-todo.elf $(BUILD)/rs-cal.elf $(BUILD)/rs-hex.elf $(BUILD)/rs-vec.elf $(BUILD)/rs-about.elf $(BUILD)/rs-paint.elf $(BUILD)/rs-edit.elf $(BUILD)/breakout.elf $(BUILD)/exitcode.elf $(BUILD)/ktest.elf $(BUILD)/ktchild.elf $(BUILD)/autorun.txt
 	# --- 1. Link the bootblock (flat binary, sector 0 + bootmain code) ---
 	$(LD) -T boot/bootblock.ld --oformat binary -o $(BUILD)/bootblock.bin $(BOOTBLOCK_OBJS)
 	@bb=$$(stat -c%s $(BUILD)/bootblock.bin); max=$$(($(BOOTBLOCK_SECTORS) * 512)); \
@@ -731,7 +754,10 @@ os: $(BOOTBLOCK_OBJS) $(KERNEL_OBJS) boot/bootblock.ld boot/kernel.ld $(BUILD)/h
 	  RS-ABOUT.ELF=$(BUILD)/rs-about.elf \
 	  RS-PAINT.ELF=$(BUILD)/rs-paint.elf \
 	  RS-EDIT.ELF=$(BUILD)/rs-edit.elf \
-	  EXITCODE.ELF=$(BUILD)/exitcode.elf"; \
+	  EXITCODE.ELF=$(BUILD)/exitcode.elf \
+	  KTEST.ELF=$(BUILD)/ktest.elf \
+	  KTCHILD.ELF=$(BUILD)/ktchild.elf \
+	  AUTORUN=$(BUILD)/autorun.txt"; \
 	  if [ -f "$(FREEDOOM1_WAD)" ]; then args="$$args FREEDOOM1.WAD=$(FREEDOOM1_WAD)"; fi; \
 	  if [ -f "$(FREEDOOM2_WAD)" ]; then args="$$args FREEDOOM2.WAD=$(FREEDOOM2_WAD)"; fi; \
 	  if [ -f "$(FREEDM_WAD)" ];    then args="$$args FREEDM.WAD=$(FREEDM_WAD)"; fi; \
@@ -870,6 +896,21 @@ smoke-exitcode: all
 # alloc::format! through the shared `libstink` Rust crate.
 smoke-rs-stdio: all
 	@python3 tools/smoke-rs-stdio.py
+
+# Kernel regression suite: apps/ktest.c run from ring 3 against the real
+# kernel, one QEMU VM per case (frame leaks, per-process heap, COW vs
+# kernel writes, pointer validation, scheduling, pipes, audio, network).
+# See docs/TESTING.md.
+ktest: all
+	@python3 tools/qa/ktest.py
+
+# Host-driven QEMU scenarios that need input or network traffic from
+# outside the guest.
+qa-net: all
+	@python3 tools/qa/net_rst.py
+
+qa-input: all
+	@python3 tools/qa/input_flush.py
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
@@ -1161,8 +1202,9 @@ $(TEST_BIN)/test_dhcp_dns2: $(TEST_DIR)/test_dhcp_dns2.c | $(TEST_BIN)
 $(TEST_BIN)/test_arp_ttl: $(TEST_DIR)/test_arp_ttl.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_arp_ttl.c
 
-$(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c | $(TEST_BIN)
-	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_pmm.c
+# Links the real allocator, not a copy: pmm.c is pure address arithmetic.
+$(TEST_BIN)/test_pmm: $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c kernel/arch/pmm.h kernel/arch/memlayout.h | $(TEST_BIN)
+	$(HOST_CC) $(HOST_CFLAGS) -Ikernel/arch -Ikernel/drivers/misc -o $@ $(TEST_DIR)/test_pmm.c kernel/arch/pmm.c
 
 $(TEST_BIN)/test_bootmain_walk: $(TEST_DIR)/test_bootmain_walk.c | $(TEST_BIN)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_bootmain_walk.c

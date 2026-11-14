@@ -346,7 +346,7 @@ static void tcp_retransmit(struct tcb *t)
 			if (gap > 0 && chunk > gap)
 				chunk = gap;
 		}
-		unsigned char linear[TCP_MSS];
+		static unsigned char linear[TCP_MSS];
 		for (unsigned int i = 0; i < chunk; i++)
 			linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
 		tcp_emit(t, TCP_ACK | TCP_PSH, linear, chunk);
@@ -448,7 +448,7 @@ static unsigned short tcp_checksum(ipv4_t src, ipv4_t dst,
 static void tcp_emit(struct tcb *t, unsigned char flags,
                      const void *data, unsigned int data_len)
 {
-	unsigned char  buf[1500];
+	static unsigned char buf[1500];          /* see net.c: one caller at a time */
 	struct tcp_hdr *h = (struct tcp_hdr *)buf;
 	if (sizeof(*h) + data_len > sizeof(buf))
 		return;
@@ -519,7 +519,7 @@ static void tcp_drain_tx(struct tcb *t)
 		if (chunk == 0)
 			return;
 
-		unsigned char linear[TCP_MSS];
+		static unsigned char linear[TCP_MSS];
 		for (unsigned int i = 0; i < chunk; i++)
 			linear[i] = t->tx_buf[(t->tx_head + i) % TCP_BUFFER_SIZE];
 
@@ -533,7 +533,10 @@ static void tcp_drain_tx(struct tcb *t)
 /* Bare RST to an unsolicited segment (RFC 793 reset generation). */
 static void tcp_emit_rst(ipv4_t src_ip, const struct tcp_hdr *in_hdr)
 {
-	struct tcb scratch;
+	/* A TCB is ~11 KiB (two 4 KiB stream buffers); it cannot live on an
+	 * 8 KiB kernel stack. tcp_emit only reads the handful of fields set
+	 * below. */
+	static struct tcb scratch;
 	scratch.local_ip    = net_get_local_ip();
 	scratch.remote_ip   = src_ip;
 	scratch.local_port  = ntohs(in_hdr->dst_port);
@@ -653,6 +656,13 @@ void tcp_close(tcp_handle_t h)
 	}
 }
 
+int tcp_owned_by(tcp_handle_t h, int pid)
+{
+	if (h < 0 || h >= TCP_MAX_CONNS || !conns[h].in_use)
+		return 0;
+	return conns[h].owner_pid == pid;
+}
+
 enum tcp_state tcp_get_state(tcp_handle_t h)
 {
 	if (h < 0 || h >= TCP_MAX_CONNS || !conns[h].in_use)
@@ -731,7 +741,7 @@ static void tcp_emit_sack_ack(struct tcb *t)
 		return;
 	}
 
-	unsigned char  buf[1500];
+	static unsigned char buf[1500];
 	struct tcp_hdr *h = (struct tcp_hdr *)buf;
 	h->src_port = htons(t->local_port);
 	h->dst_port = htons(t->remote_port);

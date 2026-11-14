@@ -157,6 +157,9 @@ static inline int sys_audio_play(const unsigned char *samples,
                                                  { return __syscall(28, (int)samples, (int)length, volume); }
 
 static inline void sys_audio_stop(int handle)    { __syscall(29, handle, 0, 0); }
+/* 1 while the sound behind `handle` is still playing, 0 once it has ended
+ * (or the handle is stale / not ours). */
+static inline int  sys_audio_playing(int handle) { return __syscall(95, handle, 0, 0); }
 
 static inline void sys_audio_set_volume(int handle, int volume)
                                                  { __syscall(30, handle, volume, 0); }
