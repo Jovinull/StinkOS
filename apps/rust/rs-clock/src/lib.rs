@@ -1,8 +1,9 @@
-//! rs-clock: 7-segment digital clock for StinkOS.
+//! rs-clock: seven-segment digital clock for StinkOS.
 //!
-//! Renders HH:MM:SS using simulated 7-segment display drawn with sys_fillrect.
-//! Updates once per second; only redraws digits that changed.
-//! Press Q or Esc to exit.
+//! Shows HH:MM:SS from the real-time clock, with the date under it. The
+//! program sleeps between seconds: it wakes just before the RTC is due to
+//! roll over, repaints when it has, and goes back to sleep.
+//! Esc, Q or the close box end it.
 
 #![no_std]
 #![no_main]
@@ -10,201 +11,214 @@
 use libstink::println;
 use libui::*;
 
-// ── Window layout ─────────────────────────────────────────────────────────────
+// ── Seven-segment geometry ──────────────────────────────────────────────────
 
-const SCREEN_W: i32 = 1024;
-const SCREEN_H: i32 = 768;
-const WIN_W:    i32 = 500;
-const WIN_H:    i32 = 220;
-const WIN_X:    i32 = (SCREEN_W - WIN_W) / 2;
-const WIN_Y:    i32 = (SCREEN_H - WIN_H) / 2;
+const DIGIT_W:   i32 = 50;
+const DIGIT_H:   i32 = 90;
+const SEG_T:     i32 = 6;    // segment thickness
+const DIGIT_GAP: i32 = 8;    // between neighbouring digits and colons
+const COLON_W:   i32 = 16;
 
-// ── 7-segment geometry ────────────────────────────────────────────────────────
+// D D : D D : D D, with DIGIT_GAP between every two neighbours.
+const CLOCK_W: i32 = 6 * DIGIT_W + 2 * COLON_W + 7 * DIGIT_GAP;
 
-const DW:  i32 = 50;  // digit width
-const DH:  i32 = 90;  // digit height
-const ST:  i32 = 6;   // segment thickness
-const GAP: i32 = 8;   // gap between elements
-const CW:  i32 = 16;  // colon width
+// ── Window layout ───────────────────────────────────────────────────────────
 
-// Total clock strip width: 6 digits + 5 inter-digit gaps + 2 colons + 4 gaps around colons
-// HH : MM : SS  →  D D . D D . D D
-// Spaces: D(gap)D(gap)C(gap)D(gap)D(gap)C(gap)D(gap)D
-const CLOCK_W: i32 = 6 * DW + 7 * GAP + 2 * CW; // 300+56+32 = 388
-const CLOCK_X: i32 = (WIN_W - CLOCK_W) / 2;
-const CLOCK_Y: i32 = 34 + (WIN_H - 34 - DH) / 2;
+/// The raised panel the digits sit in.
+const PANEL: Rect = Rect::new(PAD, PAD, CLOCK_W + 2 * PAD, DIGIT_H + 2 * PAD);
+const CLOCK_X: i32 = PANEL.x + PAD;
+const CLOCK_Y: i32 = PANEL.y + PAD;
+const DATE_Y:  i32 = PANEL.y + PANEL.h + GAP;
 
-// ── 7-segment patterns ────────────────────────────────────────────────────────
-// bit0=Top bit1=TL bit2=TR bit3=Mid bit4=BL bit5=BR bit6=Bot
+const WIN_W: i32 = PANEL.w + 2 * PAD;
+const WIN_H: i32 = DATE_Y + FONT_H + GAP + STATUS_H;
+
+// ── Segments ────────────────────────────────────────────────────────────────
+// bit0 top, bit1 top-left, bit2 top-right, bit3 middle,
+// bit4 bottom-left, bit5 bottom-right, bit6 bottom
 
 const SEGS: [u8; 10] = [
-    0x77, // 0: top, TL, TR, BL, BR, bot
-    0x24, // 1: TR, BR
-    0x5D, // 2: top, TR, mid, BL, bot
-    0x6D, // 3: top, TR, mid, BR, bot
-    0x2E, // 4: TL, TR, mid, BR
-    0x6B, // 5: top, TL, mid, BR, bot
-    0x7B, // 6: top, TL, mid, BL, BR, bot
-    0x25, // 7: top, TR, BR
+    0x77, // 0: all but the middle
+    0x24, // 1: top-right, bottom-right
+    0x5D, // 2: top, top-right, middle, bottom-left, bottom
+    0x6D, // 3: top, top-right, middle, bottom-right, bottom
+    0x2E, // 4: top-left, top-right, middle, bottom-right
+    0x6B, // 5: top, top-left, middle, bottom-right, bottom
+    0x7B, // 6: all but top-right
+    0x25, // 7: top, top-right, bottom-right
     0x7F, // 8: all
-    0x6F, // 9: top, TL, TR, mid, BR, bot
+    0x6F, // 9: all but bottom-left
 ];
-
-fn draw_digit(x: i32, y: i32, d: u8, color_on: u32, color_off: u32) {
-    let s = SEGS[d as usize];
-    let vert_h = DH / 2 - ST;
-
-    let seg = |on: bool, fx: i32, fy: i32, fw: i32, fh: i32| {
-        fill(fx, fy, fw, fh, if on { color_on } else { color_off });
-    };
-
-    // Top
-    seg(s & 0x01 != 0, x + ST,        y,              DW - 2*ST, ST);
-    // TL
-    seg(s & 0x02 != 0, x,              y + ST,         ST, vert_h);
-    // TR
-    seg(s & 0x04 != 0, x + DW - ST,   y + ST,         ST, vert_h);
-    // Mid
-    seg(s & 0x08 != 0, x + ST,        y + DH/2 - ST/2, DW - 2*ST, ST);
-    // BL
-    seg(s & 0x10 != 0, x,              y + DH/2 + ST/2, ST, vert_h);
-    // BR
-    seg(s & 0x20 != 0, x + DW - ST,   y + DH/2 + ST/2, ST, vert_h);
-    // Bot
-    seg(s & 0x40 != 0, x + ST,        y + DH - ST,    DW - 2*ST, ST);
-}
-
-fn draw_colon(x: i32, y: i32, color: u32) {
-    let dot_sz = 6;
-    let cx = x + CW / 2 - dot_sz / 2;
-    fill(cx, y + DH / 3 - dot_sz / 2,     dot_sz, dot_sz, color);
-    fill(cx, y + 2 * DH / 3 - dot_sz / 2, dot_sz, dot_sz, color);
-}
-
-// ── Digit position helpers ────────────────────────────────────────────────────
-
-fn digit_x(slot: usize) -> i32 {
-    // Slots: 0=H1 1=H2  (colon)  2=M1 3=M2  (colon)  4=S1 5=S2
-    let pair   = slot / 2; // 0, 1, 2
-    let within = slot % 2; // 0 or 1
-    CLOCK_X + pair as i32 * (2 * DW + 2 * GAP + CW + GAP)
-             + within as i32 * (DW + GAP)
-}
-
-fn colon_x(idx: usize) -> i32 {
-    // Colon 0 between H and M, colon 1 between M and S
-    digit_x(idx * 2 + 1) + DW + GAP
-}
-
-// ── Rendering ─────────────────────────────────────────────────────────────────
+/// Shown in every position when the clock cannot be read.
+const SEG_DASH: u8 = 0x08;
 
 const SEG_ON:  u32 = ACCENT;
-const SEG_OFF: u32 = 0x1a2030; // dark segment background
+const SEG_OFF: u32 = SURFACE_ALT;    // unlit segments stay faintly visible
 
-fn draw_clock(h: u32, m: u32, s: u32) {
-    let digits = [
-        (h / 10) as u8, (h % 10) as u8,
-        (m / 10) as u8, (m % 10) as u8,
-        (s / 10) as u8, (s % 10) as u8,
-    ];
-    for (i, &d) in digits.iter().enumerate() {
-        draw_digit(digit_x(i), CLOCK_Y, d, SEG_ON, SEG_OFF);
+/// Paint all seven segments of one digit, lit or unlit, so a new digit
+/// fully replaces the old one.
+fn draw_segments(win: &Window, x: i32, y: i32, segs: u8) {
+    let bar_w  = DIGIT_W - 2 * SEG_T;          // horizontal segments
+    let post_h = DIGIT_H / 2 - SEG_T;          // vertical segments
+    let mid_y  = y + DIGIT_H / 2 - SEG_T / 2;
+    let low_y  = y + DIGIT_H / 2 + SEG_T / 2;
+    let right  = x + DIGIT_W - SEG_T;
+
+    let seg = |bit: u8, sx: i32, sy: i32, sw: i32, sh: i32| {
+        win.fill(sx, sy, sw, sh, if segs & bit != 0 { SEG_ON } else { SEG_OFF });
+    };
+    seg(0x01, x + SEG_T, y,                     bar_w, SEG_T);
+    seg(0x02, x,         y + SEG_T,             SEG_T, post_h);
+    seg(0x04, right,     y + SEG_T,             SEG_T, post_h);
+    seg(0x08, x + SEG_T, mid_y,                 bar_w, SEG_T);
+    seg(0x10, x,         low_y,                 SEG_T, post_h);
+    seg(0x20, right,     low_y,                 SEG_T, post_h);
+    seg(0x40, x + SEG_T, y + DIGIT_H - SEG_T,   bar_w, SEG_T);
+}
+
+/// Left edge of digit `slot`: 0-1 hours, 2-3 minutes, 4-5 seconds.
+fn digit_x(slot: usize) -> i32 {
+    let pair   = (slot / 2) as i32;
+    let within = (slot % 2) as i32;
+    // One pair plus the colon after it: D gap D gap colon gap.
+    let pair_stride = 2 * DIGIT_W + COLON_W + 3 * DIGIT_GAP;
+    CLOCK_X + pair * pair_stride + within * (DIGIT_W + DIGIT_GAP)
+}
+
+/// Left edge of colon 0 (after the hours) or 1 (after the minutes).
+fn colon_x(idx: usize) -> i32 {
+    digit_x(idx * 2 + 1) + DIGIT_W + DIGIT_GAP
+}
+
+fn draw_colon(win: &Window, x: i32) {
+    let dot = SEG_T;
+    let cx = x + (COLON_W - dot) / 2;
+    win.fill(cx, CLOCK_Y + DIGIT_H / 3 - dot / 2,     dot, dot, SEG_ON);
+    win.fill(cx, CLOCK_Y + 2 * DIGIT_H / 3 - dot / 2, dot, dot, SEG_ON);
+}
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+
+/// Everything that does not change with the time.
+fn draw_frame(win: &Window) {
+    win.clear(BG);
+    win.fill_rect(PANEL, SURFACE);
+    win.rect(PANEL, BORDER);
+    draw_colon(win, colon_x(0));
+    draw_colon(win, colon_x(1));
+    status_bar(win, b"Esc: close\0");
+}
+
+/// The line under the panel, centred.
+fn draw_caption(win: &Window, text: &[u8], rgb: u32) {
+    let row = Rect::new(PAD, DATE_Y, win.w() - 2 * PAD, FONT_H);
+    win.fill_rect(row, BG);
+    win.text_center(row, text, rgb);
+}
+
+/// A date and time of day: year, month, day, hour, minute, second.
+type Stamp = [u32; 6];
+
+fn draw_time(win: &Window, t: &Stamp) {
+    let [year, month, day, hour, minute, second] = *t;
+    let digits = [hour / 10, hour % 10, minute / 10, minute % 10, second / 10, second % 10];
+    for (slot, &d) in digits.iter().enumerate() {
+        draw_segments(win, digit_x(slot), CLOCK_Y, SEGS[d as usize % 10]);
     }
-    draw_colon(colon_x(0), CLOCK_Y, ACCENT);
-    draw_colon(colon_x(1), CLOCK_Y, ACCENT);
+
+    // "YYYY-MM-DD"
+    let two = |n: u32| [b'0' + (n / 10 % 10) as u8, b'0' + (n % 10) as u8];
+    let (yh, yl, m, d) = (two(year / 100), two(year), two(month), two(day));
+    let date = [yh[0], yh[1], yl[0], yl[1], b'-', m[0], m[1], b'-', d[0], d[1]];
+    draw_caption(win, &date, FG_DIM);
 }
 
-fn draw_date(year: u32, month: u32, day: u32) {
-    // "YYYY-MM-DD" centered under the clock
-    let mut buf = [0u8; 12];
-    let y4 = [
-        b'0' + (year / 1000 % 10) as u8,
-        b'0' + (year / 100  % 10) as u8,
-        b'0' + (year / 10   % 10) as u8,
-        b'0' + (year        % 10) as u8,
-    ];
-    buf[0] = y4[0]; buf[1] = y4[1]; buf[2] = y4[2]; buf[3] = y4[3];
-    buf[4] = b'-';
-    buf[5] = b'0' + (month / 10 % 10) as u8;
-    buf[6] = b'0' + (month % 10) as u8;
-    buf[7] = b'-';
-    buf[8] = b'0' + (day / 10 % 10) as u8;
-    buf[9] = b'0' + (day % 10) as u8;
-    buf[10] = 0;
-    let dw = 10 * 8;
-    let dx = (WIN_W - dw) / 2;
-    let dy = CLOCK_Y + DH + 10;
-    fill(16, dy - 2, WIN_W - 32, 10 + 2, SURFACE);
-    text16(dx, dy, &buf, FG_DIM);
+fn draw_unavailable(win: &Window) {
+    for slot in 0..6 {
+        draw_segments(win, digit_x(slot), CLOCK_Y, SEG_DASH);
+    }
+    draw_caption(win, b"clock unavailable", RED);
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────────────────────────
+// ── Time ────────────────────────────────────────────────────────────────────
+
+/// The PIT ticks at 100 Hz.
+const TICKS_PER_SEC: u32 = 100;
+
+/// The RTC, with the time of day forced into range so it can always be
+/// drawn. None when the kernel could not read it.
+fn read_stamp() -> Option<Stamp> {
+    let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
+    if !read_clock(&mut rtc) {
+        return None;
+    }
+    Some([rtc.year, rtc.month, rtc.day, rtc.hour % 24, rtc.minute % 60, rtc.second % 60])
+}
+
+/// `a` is at or after `b` on the wrapping tick counter.
+fn tick_reached(a: u32, b: u32) -> bool {
+    a.wrapping_sub(b) < 0x8000_0000
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("rs-clock: start");
-    let mut cw = WIN_W;
-    let mut ch = WIN_H;
-    let mut maximized = false;
-    let mut prev_k = 0i32;
-    win_init_at(b"Clock\0", WIN_W, WIN_H, WIN_X, WIN_Y);
+    let Some(mut win) = Window::open(b"Clock\0", WIN_W, WIN_H, 0) else {
+        println!("rs-clock: could not open a window");
+        quit(1);
+    };
 
-    fill(0, 0, cw, ch, BG);
-    window_frame(0, 0, cw, ch, b"Digital Clock\0");
-    fill(8, 34, cw - 16, ch - 42, SURFACE);
+    draw_frame(&win);
 
-    let mut prev_h = 99u32;
-    let mut prev_m = 99u32;
-    let mut prev_s = 99u32;
+    let mut shown: Option<Stamp> = None;     // what the window displays
+    let mut next_look = ticks();             // tick at which to read the RTC again
+    let mut last_change = next_look;         // tick at which the display last changed
 
     loop {
-        let k = poll_key();
-        if k != 0 && k != prev_k {
-            match k {
-                k if k == b'q' as i32 || k == b'Q' as i32 || k == 27 => break,
-                KEY_F11 => {
-                    maximized = !maximized;
-                    let (nw, nh) = if maximized { (SCREEN_W_FULL, SCREEN_H_FULL) } else { (WIN_W, WIN_H) };
-                    if win_resize(nw, nh) {
-                        cw = nw; ch = nh;
-                        fill(0, 0, cw, ch, BG);
-                        window_frame(0, 0, cw, ch, b"Digital Clock\0");
-                        fill(8, 34, cw - 16, ch - 42, SURFACE);
-                        prev_h = 99; prev_m = 99; prev_s = 99;
-                    }
+        let now = ticks();
+        if tick_reached(now, next_look) {
+            match read_stamp() {
+                Some(t) if shown != Some(t) => {
+                    draw_time(&win, &t);
+                    win.flush();
+                    // The very first reading falls anywhere inside its
+                    // second, so keep looking every tick until the first
+                    // rollover is seen. From then on the next rollover is
+                    // one second away: sleep until one tick before it.
+                    let ahead = if shown.is_none() { 1 } else { TICKS_PER_SEC - 1 };
+                    next_look = now.wrapping_add(ahead);
+                    last_change = now;
+                    shown = Some(t);
                 }
-                _ => {}
-            }
-        }
-        prev_k = k;
-
-        let mut rtc = RtcTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
-        if read_clock(&mut rtc) == 0 {
-            let h = rtc.hour % 24;
-            let m = rtc.minute % 60;
-            let s = rtc.second % 60;
-
-            if h != prev_h || m != prev_m || s != prev_s {
-                draw_clock(h, m, s);
-                draw_date(rtc.year, rtc.month, rtc.day);
-                prev_h = h; prev_m = m; prev_s = s;
-            }
-        }
-
-        if let Some(ev) = win_poll_event() {
-            if ev.kind == WIN_EV_RESIZE && win_resize(ev.x, ev.y) {
-                cw = ev.x; ch = ev.y;
-                fill(0, 0, cw, ch, BG);
-                window_frame(0, 0, cw, ch, b"Digital Clock\0");
-                fill(8, 34, cw - 16, ch - 42, SURFACE);
-                prev_h = 99; prev_m = 99; prev_s = 99;
+                Some(_) => {
+                    // A little early: look again on the next tick. If the
+                    // RTC has not moved for much longer than a second it is
+                    // not running; then one look per second is enough.
+                    let stalled = now.wrapping_sub(last_change) > TICKS_PER_SEC + TICKS_PER_SEC / 2;
+                    next_look = now.wrapping_add(if stalled { TICKS_PER_SEC } else { 1 });
+                }
+                None => {
+                    draw_unavailable(&win);
+                    win.flush();
+                    shown = None;
+                    next_look = now.wrapping_add(TICKS_PER_SEC);
+                }
             }
         }
 
-        win_flush();
-        sleep_ms(200);
+        // Sleep until the next look is due. Input wakes the program early;
+        // it then comes back here with the time that is left.
+        let left = next_look.wrapping_sub(ticks());
+        let wait_ticks = if left == 0 || left >= 0x8000_0000 { 1 } else { left };
+        match win.wait(wait_ticks * (1000 / TICKS_PER_SEC)) {
+            Some(Event::Close) | Some(Event::Key(KEY_ESC)) |
+            Some(Event::Key(b'q')) | Some(Event::Key(b'Q')) => break,
+            _ => {}
+        }
     }
 
-    win_done();
+    win.close();
     println!("rs-clock: exit");
 }

@@ -94,8 +94,6 @@ void kmain(void)
 	audio_init();                              /* probes SB16; no-op if -device sb16 absent */
 	audio_start_output();                      /* arm the DMA loop; silent until mixer fills */
 	bootdiag_add("audio: sb16", audio_present() ? BOOT_OK : BOOT_ABSENT);
-	win_init();
-	bootdiag_add("compositor", BOOT_OK);
 	pci_scan();                                /* log every PCI device for visibility */
 	bootdiag_add("bus: pci", BOOT_OK);
 	ata_dma_init();                            /* enable PIIX Bus Master DMA if present */
@@ -108,6 +106,8 @@ void kmain(void)
 	e1000_init();                              /* probes Intel 82540EM; no-op if absent */
 	bootdiag_add("net: e1000", e1000_present() ? BOOT_OK : BOOT_ABSENT);
 	net_init();                                /* caches local MAC for L2 emit */
+	win_init();                                /* back buffer + kwm thread (needs fb + procs) */
+	bootdiag_add("compositor", fb_usable() ? BOOT_OK : BOOT_ABSENT);
 	net_start();                               /* knet thread: all RX + protocol timers */
 	dhcp_start();                              /* DISCOVER goes out; reply lands via UDP cb */
 	bootdiag_add("net: dhcp", e1000_present() ? BOOT_OK : BOOT_ABSENT);

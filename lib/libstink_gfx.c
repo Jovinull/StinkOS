@@ -112,41 +112,21 @@ void draw_shadow(int x, int y, int w, int h, int depth, unsigned int shadow_rgb)
     sys_fillrect(x + depth, y + depth, w, h, shadow_rgb);
 }
 
-/* Window decoration: titlebar, close button, outer border.
- * Returns the Y coordinate of the inner content area (titlebar bottom + 1).
- */
-#define WIN_TITLEBAR_H  33
-#define WIN_CLOSE_W     24
-#define WIN_CLOSE_H     20
-
+/* Header strip for full-screen programs: see libstink.h. No close box --
+ * a full-screen program has no window manager behind it, and a button
+ * that does nothing is worse than no button. */
 int draw_window_frame(int x, int y, int w, int h, const char *title)
 {
-    /* Shadow behind the window */
-    draw_shadow(x, y, w, h, 4, 0x050810);
+    sys_fillrect(x, y, w, h, 0x0d1117);                 /* background */
+    sys_fillrect(x, y, w, WIN_TITLEBAR_H, 0x161b22);    /* header strip */
+    sys_fillrect(x + 12, y + 14, 4, 6, 0x57f287);       /* accent mark */
+    sys_drawtext(x + 24, y + (WIN_TITLEBAR_H - 8) / 2, title, 0xe6edf3);
+    sys_fillrect(x, y + WIN_TITLEBAR_H - 1, w, 1, 0x30363d);
 
-    /* Window background */
-    sys_fillrect(x, y, w, h, 0x0d1117);
+    sys_fillrect(x,         y,         w, 1, 0x30363d); /* outer border */
+    sys_fillrect(x,         y + h - 1, w, 1, 0x30363d);
+    sys_fillrect(x,         y,         1, h, 0x30363d);
+    sys_fillrect(x + w - 1, y,         1, h, 0x30363d);
 
-    /* Titlebar strip */
-    sys_fillrect(x, y, w, WIN_TITLEBAR_H, 0x161b22);
-
-    /* Title text: vertically centred in titlebar */
-    sys_drawtext(x + 12, y + (WIN_TITLEBAR_H - 8) / 2, title, 0xe6edf3);
-
-    /* Close button: rounded red rect with X at the right */
-    int bx = x + w - WIN_CLOSE_W - 8;
-    int by = y + (WIN_TITLEBAR_H - WIN_CLOSE_H) / 2;
-    draw_rounded_rect(bx, by, WIN_CLOSE_W, WIN_CLOSE_H, 4, 0xf47067);
-    sys_drawtext(bx + (WIN_CLOSE_W - 8) / 2, by + (WIN_CLOSE_H - 8) / 2, "X", 0xffffff);
-
-    /* Separator line below titlebar */
-    sys_fillrect(x, y + WIN_TITLEBAR_H, w, 1, 0x30363d);
-
-    /* Outer border */
-    sys_fillrect(x,             y,             w, 1, 0x30363d);
-    sys_fillrect(x,             y + h - 1,     w, 1, 0x30363d);
-    sys_fillrect(x,             y,             1, h, 0x30363d);
-    sys_fillrect(x + w - 1,     y,             1, h, 0x30363d);
-
-    return y + WIN_TITLEBAR_H + 1;
+    return y + WIN_TITLEBAR_H;
 }
