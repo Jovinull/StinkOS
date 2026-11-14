@@ -30,8 +30,8 @@ sudo apt-get install -y \
 
 # Fedora
 sudo dnf install -y \
-    gcc gcc-c++ make bison flex texinfo wget \
-    gmp-devel mpc-devel mpfr-devel isl-devel \
+    gcc gcc-c++ make m4 bison flex texinfo wget \
+    gmp-devel libmpc-devel mpfr-devel isl-devel \
     qemu-system-x86 python3 cppcheck
 
 # Arch
@@ -43,6 +43,12 @@ sudo pacman -S --needed \
 
 `cppcheck` is optional -- it powers `make audit` but the OS builds
 without it.
+
+No root on this machine? The toolchain script in step 3 only strictly needs
+a host `gcc`/`g++`, `make`, `m4`, `tar`, `xz` and `wget` or `curl`. When the
+GMP / MPFR / MPC development packages are missing it downloads them and
+builds them inside the gcc tree; `bison`, `flex` and `texinfo` are not
+needed for the release tarballs it uses.
 
 ## 2. Clone the repo
 
@@ -61,15 +67,15 @@ A helper script downloads, configures, and installs binutils + gcc under
 bash tools/build-cross-toolchain.sh
 ```
 
-This takes 30-60 minutes on a modern laptop. The script is idempotent --
-if you re-run it after a successful build, it exits early.
+This takes 15-60 minutes depending on core count. Re-running the script
+reuses the downloaded sources but rebuilds and reinstalls both packages.
 
 Once it finishes, add the toolchain to your shell path for the rest of
 this session:
 
 ```sh
 export PATH="$HOME/opt/cross/bin:$PATH"
-i386-elf-gcc --version | head -1   # should print: i386-elf-gcc (GCC) 13.x
+i386-elf-gcc --version | head -1   # should print: i386-elf-gcc (GCC) 14.2.0
 ```
 
 You probably want a permanent entry in your `~/.bashrc` / `~/.zshrc`.
@@ -171,7 +177,7 @@ content `repo_url=http://10.0.2.2:8080` (QEMU's host-loopback address).
 | Symptom                                            | Likely cause                                            |
 |----------------------------------------------------|---------------------------------------------------------|
 | `i386-elf-gcc: command not found`                  | Toolchain not on PATH; redo step 3                      |
-| `make` aborts on the cross-toolchain build         | Missing host dep (bison / flex / GMP); redo step 1      |
+| Cross-toolchain script aborts                      | Missing host dep (`gcc`/`g++`/`make`/`m4`); redo step 1 |
 | QEMU window stays black                            | `vbe: unavailable` on serial; rebuild with `-curses`    |
 | `make test-headless` hangs                         | QEMU binary missing OR firewall blocked the serial pipe |
 | Doom entry greyed out                              | Run `tools/fetch-wads.sh`                               |
