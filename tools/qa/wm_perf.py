@@ -50,9 +50,9 @@ def show(label, rows):
 
 
 def main(argv):
-    kvm = "--kvm" in argv
-    with Vm(net=True, audio=True, cpu="host" if kvm else "Penryn",
-            extra=["-enable-kvm"] if kvm else None) as vm:
+    if "--kvm" in argv:
+        os.environ["STINKQA_KVM"] = "1"
+    with Vm(net=True, audio=True) as vm:
         d = Desktop(vm)
         vm.mouse_to(100, 560)                    # below the tiles: nothing to hover
         time.sleep(2.5)
