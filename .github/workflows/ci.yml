@@ -109,6 +109,11 @@ jobs:
         env:
           STINKQA_TIMEOUT_SCALE: "4"
 
+      - name: QA -- install to a second disk and boot it
+        run: make qa-install
+        env:
+          STINKQA_TIMEOUT_SCALE: "4"
+
       # Dedicated smokes split out of test-headless: each spins its
       # own QEMU instance + asserts a single feature end-to-end.
       # Cheaper per-assertion than the menu sweep, less prone to
