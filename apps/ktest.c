@@ -1152,6 +1152,32 @@ static int t_win_unmap(void)
 	}
 	code = sys_waitpid(pid);
 	if (code != 139) FAIL("old buffer still mapped after shrinking (exit %d)", code);
+
+	/* A window belongs to one process. A child forked while it is open
+	 * gets neither the window nor a view of its pixels. */
+	pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) {
+		if (win_open(200, 100) != 0) child_exit(2);
+		WINPX[0] = 0x123456;
+		int kid = sys_fork();
+		if (kid < 0) child_exit(4);
+		if (kid == 0) {
+			struct stink_win_event ev;
+			if (sys_win_get_event(&ev) != -1) child_exit(5);   /* no window here */
+			WINPX[0] = 1;                   /* must fault */
+			child_exit(6);
+		}
+		int kc = sys_waitpid(kid);
+		if (kc != 139) child_exit(kc == 5 ? 5 : 7);
+		if (WINPX[0] != 0x123456) child_exit(8);              /* ours, untouched */
+		child_exit(1);
+	}
+	code = sys_waitpid(pid);
+	if (code == 5) FAIL("a forked child could use its parent's window");
+	if (code == 7) FAIL("a forked child could write its parent's window buffer");
+	if (code == 8) FAIL("the parent's window buffer changed across a fork");
+	if (code != 1) FAIL("fork with a window open: exit %d", code);
 	return 0;
 }
 

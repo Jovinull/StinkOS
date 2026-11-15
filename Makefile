@@ -958,13 +958,14 @@ qa: ktest ktest-lowmem qa-net qa-input qa-kbd qa-wm qa-apps qa-doom qa-install
 # the target stays useful in any environment, including CI. Vendored sources
 # under apps/doom/ are excluded (they're third-party and famously not
 # strict-alias clean; warnings there would drown out real findings).
-AUDIT_SRCS = kernel boot lib $(filter-out apps/doom apps/doom-shims, $(wildcard apps))
+AUDIT_SRCS = kernel boot lib apps
 audit:
 	@echo "=== StinkOS static-analysis sweep ==="
 	@if command -v cppcheck >/dev/null 2>&1; then \
 	    echo "--- cppcheck ---"; \
 	    cppcheck --quiet --enable=warning,style,performance,portability \
 	             --inline-suppr --suppress=unusedFunction \
+	             -i apps/doom -i apps/doom-shims \
 	             -I kernel -I kernel/arch -I kernel/drivers/video \
 	             -I kernel/drivers/input -I kernel/drivers/storage \
 	             -I kernel/drivers/audio -I kernel/drivers/net \
