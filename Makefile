@@ -171,8 +171,13 @@ all: os
 $(BUILD):
 	mkdir -p $(BUILD)
 
+# -MMD -MP: record which headers each kernel object was built from, so a
+# changed struct rebuilds every file that uses it. Without this an edit to
+# a header left objects with the old layout linked into the kernel.
 $(BUILD)/%.o: %.c | $(BUILD)
-	$(CC) $(CFLAGS) $(KINCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) $(KINCLUDES) -MMD -MP -c $< -o $@
+
+-include $(wildcard $(BUILD)/*.d)
 
 $(BUILD)/%.o: %.s | $(BUILD)
 	$(AS) -O0 $< -o $@
