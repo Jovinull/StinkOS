@@ -79,8 +79,7 @@ void net_start(void)
 	if (!e1000_present() || net_thread)
 		return;
 	net_thread = proc_kthread_create("knet", net_thread_main);
-	if (net_thread)
-		net_thread->priority = 8;          /* ahead of ordinary processes (16) */
+	/* (kernel threads run ahead of ordinary processes: PROC_PRIO_KTHREAD) */
 }
 
 void net_irq_wake(void)
