@@ -9,7 +9,7 @@ only the last four run the system's own code.
 | Host tests on real sources | `make unittest` (`test_pmm`) | The kernel's own `.c` file linked into a host binary | That file's behaviour |
 | Kernel cases in QEMU | `make ktest` | `apps/ktest.c` in ring 3 against the booted kernel, one VM per case | Kernel invariants end to end |
 | Scenarios in QEMU | `make test-headless`, `make smoke-*`, `make qa-net`, `make qa-input`, `make qa-kbd` | Scripts driving a booted system through keyboard, mouse, serial and network | Whole-system behaviour |
-| The desktop in QEMU | `make qa-wm`, `make qa-apps`, `make qa-doom` | The graphical session driven with pointer and keys, checked on screenshots, the serial log and the disk image | What a person at the machine would see |
+| The desktop in QEMU | `make qa-wm`, `make qa-apps`, `make qa-doom`, `make qa-install` | The graphical session driven with pointer and keys, checked on screenshots, the serial log and the disk image | What a person at the machine would see |
 
 `make qa` runs every suite that boots the system.
 
@@ -56,7 +56,9 @@ Two userland libraries are tested the same way, from their real sources:
 invariant: no frame leaks across fork / exec / kill, a program break per
 process, COW that holds when the kernel writes, pointer validation that
 matches what is mapped, a scheduler that neither starves nor wastes CPU,
-owned pipes and sockets, audio that survives its buffer going away.
+owned pipes and sockets, audio that survives its buffer going away, file
+data through every multi-sector path, windows that are released whatever
+way their owner ends.
 
 `tools/qa/ktest.py` runs each case in its own VM:
 
@@ -104,8 +106,8 @@ not run two of them at once.
 
 ## The desktop in QEMU
 
-These three suites need Python's Pillow for screenshots, and boot the
-stock image, which starts the desktop.
+These suites need Python's Pillow for screenshots, and boot the stock
+image, which starts the desktop.
 
 They do not guess where things are. The window manager logs every state
 change on the serial line (`win: show pid=5 x=.. y=.. w=.. h=..`,
@@ -118,17 +120,36 @@ test can assert that the calculator's display shows `56`.
 
 | Suite | What it does |
 |---|---|
-| `tools/qa/wm_test.py` | One session: start programs from the desktop, focus, raise, drag (including off every screen edge), resize, close by the close box and by the taskbar, kill a window's owner, eight windows at once, full-screen takeover and return, leave to the text menu and come back. After each step it checks the screen for leftovers: a moved or closed window must leave exactly the pixels that were under it |
-| `tools/qa/apps_test.py` | Every windowed program in its own VM: opens it, uses it for what it is for (a sum in the calculator, typing and saving in the editor, a stroke in the paint program, killing a process from the task manager, ...), checks the result on screen, then checks what reached the disk by reading the image from the host, and for programs that save, boots a second time to see the data come back |
-| `tools/qa/doom_test.py` | Doom from the desktop tile: title screen, new game through the menus, walking, turning and firing with the HUD ammo count checked, a save and a load, sound effects reaching the mixer, quit back to the desktop with the screen restored, and a second run in the same boot |
+| `tools/qa/wm_test.py` | One session. Two windows: focus and chrome colours, stacking, raise by click and by taskbar button, a drag with nothing left behind, Esc reaching only the focused window, the close box. A full-screen program taking the screen and giving it back. Six open/close cycles. A window dragged against each of the four screen edges and back. Seven windows at once, an eighth program refused, each one closed. Ctrl+Q with windows open, the text menu, the desktop started again. After each stage the screen is compared with the first screenshot of the empty desktop, pixel for pixel |
+| `tools/qa/wm_perf.py` | Reads the compositor's `win: perf` lines: no frames on a still screen, nothing recomposed for pointer motion, only the window's neighbourhood for a drag, one window's worth of pixels per frame for an animation. Prints frame times for information |
+| `tools/qa/apps_test.py` | One session on a writable copy of the image, every windowed program in turn, used for what it is for: sums in the calculator by keyboard and by mouse, items in the to-do list, typing, saving and resizing in the editor, opening a file from the file browser, a stroke and a save in the paint program, the hex viewer, clock, calendar, system information, the DHCP lease, the keyboard layout switch, the vector animation, killing a program from the task manager. Results are read off the screen. Then the VM is shut down and the image is read from the host (the editor saved exactly the bytes typed, and so on), and a second boot checks that the to-do list and the drawing come back |
+| `tools/qa/doom_test.py` | Doom from the desktop tile: title screen, the compositor out of the way, a new game, turning with key-down and key-up, walking, firing with the ammunition counter going down, a save with a typed name, quit to an intact desktop, a second run that loads the save. The save file is then checked on the image from the host. Sound is not checked here (`ktest audio-*` covers the mixer) |
+| `tools/qa/install_test.py` | Leaves the desktop for the text menu, runs the installer onto a blank second disk, checks the partition table and the files on that disk from the host, then boots it alone to the desktop |
 
-A failure saves the last screenshot and the serial log under the
-directory the script prints.
+On a failure the script prints which check failed and the end of the
+serial log; `--shots DIR` (`wm_test`, `apps_test`) keeps a screenshot of
+every stage.
 
-To add a case for a new program, add a function to `apps_test.py`: it
-gets a booted desktop, calls `launch("rs-name")` (which returns the
-window's geometry as the kernel reported it), sends input in client
-coordinates and asserts on `read_text` / the disk.
+Pixel comparisons are a net, not a judge: when a suite changes or a
+check is added, look at the `--shots` output once.
+
+To add a check for a program, add a block to `session_one` in
+`apps_test.py`: `d.launch("rs-name")` returns the window's pid,
+`d.geom(pid)` its client rectangle as the kernel reported it, `d.text(pid)`
+the text it shows, `d.click_text(pid, "Save")` clicks a label.
+
+### A second CPU: KVM
+
+`STINKQA_KVM=1` makes every script built on `stinkqa` run the guest on
+the host's CPU (`-enable-kvm -cpu host`) instead of QEMU's emulated one.
+Instruction timing is real, and port I/O becomes expensive instead of
+nearly free, which is closer to hardware in the ways that matter for
+races and for drivers that poll. CI does not have KVM; run it locally
+before a release:
+
+```sh
+STINKQA_KVM=1 make qa
+```
 
 ## Adding a host model
 
