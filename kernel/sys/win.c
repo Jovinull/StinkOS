@@ -359,14 +359,26 @@ static void focus_top(void)
 
 /* ---- back buffer drawing ------------------------------------------------- */
 
+/* Whole rows of pixels move with the string instructions: they are what
+ * the compositor spends its time on (the direction flag is clear in the
+ * kernel, see the trap entry). */
+static inline void px_copy(unsigned int *dst, const unsigned int *src, unsigned int n)
+{
+	__asm__ volatile ("rep movsl" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
+}
+
+static inline void px_set(unsigned int *dst, unsigned int rgb, unsigned int n)
+{
+	__asm__ volatile ("rep stosl" : "+D"(dst), "+c"(n) : "a"(rgb) : "memory");
+}
+
 static void bb_fill(struct rect r, struct rect clip, unsigned int rgb)
 {
 	r = rect_isect(r, clip);
-	for (int y = r.y0; y < r.y1; y++) {
-		unsigned int *row = back + y * scr_w;
-		for (int x = r.x0; x < r.x1; x++)
-			row[x] = rgb;
-	}
+	if (rect_empty(r))
+		return;
+	for (int y = r.y0; y < r.y1; y++)
+		px_set(back + y * scr_w + r.x0, rgb, (unsigned int)(r.x1 - r.x0));
 }
 
 static void bb_text(int x, int y, const char *s, struct rect clip, unsigned int rgb)
@@ -410,8 +422,7 @@ static void bb_client(const struct win *w, struct rect clip)
 			int n = (int)(1024u - off);
 			if (n > left)
 				n = left;
-			for (int i = 0; i < n; i++)
-				dst[i] = src[i];
+			px_copy(dst, src, (unsigned int)n);
 			dst += n;
 			idx += (unsigned int)n;
 			left -= n;
@@ -511,18 +522,23 @@ static void compose(struct rect clip)
 	int order[WIN_MAX];
 	int n = z_order(order);
 
-	/* Skip the background fill when an opaque desktop window covers it. */
-	int covered = 0;
+	/* A client area is opaque. Painting starts at the topmost window whose
+	 * client area covers the whole clip: whatever lies under it cannot be
+	 * seen, and a program repainting its own window (the common case)
+	 * costs one copy of that window instead of one per window beneath. */
+	int first = -1;
 	for (int k = 0; k < n; k++) {
 		const struct win *w = &wins[order[k]];
-		if (!decorated(w) && w->x <= clip.x0 && w->y <= clip.y0 &&
+		if (w->x <= clip.x0 && w->y <= clip.y0 &&
 		    w->x + w->w >= clip.x1 && w->y + w->h >= clip.y1)
-			covered = 1;
+			first = k;
 	}
-	if (!covered)
+	if (first < 0) {
 		bb_fill(clip, clip, C_DESKTOP);
+		first = 0;
+	}
 
-	for (int k = 0; k < n; k++) {
+	for (int k = first; k < n; k++) {
 		int i = order[k];
 		if (rect_empty(rect_isect(outer(&wins[i]), clip)))
 			continue;

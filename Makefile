@@ -932,6 +932,7 @@ qa-kbd: all
 # (these three need Python's Pillow for screenshots).
 qa-wm: all
 	@python3 tools/qa/wm_test.py
+	@python3 tools/qa/wm_perf.py
 
 qa-apps: all
 	@python3 tools/qa/apps_test.py
