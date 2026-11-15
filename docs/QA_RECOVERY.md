@@ -249,7 +249,8 @@ window straight onto the visible framebuffer; windows painted their own
 frames; all programs read one global key queue and rebuilt a pointer
 position from raw deltas; the launcher waited for each program to end.
 Patching that in place would have left the causes. The window system
-was rebuilt (`188abae`) and the fourteen programs ported to it; what
+was rebuilt ("rebuild the window system around a compositor thread")
+and the fourteen programs ported to it; what
 follows answers each of the investigations the pass was asked to make.
 
 ### 3.2 The seven investigations
@@ -297,7 +298,7 @@ text menu, also tested.
 | Press and release distinguished? | `WIN_EV_SCAN` carries make/break for programs that need it; `WIN_EV_KEY` is one event per character | Doom (full-screen path) turning stops on key-up |
 
 Found while doing this: a program was never told that the pointer had
-left its window, so the last button hovered stayed lit (`9c8c6d1`, with
+left its window, so the last button hovered stayed lit (fixed, with
 a `wm_test` check that failed before).
 
 **G4 — blocking desktop. Fixed + retested.**
@@ -380,7 +381,8 @@ between runs.
 | A 480x400 window animating at 25 fps | 25/s | 4.4 ms: 11 % of the CPU | 0.52 ms: 1 % |
 | Repaint of the whole screen | 1 | 5 to 25 ms | 1.6 to 3.5 ms |
 
-The animation figures were 9.3 ms and 1.5 ms before `ff4b948`, which
+The animation figures were 9.3 ms and 1.5 ms before the commit "do not
+paint what is hidden; move pixel rows with string instructions", which
 stopped painting windows hidden under an opaque one and moved rows with
 `rep movs`.
 
@@ -439,7 +441,7 @@ One more defect surfaced while fixing R2. The kernel's build rule
 listed no headers, so adding a field to `struct proc` rebuilt the files
 that were edited and linked them with objects compiled for the old
 layout; three unrelated `ktest` cases hung. Kernel objects are now
-built with `-MMD -MP` (`83ca4ba`). Every result in section 6 is from a
+built with `-MMD -MP`. Every result in section 6 is from a
 clean build.
 
 ## 4. Applications
@@ -489,7 +491,7 @@ The installer had no test; section 5.
 showed Doom taking 115 s to reach its first frame, against 7 s under
 TCG. StinkFS issued one ATA command per sector, and under KVM each port
 access is a VM exit. Whole sectors now move in runs of up to 128 per
-command (`cd2f22a`). Doom starts in 12 s under KVM. `ktest fs-runs`
+command. Doom starts in 12 s under KVM. `ktest fs-runs`
 checks the data through every path that changed, and did not finish in
 60 s under KVM before the change. What remains slow there is the
 driver polling the status port (A29): a 384 kB save takes 0.16 s under
@@ -547,23 +549,34 @@ does not follow, and a null data pointer that only ever comes with a
 length of zero. clang-tidy and scan-build are not installed here:
 **Not tested**.
 
-## 7. PR #16: state and recommendation
+## 7. Integration
 
-`feat/userland-ui` keeps its original history; everything in this log
-is on top of it, with the kernel work merged in from
-`fix/kernel-recovery` (PR #17). Nothing was force-pushed and `master`
-is untouched.
+The work was done on two branches. `fix/kernel-recovery` (PR #17, kernel
+only) was merged into `master` by rebase. `feat/userland-ui` (PR #16)
+kept its 59 original commits and received everything else on top,
+with the kernel branch merged into it four times; nothing was
+force-pushed. Its last commit, `1b26365`, is the tree every result in
+section 6 was measured on.
 
-Recommendation: merge PR #17 first (kernel only; the behaviour changes
-programs can observe are listed in `CHANGELOG.md`), then PR #16. The second depends on
-the first and contains it. The window syscalls 85-94 did not exist on
-`master`, so nothing released breaks.
+`master` takes rebase merges only, and a branch with merge commits
+cannot be rebased onto it. The graphical work therefore went in as a
+linear series built for the purpose: the PR's original commits as one
+commit on top of the merged kernel, then each later commit replayed in
+order (the two that duplicated kernel commits dropped). The resulting
+tree was compared with `1b26365` and is identical, apart from this
+section and a few commit references in this file. The branch
+`feat/userland-ui` is kept as the record of how the work actually
+proceeded.
 
-What speaks for merging: every defect above has a test that failed
-before and passes now; the suites pass on two CPUs; the previous
-programs still pass their own tests. What speaks for waiting: the open
-items of section 8, of which the TCP ones (N5-N10) are the most likely
-to be met in use.
+The behaviour changes programs can observe are listed in
+`CHANGELOG.md`. The window syscalls 85-94 did not exist on `master`
+before, so nothing released changes shape.
+
+What was weighed before integrating: every defect above has a test
+that failed before and passes now, the suites pass on two CPUs and in
+CI, and the previous programs still pass their own tests. Against
+that stand the open items of section 8, of which the TCP ones (N5-N10)
+are the most likely to be met in use; none of them is new.
 
 ## 8. Not stable, not tested, not done
 
