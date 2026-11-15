@@ -26,6 +26,18 @@ static inline void outw(unsigned short port, unsigned short val)
 	__asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
 }
 
+/* `count` 16-bit words between a port and memory in one string instruction
+ * (a sector of PIO data is 256 of them). */
+static inline void insw(unsigned short port, void *buf, unsigned int count)
+{
+	__asm__ volatile ("rep insw" : "+D"(buf), "+c"(count) : "d"(port) : "memory");
+}
+
+static inline void outsw(unsigned short port, const void *buf, unsigned int count)
+{
+	__asm__ volatile ("rep outsw" : "+S"(buf), "+c"(count) : "d"(port) : "memory");
+}
+
 static inline unsigned int inl(unsigned short port)
 {
 	unsigned int ret;
