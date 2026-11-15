@@ -87,6 +87,10 @@ reproduces it.
 - `SYS_CLIP_READ` into a read-only page halted the kernel.
 - A program running in the background took keys typed at the shell: the
   console keyboard now goes to the foreground program only.
+- The ATA driver gave up on a busy drive after a count of status reads
+  (a fraction of a second under emulation) and did not check a write
+  for errors; the installer stopped on the first slow write. Waits are
+  by the clock now, writes are checked, and the installer retries.
 - Kernel objects were not rebuilt when a header changed.
 
 ### Known issues

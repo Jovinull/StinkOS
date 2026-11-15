@@ -18,7 +18,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from stinkqa import Vm, QaError, Desktop, fs_list  # noqa: E402
+from stinkqa import Vm, QaError, Desktop, fs_list, FS_DIR_LBA  # noqa: E402
 
 TARGET_SIZE = 128 * 1024 * 1024
 checks = []
@@ -61,6 +61,17 @@ def main():
             vm.key("ret")                        # back to the menu
             vm.wait_serial("menu: back", timeout=15, start=mark)
             check("...and returned to the menu", True)
+
+        # The clone, sector by sector. Two sectors may differ: the MBR (the
+        # installer writes a partition table) and the directory's first
+        # sector (the first-boot marker, removed again from the source).
+        differ = []
+        with open(src, "rb") as a, open(target, "rb") as b:
+            for i in range(os.path.getsize(src) // 512):
+                if a.read(512) != b.read(512):
+                    differ.append(i)
+        check("every sector of the clone equals the source", set(differ) <= {0, FS_DIR_LBA},
+              "%d sectors differ, first at LBA %d" % (len(differ), differ[0] if differ else 0))
 
         with open(target, "rb") as f:
             mbr = f.read(512)

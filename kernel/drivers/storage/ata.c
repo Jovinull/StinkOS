@@ -17,6 +17,7 @@
 #include "serial.h"
 #include "io.h"
 #include "memlayout.h"     /* V2P for Bus Master DMA phys addrs */
+#include "interrupts.h"    /* pit_ticks: time-based timeouts */
 
 /* ---- ATA register offsets (from channel base) ---- */
 #define ATA_PRIMARY_BASE   0x1F0
@@ -32,6 +33,7 @@
 
 #define ST_ERR 0x01
 #define ST_DRQ 0x08
+#define ST_DF  0x20                 /* device fault */
 #define ST_BSY 0x80
 
 #define CMD_READ_SECTORS  0x20
@@ -41,7 +43,26 @@
 #define CMD_READ_DMA      0xC8
 #define CMD_WRITE_DMA     0xCA
 
+/* How long a drive may stay busy before it is given up on. A count of
+ * status reads is not a time: a million of them is a second on real
+ * hardware but a tenth of that under an emulator, where a single slow
+ * write on the host then looked like a dead drive (the installer stopped
+ * with "copy error"). The count is the floor, and the only limit while
+ * interrupts are off and the tick does not advance; with the clock
+ * running, a command gets ATA_TIMEOUT_TICKS. */
 #define ATA_TIMEOUT_SPINS 1000000
+#define ATA_TIMEOUT_TICKS 1000u     /* 10 s */
+
+static int ata_gave_up(unsigned int *spins, unsigned int t0)
+{
+    if (++*spins < ATA_TIMEOUT_SPINS)
+        return 0;
+    unsigned int eflags;
+    __asm__ volatile ("pushf; pop %0" : "=r"(eflags));
+    if (!(eflags & 0x200u))
+        return 1;                           /* no clock to go by */
+    return pit_ticks() - t0 >= ATA_TIMEOUT_TICKS;
+}
 
 /* ---- Bus Master IDE (BMIDE) register offsets from channel base ---- */
 #define BMIDE_CMD    0x00   /* bit 0 = start/stop, bit 3 = read(1)/write(0) */
@@ -83,10 +104,25 @@ static unsigned char ata_drive_byte(int drive)
 
 static int ata_wait_ready_base(unsigned short base)
 {
-    unsigned int spins = 0;
-    while ((inb(base + ATA_REG_CMD) & ST_BSY) && spins < ATA_TIMEOUT_SPINS)
-        spins++;
-    return (spins < ATA_TIMEOUT_SPINS) ? 0 : -1;
+    unsigned int spins = 0, t0 = pit_ticks();
+    for (;;) {
+        unsigned char status = inb(base + ATA_REG_CMD);
+        if (status == 0xFF)
+            return -1;                      /* floating bus: nothing on this channel */
+        if (!(status & ST_BSY))
+            return 0;
+        if (ata_gave_up(&spins, t0))
+            return -1;
+    }
+}
+
+/* Wait for the command in progress to finish and say whether it worked:
+ * a write that the drive reports as failed must not be taken for done. */
+static int ata_wait_done(unsigned short base)
+{
+    if (ata_wait_ready_base(base) != 0)
+        return -1;
+    return (inb(base + ATA_REG_CMD) & (ST_ERR | ST_DF)) ? -1 : 0;
 }
 
 static int ata_poll_base(unsigned short base)
@@ -94,14 +130,14 @@ static int ata_poll_base(unsigned short base)
     if (ata_wait_ready_base(base) != 0)
         return -1;
 
-    unsigned int spins = 0;
+    unsigned int spins = 0, t0 = pit_ticks();
     for (;;) {
         unsigned char status = inb(base + ATA_REG_CMD);
-        if (status & ST_ERR)
+        if (status & (ST_ERR | ST_DF))
             return -1;
         if (status & ST_DRQ)
             return 0;
-        if (++spins >= ATA_TIMEOUT_SPINS)
+        if (ata_gave_up(&spins, t0))
             return -1;
     }
 }
@@ -195,7 +231,7 @@ static int ata_dma_transfer(int drive, unsigned int lba, unsigned int count,
     outb(bm + BMIDE_CMD, is_write ? 0x01u : 0x09u);
 
     /* Poll Bus Master status until IRQ (bit 2) or error/timeout. */
-    unsigned int spins = 0;
+    unsigned int spins = 0, t0 = pit_ticks();
     for (;;) {
         unsigned char st = inb(bm + BMIDE_STATUS);
         if (st & 0x04u) break;              /* IRQ set: transfer complete */
@@ -203,7 +239,7 @@ static int ata_dma_transfer(int drive, unsigned int lba, unsigned int count,
             outb(bm + BMIDE_CMD, 0);
             return -1;
         }
-        if (++spins >= ATA_TIMEOUT_SPINS) {
+        if (ata_gave_up(&spins, t0)) {
             outb(bm + BMIDE_CMD, 0);
             return -1;
         }
@@ -254,7 +290,7 @@ int ata_drive_write(int drive, unsigned int lba, unsigned int count, const void 
             return -1;
         unsigned short base = ata_base_for(drive);
         outb(base + ATA_REG_CMD, CMD_FLUSH_CACHE);
-        return ata_wait_ready_base(base);
+        return ata_wait_done(base);
     }
 
     /* PIO fallback. */
@@ -268,8 +304,12 @@ int ata_drive_write(int drive, unsigned int lba, unsigned int count, const void 
         outsw(base + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
+    /* The last sector is still being written: a command sent now would
+     * be ignored. Wait for it, check it, then flush and check that. */
+    if (ata_wait_done(base) != 0)
+        return -1;
     outb(base + ATA_REG_CMD, CMD_FLUSH_CACHE);
-    return ata_wait_ready_base(base);
+    return ata_wait_done(base);
 }
 
 int ata_drive_identify(int drive, char *model_out, unsigned int *sectors_out)

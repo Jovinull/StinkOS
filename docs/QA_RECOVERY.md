@@ -225,6 +225,8 @@ move into the sections above.
 | A27 | P2 | fs | one ATA command (and, for writes, one cache flush) per sector in every file operation | **fixed + retested** (section 5): runs of up to 128 sectors; `ktest fs-runs` |
 | A28 | P2 | fs | a delete moves every sector stored after the file, with nothing to recover from a failure half way | open (documented in `docs/STINKFS.md`); the move itself is now 128 sectors per command |
 | A29 | P2 | ata | completion is detected by polling the status port with the CPU held | open: correct, but slow where a port read is expensive (measured under KVM, section 5) |
+| A30 | P1 | ata | a drive was given up on after a fixed number of status reads (about a tenth of a second under emulation): one slow write on the host and the installer stopped with "copy error"; a failed write was not noticed at all (only BSY was looked at); the flush after a PIO write was sent while the drive was still busy and ignored | **fixed + retested**: ten seconds by the clock, error and fault bits checked after writes and flushes, flush sent when the write is done, three attempts per chunk in the installer. With stalls injected through QMP the install stopped at the first one before and completes with an identical clone now |
+| A31 | P2 | pci | the PCI scan looks at function 0 only, so the IDE controller (00:01.1 on QEMU) is never found and the Bus Master DMA code never runs: all disk I/O is PIO | open |
 | K18 | P0 | proc | kernel threads could be suspended, killed, signalled or demoted by any process | **fixed + retested** (`ktest kthread-guard`; section 3.6 R2) |
 | B1 | P1 | build | no header dependencies for kernel objects | fixed (`-MMD -MP`) |
 | K19 | P1 | input | without windows every process read the one keyboard queue: a program started with `bg` took characters typed at the shell (`smoke-multiproc` failed about one run in six, and twice in CI) | **fixed + retested**: the console keyboard goes to the program in front only. The shell scenario, repeated: 3 failures in 22 runs before, 0 in 20 after |
@@ -495,12 +497,32 @@ access is a VM exit. Whole sectors now move in runs of up to 128 per
 command. Doom starts in 12 s under KVM. `ktest fs-runs`
 checks the data through every path that changed, and did not finish in
 60 s under KVM before the change. What remains slow there is the
-driver polling the status port (A29): a 384 kB save takes 0.16 s under
-TCG and about 4 s under KVM.
+driver polling the status port (A29), and the fact that it is always
+PIO (A31): a 384 kB save takes 0.16 s under TCG and about 4 s under
+KVM.
 
-**Installer. Verified.** `install_test` runs it from the text menu onto
-a blank second disk, reads the partition table and the file list of the
-target from the host, and boots the target alone to the desktop.
+**Installer. Fixed + retested.** `install_test` runs it from the text
+menu onto a blank second disk, compares the clone with the source
+sector by sector from the host, reads the partition table and the file
+list, and boots the target alone to the desktop.
+
+The test was passing while the installer was not sound. A CI run sat
+in it for forty minutes: the drive wait in the ATA driver was a count
+of status reads, a slow write on the host outlasted it, and the
+installer treats a chunk that copies nothing as fatal (A30). Stalls
+injected on either disk through QMP reproduce it at will: "copy error
+at lba N" at the first stall before the fix, a complete and identical
+clone after.
+
+One local run before the fix ended "successfully" with 11 624
+consecutive sectors of the clone different from the source, and
+another with no directory on the target. The test did not compare
+contents then, so both passed or failed for the wrong reason, and
+neither was caught with enough state to say what the sectors held. The
+driver did not look at the error bits after a write, which would hide
+exactly this, but the link is not demonstrated. After the fix: 12
+installs in a row with every sector equal. The comparison is now part
+of the test, so a recurrence fails loudly.
 
 **Doom.** Audited through the port layer (`doomgeneric_stink.c`, the
 `doom-shims`, `libstink_stdio/alloc/posix`); the engine source is
@@ -535,7 +557,7 @@ Final tree, same host. "KVM" is `STINKQA_KVM=1`.
 | `wm_perf` | 6/6 | 6/6 |
 | `apps_test` | 39/39 | 39/39 |
 | `doom_test` | 13/13 | 13/13 |
-| `install_test` | 8/8 (34 s) | 8/8 (260 s: the clone is where the polling driver, A29, costs most) |
+| `install_test` | 9/9, twelve runs in a row | 8/8 before the sector comparison was added (260 s: the clone is where the polling driver, A29, costs most) |
 | `test-headless`, eleven `smoke-*` | pass | not run (scripts do not use the harness) |
 
 CI (GitHub Actions, TCG only) runs the first column on every push; its
@@ -590,7 +612,10 @@ are the most likely to be met in use; none of them is new.
   whatever the BIOS boot drive was. USB or second-disk boot of the
   loader is unsupported.
 - **A24**: StinkFS names are case-sensitive except in the loader.
-- **A28 / A29**: delete compacts with no recovery; the ATA driver polls.
+- **A28 / A29 / A31**: delete compacts with no recovery; the ATA driver
+  polls, and never uses DMA because the PCI scan misses the controller.
+- **Installer**: a corrupted clone was seen once and not explained
+  (section 5). The test now compares every sector.
 - **Memory map**: RAM size from CMOS, not E820.
 - **Long syscalls** hold everything (non-preemptive kernel).
 - **Full-screen programs** cannot be left by a hotkey: a hung one holds

@@ -115,6 +115,7 @@ static void draw_progress(unsigned int done, unsigned int total)
 	const char *suf = " sectors copied";
 	for (int i = 0; suf[i]; i++) buf[p++] = suf[i];
 	buf[p] = '\0';
+	sys_fillrect(bar_x, bar_y + 36, bar_w, 16, COLOR_PANEL);   /* the previous count */
 	sys_drawtext(bar_x, bar_y + 36, buf, COLOR_TEXT);
 }
 
@@ -246,7 +247,11 @@ void main(void)
 	while (copied < total) {
 		unsigned int batch = total - copied;
 		if (batch > chunk) batch = chunk;
-		int did = sys_disk_copy(SOURCE_DRIVE, TARGET_DRIVE, copied, batch);
+		/* One sector that fails is tried again before the whole install
+		 * is called off: the kernel already waited ten seconds for it. */
+		int did = 0;
+		for (int attempt = 0; attempt < 3 && did <= 0; attempt++)
+			did = sys_disk_copy(SOURCE_DRIVE, TARGET_DRIVE, copied, batch);
 		if (did <= 0) {
 			draw_status(420, "copy error at lba", "", COLOR_ERR);
 			format_dec(copied, num);
