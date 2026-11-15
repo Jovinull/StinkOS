@@ -192,6 +192,26 @@ def session_one(img, shots):
         p = d.launch("rs-vec")
         a = vm.image(); time.sleep(0.6); b = vm.image()
         check("vec: the figure animates", a.tobytes() != b.tobytes())
+        # Resize it four times while it is drawing: bigger, smaller, wide, tall.
+        sizes_ok, g = True, d.geom(p)
+        for dw, dh in ((120, 80), (-200, -150), (260, -40), (-180, 190)):
+            mark = vm.mark()
+            vm.drag(g[0] + g[2] - 4, g[1] + g[3] - 4, g[0] + g[2] - 4 + dw, g[1] + g[3] - 4 + dh, steps=6)
+            try:
+                vm.wait_serial("win: resize pid=%d" % p, timeout=5, start=mark)
+            except QaError:
+                sizes_ok = False
+                break
+            g2 = d.geom(p)
+            sizes_ok = sizes_ok and abs(g2[2] - g[2] - dw) <= 8 and abs(g2[3] - g[3] - dh) <= 8
+            g = g2
+        check("vec: four resizes in a row while it animates", sizes_ok, str(g))
+        time.sleep(0.5)
+        a = vm.image().crop((g[0], g[1], g[0] + g[2], g[1] + g[3]))
+        time.sleep(0.5)
+        b = vm.image().crop((g[0], g[1], g[0] + g[2], g[1] + g[3]))
+        check("vec: still animating at the last size, edge to edge",
+              a.tobytes() != b.tobytes() and a.getpixel((g[2] - 2, 2)) == b.getpixel((g[2] - 2, 2)))
         close(vm, d, p)
 
         # ---- task manager kills a program -------------------------------

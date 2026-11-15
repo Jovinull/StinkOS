@@ -111,6 +111,16 @@ def main(argv):
             check("releasing it stops the turn", resting < turning / 3,
                   "mean change %.1f while turning, %.1f after release" % (turning, resting))
 
+            # The mouse turns too (relative motion, read by the game itself
+            # while it has the screen).
+            m0 = vm.image()
+            vm.mouse_rel(240, 0); time.sleep(0.7)
+            vm._mx = None                           # the guest pointer is wherever Doom left it
+            m1 = vm.image()
+            check("moving the mouse turns the view", delta(m0, m1) > 2.0,
+                  "mean change %.1f" % delta(m0, m1))
+            still_b = m1
+
             vm.key_down("up"); time.sleep(1.0); vm.key_up("up"); time.sleep(0.6)
             moved = vm.image()
             check("holding Up moves the player", delta(still_b, moved) > 2.0,
