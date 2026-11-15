@@ -22,6 +22,8 @@ reproduces it.
 - Syscalls refuse a buffer the caller could not write itself (read-only
   segments), and unmapped holes inside the user range.
 - Mixer handles and sockets belong to the process that opened them.
+- Kernel threads cannot be killed, suspended, signalled or re-prioritised
+  from user space, and `SYS_SETPRIO` refuses priorities 0 to 8.
 - `SYS_MOUNT` refuses ranges that overlap the boot area or the mounted
   root, and directories that fail validation.
 - Stock images boot into the desktop (an `AUTORUN` file names it).
@@ -49,6 +51,13 @@ reproduces it.
   `qa-*`, `qa`.
 - `tools/build-cross-toolchain.sh` builds into `~/opt/cross` without
   sudo.
+- The compositor reports its cost on serial (`win: perf ...`, one line
+  per second in which it drew); `tools/qa/wm_perf.py` checks it.
+- `tools/qa/install_test.py` (`make qa-install`): the installer onto a
+  second disk, then a boot from that disk.
+- `STINKQA_KVM=1` runs any `tools/qa` suite on the host CPU.
+- A window gets one mouse event with `x = y = -1` when the pointer
+  leaves it.
 
 ### Fixed
 
@@ -72,6 +81,11 @@ reproduces it.
   bits per pixel.
 - Doom: save games failed (path prefix, 15-character names) and wrote one
   byte per syscall; letter keys did not reach the game.
+- StinkFS issued one disk command per sector; it moves runs of up to
+  128. Doom reached its first frame in 115 s under KVM, 12 s now.
+- `make audit` scanned the vendored Doom sources it claimed to skip.
+- `SYS_CLIP_READ` into a read-only page halted the kernel.
+- Kernel objects were not rebuilt when a header changed.
 
 ### Known issues
 

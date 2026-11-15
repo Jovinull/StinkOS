@@ -122,7 +122,7 @@ Want to verify it works without staring at it?
 make unittest          # host-side tests, seconds
 make ktest             # kernel invariants, one VM per case
 make qa                # everything that boots: kernel cases, network, input,
-                       # the desktop, every windowed program, Doom
+                       # the desktop, every windowed program, Doom, the installer
 make test-headless     # the text menu and the console apps
 ```
 
