@@ -14,7 +14,7 @@ help:
 	@echo "  make unittest      -- run every host-side regression test"
 	@echo "  make ktest         -- kernel regression cases in QEMU (one VM per case)"
 	@echo "  make qa-net qa-input qa-kbd -- host-driven network / input scenarios"
-	@echo "  make qa-wm qa-apps qa-doom  -- desktop, every windowed program, Doom"
+	@echo "  make qa-wm qa-apps qa-doom qa-install -- desktop, every windowed program, Doom, installer"
 	@echo "  make qa            -- every QEMU suite above"
 	@echo "  make sample-packages -- build the .stinkpkg samples used by stink-pkg"
 	@echo "  make stinkos-install.iso -- raw disk image (dd to a USB stick)"
@@ -946,8 +946,12 @@ qa-apps: all
 qa-doom: all
 	@python3 tools/qa/doom_test.py
 
+# The installer: clone onto a blank second disk, then boot that disk alone.
+qa-install: all
+	@python3 tools/qa/install_test.py
+
 # Everything that boots the system.
-qa: ktest ktest-lowmem qa-net qa-input qa-kbd qa-wm qa-apps qa-doom
+qa: ktest ktest-lowmem qa-net qa-input qa-kbd qa-wm qa-apps qa-doom qa-install
 
 # Static analysis sweep over kernel + lib + apps. Runs whichever of cppcheck,
 # clang-tidy and scan-build are installed -- skips missing tools quietly so
