@@ -44,6 +44,12 @@ Yeah, the name is a joke. The code isn't.
 ## Screenshots
 
 <p align="center">
+  <img src="images/desktop_windows.png" width="80%" alt="The StinkOS desktop with a text editor, a task manager, a calculator and a clock open in overlapping windows, and the taskbar listing them">
+  <br>
+  <sub>The desktop: four programs in four processes, windows composed by the kernel. Title bars, close boxes, taskbar and pointer are the kernel's; the content is each program's.</sub>
+</p>
+
+<p align="center">
   <img src="images/doom_e1m1.png" width="80%" alt="Freedoom1 running as a userland app on StinkOS, picking up a shotgun in Phase 1 Map01">
   <br>
   <sub>Freedoom1 running as a userland app — ring 3, no GRUB, no Multiboot loader. Bootblock → ELF kernel → doomgeneric.</sub>
@@ -63,7 +69,7 @@ Yeah, the name is a joke. The code isn't.
 </p>
 
 <sub>
-Top-left: the boot menu, every userland app on the disk picked by ENTER.
+Top-left: the kernel's text menu (Ctrl+Q from the desktop), every program on the disk picked by ENTER.
 Top-right: Freedoom1 mid-combat — original Doom HUD, status bar, status face, weapon grid, all running through doomgeneric.
 Middle-left: the shell chained through <code>help</code> / <code>mem</code> / <code>ps</code> / <code>netinfo</code> — DHCP bound from QEMU's user-mode SLIRP, free-page count via <code>SYS_MEMINFO</code>.
 Middle-right: <code>SYS_MAP_FB</code> in action — the framebuffer mapped read-write into the user address space, so every pixel write is one store, zero syscalls.
