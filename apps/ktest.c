@@ -528,6 +528,81 @@ static int hammer(const char *name, unsigned char seed, int rounds)
 	return 0;
 }
 
+/* File data through every path that moves whole runs of sectors: big reads
+ * and writes that start and end off a sector boundary, a write in the
+ * middle, appends that grow a file in place and that move it, and a delete
+ * that slides the files stored after it down the disk. */
+#define FSR_SIZE 200000u
+static unsigned char fsr_byte(unsigned int i, unsigned int salt)
+{
+	unsigned int v = (i + salt) * 2654435761u;
+	return (unsigned char)(v >> 13);
+}
+
+static int fsr_check(const char *name, const unsigned char *want, unsigned int size,
+                     unsigned char *scratch, const char *when)
+{
+	static const unsigned int offs[] = { 0, 1, 511, 512, 513, 65535, 65536, 70001, 131072 };
+	static const unsigned int lens[] = { 1, 700, 4096, 66000, 131073 };
+	int r = sys_fread(name, scratch, size + 4096);
+	if (r != (int)size) FAIL("%s: %s reads %d bytes, want %u", when, name, r, size);
+	if (memcmp(scratch, want, size) != 0) FAIL("%s: %s read back different", when, name);
+	for (unsigned int a = 0; a < sizeof(offs) / sizeof(offs[0]); a++)
+		for (unsigned int b = 0; b < sizeof(lens) / sizeof(lens[0]); b++) {
+			unsigned int off = offs[a], len = lens[b];
+			if (off >= size) continue;
+			unsigned int n = len < size - off ? len : size - off;
+			r = sys_fread_at(name, scratch, len, off);
+			if (r != (int)n) FAIL("%s: read_at(%u, %u) returned %d", when, off, len, r);
+			if (memcmp(scratch, want + off, n) != 0)
+				FAIL("%s: read_at(%u, %u) returned other bytes", when, off, len);
+		}
+	return 0;
+}
+
+static int t_fs_runs(void)
+{
+	unsigned char *want = sys_mmap(FSR_SIZE + 2 * PAGE);
+	unsigned char *scratch = sys_mmap(FSR_SIZE + 4 * PAGE);
+	static unsigned char first[3000], third[100];
+	if (!want || !scratch) FAIL("mmap failed");
+	unsigned int size = FSR_SIZE;
+	for (unsigned int i = 0; i < size; i++) want[i] = fsr_byte(i, 1);
+	for (unsigned int i = 0; i < sizeof(first); i++) first[i] = fsr_byte(i, 7);
+	for (unsigned int i = 0; i < sizeof(third); i++) third[i] = fsr_byte(i, 9);
+	sys_fdelete("KTA.DAT"); sys_fdelete("KTB.DAT"); sys_fdelete("KTC.DAT");
+
+	if (sys_fwrite("KTA.DAT", first, sizeof(first)) != 0) FAIL("could not create KTA.DAT");
+	if (sys_fwrite("KTB.DAT", want, size) != 0) FAIL("could not create KTB.DAT");
+	if (fsr_check("KTB.DAT", want, size, scratch, "after write")) return 1;
+
+	/* overwrite a stretch in the middle, off the sector grid at both ends */
+	for (unsigned int i = 0; i < 70000; i++) want[1000 + i] = fsr_byte(i, 3);
+	if (sys_fwrite_at("KTB.DAT", want + 1000, 70000, 1000) != 0) FAIL("write_at failed");
+	if (fsr_check("KTB.DAT", want, size, scratch, "after write_at")) return 1;
+
+	/* last file on the disk: an append grows it where it is */
+	for (unsigned int i = 0; i < 5000; i++) want[size + i] = fsr_byte(i, 4);
+	if (sys_fappend("KTB.DAT", want + size, 5000) != 0) FAIL("append in place failed");
+	size += 5000;
+	if (fsr_check("KTB.DAT", want, size, scratch, "after append in place")) return 1;
+
+	/* no longer the last file: the next append has to move it */
+	if (sys_fwrite("KTC.DAT", third, sizeof(third)) != 0) FAIL("could not create KTC.DAT");
+	for (unsigned int i = 0; i < 3000; i++) want[size + i] = fsr_byte(i, 5);
+	if (sys_fappend("KTB.DAT", want + size, 3000) != 0) FAIL("append that moves failed");
+	size += 3000;
+	if (fsr_check("KTB.DAT", want, size, scratch, "after append that moved it")) return 1;
+
+	/* deleting a file stored before them slides both down the disk */
+	if (sys_fdelete("KTA.DAT") != 0) FAIL("delete failed");
+	if (fsr_check("KTB.DAT", want, size, scratch, "after deleting an earlier file")) return 1;
+	if (fsr_check("KTC.DAT", third, sizeof(third), scratch, "after deleting an earlier file")) return 1;
+
+	sys_fdelete("KTB.DAT"); sys_fdelete("KTC.DAT");
+	return 0;
+}
+
 static int t_concurrent(void)
 {
 	for (int warm = 0; warm < 2; warm++) {
@@ -1127,6 +1202,7 @@ static const struct ktcase cases[] = {
 	{ "fair3",       t_fair3 },
 	{ "fpu",         t_fpu },
 	{ "concurrent",  t_concurrent },
+	{ "fs-runs",     t_fs_runs },
 	{ "sbrk-oom",    t_sbrk_oom },
 	{ "oom",         t_oom },
 	{ "eflags",      t_eflags },

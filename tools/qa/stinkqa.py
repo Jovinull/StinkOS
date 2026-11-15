@@ -65,12 +65,20 @@ class Vm:
         self._png = None           # does this QEMU write PNG screendumps? unknown yet
         self._mx = None            # last known guest cursor position
         self._my = None
+        # STINKQA_KVM=1 runs every suite on the host's CPU through KVM
+        # instead of the emulated one: real instruction timing, and a
+        # different interleaving of everything that depends on it.
+        kvm = os.environ.get("STINKQA_KVM")
+        if kvm:
+            cpu = "host"
         args = ["qemu-system-i386", "-cpu", cpu,
                 "-drive", "format=raw,file=%s" % image,
                 "-display", display,
                 "-serial", "file:" + self.serial_path,
                 "-qmp", "unix:%s,server,nowait" % self.qmp_path,
                 "-no-reboot"]
+        if kvm:
+            args.append("-enable-kvm")
         if snapshot:
             args.append("-snapshot")
         if mem:

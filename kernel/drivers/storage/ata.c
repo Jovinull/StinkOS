@@ -126,10 +126,7 @@ static int ata_select_drive(int drive, unsigned int lba,
 
 static void dma_copy(void *dst, const void *src, unsigned int n)
 {
-    unsigned char       *d = (unsigned char *)dst;
-    const unsigned char *s = (const unsigned char *)src;
-    while (n--)
-        *d++ = *s++;
+    __asm__ volatile ("rep movsb" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
 }
 
 /* ---- Bus Master DMA initialisation ---- */
@@ -240,8 +237,7 @@ int ata_drive_read(int drive, unsigned int lba, unsigned int count, void *buffer
     for (unsigned int s = 0; s < count; s++) {
         if (ata_poll_base(base) != 0)
             return -1;
-        for (int i = 0; i < 256; i++)
-            buf[i] = inw(base + ATA_REG_DATA);
+        insw(base + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
     return 0;
@@ -269,8 +265,7 @@ int ata_drive_write(int drive, unsigned int lba, unsigned int count, const void 
     for (unsigned int s = 0; s < count; s++) {
         if (ata_poll_base(base) != 0)
             return -1;
-        for (int i = 0; i < 256; i++)
-            outw(base + ATA_REG_DATA, buf[i]);
+        outsw(base + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
     outb(base + ATA_REG_CMD, CMD_FLUSH_CACHE);
@@ -289,8 +284,7 @@ int ata_drive_identify(int drive, char *model_out, unsigned int *sectors_out)
         return -1;
 
     unsigned short data[256];
-    for (int i = 0; i < 256; i++)
-        data[i] = inw(base + ATA_REG_DATA);
+    insw(base + ATA_REG_DATA, data, 256);
 
     for (int w = 0; w < 20; w++) {
         unsigned short word = data[27 + w];
