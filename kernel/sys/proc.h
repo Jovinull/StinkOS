@@ -23,6 +23,11 @@ enum proc_state {
 	PROC_ZOMBIE                         /* exited, waiting for parent reap */
 };
 
+/* Kernel threads run at this priority. User processes may not be given a
+ * better one: with strict priorities a busy process above the threads
+ * would stop the network and the screen. */
+#define PROC_PRIO_KTHREAD 8
+
 #define PROC_NSIG       32              /* matches POSIX signal-number range */
 
 struct proc {
@@ -37,6 +42,7 @@ struct proc {
 	unsigned int      sig_handlers[PROC_NSIG];   /* userland handler addrs */
 	struct vfs_fd     fd_table[VFS_FD_MAX];       /* per-process open files */
 	int               priority;          /* 0 = highest .. 31 = lowest; default 16 */
+	int               kthread;           /* kernel thread: no user side, not a target for user requests */
 	char              name[PROC_NAME_LEN];
 
 	/* Blocking. A SLEEPING proc is skipped by the scheduler until

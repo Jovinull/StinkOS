@@ -517,7 +517,9 @@ void syscall_dispatch(struct regs *r)
 			break;
 		}
 		struct proc *target = proc_get(pid);
-		if (!target) {
+		/* Kernel threads keep their priority, and no process is put
+		 * ahead of them. */
+		if (!target || target->kthread || prio <= PROC_PRIO_KTHREAD) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -591,8 +593,9 @@ void syscall_dispatch(struct regs *r)
 			break;
 		}
 		struct proc *target = proc_get(pid);
-		if (!target || target->state == PROC_ZOMBIE) {
-			r->eax = (unsigned int)-1;
+		if (!target || target->kthread || target->state == PROC_ZOMBIE) {
+			r->eax = (unsigned int)-1;        /* (a suspended kernel thread stops the
+			                                   * network or the screen for everyone) */
 			break;
 		}
 		target->suspended = 1;                /* scheduler skips it from now on */
@@ -703,7 +706,7 @@ void syscall_dispatch(struct regs *r)
 			break;
 		}
 		struct proc *target = proc_get(pid);
-		if (!target) {
+		if (!target || target->kthread) {
 			r->eax = (unsigned int)-1;
 			break;
 		}
@@ -774,7 +777,7 @@ void syscall_dispatch(struct regs *r)
 			break;
 		}
 		struct proc *target = proc_get(pid);
-		if (!target || target->state == PROC_ZOMBIE ||
+		if (!target || target->kthread || target->state == PROC_ZOMBIE ||
 		    target->state == PROC_EMBRYO) {
 			r->eax = (unsigned int)-1;
 			break;
