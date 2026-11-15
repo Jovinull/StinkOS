@@ -292,6 +292,37 @@ static int t_orphan(void)
 	return 0;
 }
 
+/* Kernel threads (the network thread, the window manager) are processes
+ * in the table, but not ones a program may stop, kill, signal or demote;
+ * and no program may put itself ahead of them. This test runs as PID 1,
+ * so every other live PID at this point is a kernel thread, and requests
+ * aimed at an unused PID must fail as well. */
+static int t_kthread_guard(void)
+{
+	for (int pid = 2; pid <= 16; pid++) {
+		if (sys_suspend(pid) != -1) FAIL("suspend(%d) was accepted", pid);
+		if (sys_kill(pid) != -1)    FAIL("kill(%d) was accepted", pid);
+		if (sys_raise(pid, 9) != -1) FAIL("raise(%d) was accepted", pid);
+		if (sys_setprio(pid, 31) != -1) FAIL("setprio(%d, 31) was accepted", pid);
+	}
+	int me = sys_getpid();
+	for (int prio = 0; prio <= 8; prio++)
+		if (sys_setprio(me, prio) != -1) FAIL("a process took priority %d, ahead of the kernel threads", prio);
+	if (sys_setprio(me, 20) != 0) FAIL("setprio(self, 20) refused");
+	if (sys_setprio(me, 16) != 0) FAIL("setprio(self, 16) refused");
+
+	/* The threads still do their work: time passes while we sleep, and a
+	 * child still gets the CPU. */
+	unsigned int t0 = sys_ticks();
+	sys_sleep_ms(100);
+	if (sys_ticks() - t0 < 8) FAIL("sleep returned early");
+	int pid = sys_fork();
+	if (pid < 0) FAIL("fork failed");
+	if (pid == 0) child_exit(5);
+	if (sys_waitpid(pid) != 5) FAIL("child did not run");
+	return 0;
+}
+
 /* The process table as text: one header line, then one row per process,
  * and our own row says who we are. */
 static int t_procinfo(void)
@@ -1222,6 +1253,7 @@ static const struct ktcase cases[] = {
 	{ "kill-reap",   t_kill_reap },
 	{ "orphan",      t_orphan },
 	{ "procinfo",    t_procinfo },
+	{ "kthread-guard", t_kthread_guard },
 	{ "sleep-fair",  t_sleep_fair },
 	{ "preempt",     t_preempt },
 	{ "resched",     t_resched },

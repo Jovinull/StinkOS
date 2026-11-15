@@ -255,6 +255,8 @@ struct proc *proc_kthread_create(const char *name, void (*entry)(void))
 	p->esp        = context_init(p->kstack_top, entry);
 	p->cr3        = 0;                          /* runs on whatever address space is loaded */
 	p->parent_pid = 0;                          /* nobody waits for a kernel thread */
+	p->kthread    = 1;
+	p->priority   = PROC_PRIO_KTHREAD;
 	p->state      = PROC_READY;
 
 	return p;
@@ -525,7 +527,7 @@ void proc_abandon_children(struct proc *parent)
 
 int proc_kill(struct proc *p)
 {
-	if (!p || p->pid <= 1 || p->state == PROC_ZOMBIE ||
+	if (!p || p->pid <= 1 || p->kthread || p->state == PROC_ZOMBIE ||
 	    p->state == PROC_EMBRYO || p->state == PROC_UNUSED)
 		return -1;
 	if (!p->killed) {
