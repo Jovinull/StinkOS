@@ -49,9 +49,9 @@ void fb_present(const unsigned int *back, unsigned int x, unsigned int y,
 		const unsigned int *s = back + (y + row) * width + x;
 		volatile unsigned char *p = fb + (y + row) * pitch + x * bytes_pp;
 		if (bytes_pp == 4) {
-			volatile unsigned int *d = (volatile unsigned int *)p;
-			for (unsigned int i = 0; i < w; i++)
-				d[i] = s[i];
+			unsigned int *d = (unsigned int *)p;
+			unsigned int n = w;
+			__asm__ volatile ("rep movsl" : "+D"(d), "+S"(s), "+c"(n) : : "memory");
 		} else {
 			for (unsigned int i = 0; i < w; i++) {
 				unsigned int rgb = s[i];
