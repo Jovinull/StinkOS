@@ -126,6 +126,10 @@ and owns the taskbar and pointer.
   (`key` = character), `3` close box, `4` resize request (`x`, `y` = new
   client size; answer with `SYS_WIN_RESIZE`), `5` raw key event,
   `6` focus (`x` = 1 gained).
+* Without a window, `SYS_GETKEY` / `SYS_GETKEYEVENT` deliver keys only to
+  the program in front: the one that has taken the whole screen, or PID 1
+  (the text menu and what it or the shell runs in the foreground). A
+  process started in the background (`bg` in the shell) reads no keys.
 * A window owner's `SYS_GETKEY` / `SYS_GETKEYEVENT` read that window's own
   key queue (filled only while it has focus); `SYS_GETMOUSE` returns no
   motion for it. The full-screen drawing calls (`SYS_DRAW`, `SYS_FILLRECT`,

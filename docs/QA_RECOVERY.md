@@ -227,6 +227,7 @@ move into the sections above.
 | A29 | P2 | ata | completion is detected by polling the status port with the CPU held | open: correct, but slow where a port read is expensive (measured under KVM, section 5) |
 | K18 | P0 | proc | kernel threads could be suspended, killed, signalled or demoted by any process | **fixed + retested** (`ktest kthread-guard`; section 3.6 R2) |
 | B1 | P1 | build | no header dependencies for kernel objects | fixed (`-MMD -MP`) |
+| K19 | P1 | input | without windows every process read the one keyboard queue: a program started with `bg` took characters typed at the shell (`smoke-multiproc` failed about one run in six, and twice in CI) | **fixed + retested**: the console keyboard goes to the program in front only. The shell scenario, repeated: 3 failures in 22 runs before, 0 in 20 after |
 
 ## 3. Graphical userland (PR #16)
 
@@ -600,5 +601,6 @@ are the most likely to be met in use; none of them is new.
 - **Real hardware**: nothing here ran outside QEMU. KVM gives a real
   CPU, not real devices.
 - **Legacy scripts** (`smoke-*`, `test-headless`) still use fixed
-  sleeps; one of them failed once in CI for that reason and was changed
-  to wait on its condition, the others were not.
+  sleeps. `smoke-multiproc` failed in CI three times during this pass:
+  once for its fixed sleep (it now waits on its condition) and twice
+  for a real defect it was exposing (K19).

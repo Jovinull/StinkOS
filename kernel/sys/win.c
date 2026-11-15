@@ -1370,6 +1370,14 @@ int win_legacy_draw(int pid)
 	return 1;
 }
 
+/* Who the keyboard belongs to when it is not a window's: the program that
+ * has taken the whole screen, or else PID 1, which is the text menu and
+ * whatever it (or the shell) runs in the foreground. */
+int win_console_owner(void)
+{
+	return fs_pid ? fs_pid : 1;
+}
+
 int win_getkey(int pid, int *out)
 {
 	int si = slot_of(pid);
