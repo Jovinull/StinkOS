@@ -101,6 +101,7 @@ static int           grab = -1;        /* window that owns the pointer while a b
 static int           drag = -1, drag_dx, drag_dy;
 static int           rsz = -1, rsz_w, rsz_h;
 static int           hover_close = -1;
+static int           over = -1;        /* window whose client area last had the pointer */
 static int           last_mx = -1, last_my = -1;
 static unsigned char last_mb;
 static int           cur_drawn, cur_x, cur_y;
@@ -741,6 +742,18 @@ static int hit(int x, int y, int *part)
 	return -1;
 }
 
+/* The pointer is now over window `i`'s client area (-1: over none). The
+ * window it was over before is told once, with x = y = -1: without that a
+ * program would go on showing whatever it highlighted under the pointer. */
+static void pointer_over(int i)
+{
+	if (over == i)
+		return;
+	if (over >= 0 && wins[over].pid && wins[over].visible)
+		ev_push(&wins[over], WIN_EV_MOUSE, -1, -1, 0, 0);
+	over = i;
+}
+
 static void set_hover_close(int i)
 {
 	if (hover_close == i)
@@ -836,14 +849,18 @@ static void mouse_step(void)
 	if (grab >= 0) {
 		struct win *w = &wins[grab];
 		ev_push(w, WIN_EV_MOUSE, mx - w->x, my - w->y, mb, changed);
-		if (!mb)
+		if (!mb) {
+			int part, i = hit(mx, my, &part);  /* released somewhere else? */
 			grab = -1;
+			pointer_over(i >= 0 && part == PART_CLIENT ? i : -1);
+		}
 		return;
 	}
 
 	int part;
 	int i = hit(mx, my, &part);
 	set_hover_close(part == PART_CLOSE ? i : -1);
+	pointer_over(i >= 0 && part == PART_CLIENT && my < scr_h - WIN_TASKBAR_H ? i : -1);
 
 	if (my >= scr_h - WIN_TASKBAR_H) {
 		if (down) {
@@ -1133,6 +1150,7 @@ static void destroy_slot(int si, int unmap)
 	if (drag == si)        drag = -1;
 	if (rsz == si)         rsz = -1;
 	if (hover_close == si) hover_close = -1;
+	if (over == si)        over = -1;
 	if (focus == si)
 		focus_top();
 	if (was_visible) {
@@ -1302,6 +1320,7 @@ int win_legacy_draw(int pid)
 		 * is up: it takes the screen until it exits. */
 		fs_pid = pid;
 		trace("fullscreen", pid, 0, 0, scr_w, scr_h);
+		pointer_over(-1);
 		grab = drag = rsz = -1;
 		cur_drawn = 0;
 		keyboard_flush();

@@ -219,6 +219,23 @@ def main(argv):
         left = same_outside(img, base, [clock])
         check("desktop is clean after 6 open/close cycles", left == 0, "%d pixels differ" % left)
 
+        # ---- hover does not outlive the pointer ----------------------------
+        pid = d.launch("rs-calc")
+        g = d.geom(pid)
+        box = (g[0], g[1], g[0] + g[2], g[1] + g[3])
+        rest = d.shot("calc-rest").crop(box)
+        vm.mouse_to(g[0] + g[2] // 2 - 40, g[1] + g[3] - 60)      # onto a button
+        hot = vm.wait_stable(timeout=4).crop(box)
+        check("a button under the pointer is highlighted", hot.tobytes() != rest.tobytes())
+        vm.mouse_to(g[0] + g[2] + 150, g[1] + g[3] - 60)          # straight out through the side
+        gone = d.shot("calc-left").crop(box)
+        check("the highlight goes when the pointer leaves the window",
+              gone.tobytes() == rest.tobytes())
+        vm.mouse_to(g[0] + g[2] // 2 - 40, g[1] + g[3] - 60)
+        mark = vm.mark()
+        vm.key("q")
+        vm.wait_serial("win: destroy pid=%d" % pid, timeout=5, start=mark)
+
         # ---- a window cannot be lost off the screen ------------------------
         pid = d.launch("rs-about")
         g0 = d.geom(pid)
