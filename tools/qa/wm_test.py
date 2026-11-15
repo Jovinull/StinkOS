@@ -22,7 +22,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from stinkqa import Vm, QaError, count_color, fs_list  # noqa: E402
+from stinkqa import Vm, QaError, count_color, fs_list, fs_put, menu_image  # noqa: E402
 
 # Colours from kernel/sys/win.c
 TITLE_BG, TITLE_FOCUS = (0x16, 0x1b, 0x22), (0x1f, 0x29, 0x33)
@@ -321,9 +321,14 @@ def main(argv):
         vm.click(900, 600)                       # empty desktop: give it the keyboard
         vm.key("ctrl", "q")
         vm.wait_serial("menu: ready", timeout=15, start=mark)
-        after = vm.serial()[mark:]
-        check("ending the session closed every window",
-              all(("win: destroy pid=%d " % p) in after for p in (a, b)))
+        # Their owners are killed and release their windows as they exit.
+        closed = True
+        for p in (a, b):
+            try:
+                vm.wait_serial("win: destroy pid=%d " % p, timeout=10, start=mark)
+            except QaError:
+                closed = False
+        check("ending the session closed every window", closed)
         menu = vm.wait_stable(timeout=6)
         check("the text menu owns the screen (no taskbar, no window chrome)",
               menu.getpixel((40, 768 - 10)) != BAR_BG and count_color(menu, TITLE_FOCUS) == 0)
@@ -350,6 +355,30 @@ def main(argv):
                    if "kernel exception" in l or "stack overflow" in l
                    or "bytes of kernel stack" in l or "app: fault" in l]
         check("no kernel exception, fault or stack warning", not trouble, "; ".join(trouble[:3]))
+
+    # ---- a window with no desktop behind it ------------------------------
+    # The first window of a session appears on a screen the text menu drew.
+    # Everything around it must be the compositor's own background.
+    img = menu_image()
+    fs_put(img, "AUTORUN", "RS-ABOUT\n")
+    with Vm(image=img, net=True, audio=True) as vm:
+        end = vm.wait_serial("win: show pid=", timeout=40)
+        m = re.search(r"win: show pid=(\d+) x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+)", vm.serial())
+        g = tuple(map(int, m.groups()[1:]))
+        vm.mouse_to(*PARK)
+        shot = vm.wait_stable(timeout=6)
+        if shots:
+            shot.save(os.path.join(shots, "30-lone-window.png"))
+        o = outer(g)
+        px = shot.load()
+        stray = 0
+        for y in range(0, 768 - TASKBAR_H):
+            for x in range(0, 1024):
+                if inside(o, x, y) or (x >= PARK[0] - 2 and y >= PARK[1] - 2):
+                    continue
+                if px[x, y] != APP_BG:
+                    stray += 1
+        check("a lone window stands on a clean background", stray == 0, "%d stray pixels" % stray)
 
     failed = [c for c in checks if not c[1]]
     print("wm_test: %d/%d checks passed" % (len(checks) - len(failed), len(checks)))
