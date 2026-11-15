@@ -107,7 +107,12 @@ time.sleep(6.0)                          # let the child run a few SYS_LOG lines
 # still alive and able to dispatch new input after the fork.
 keys("ps")
 key("ret", pause=0.6)
-time.sleep(3.5)                          # slow CI runners need extra slack for the 2nd SHELL.HIS write
+# The shell answers by saving its history a second time. Wait for that
+# rather than for a fixed time: a busy CI runner has taken longer than any
+# pause chosen here.
+deadline = time.time() + 60
+while serial().count("fs: wrote SHELL.HIS") < 2 and time.time() < deadline:
+    time.sleep(0.2)
 
 send("quit", pause=0.5)
 
