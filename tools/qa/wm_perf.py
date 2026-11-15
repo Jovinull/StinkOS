@@ -26,6 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from stinkqa import Vm, QaError, Desktop  # noqa: E402
 
 SCREEN_KPX = 1024 * 768 // 1000
+CLOCK_KPX = 2                           # the taskbar clock: 60 x 28 pixels
+
+
+def quiet(rows):
+    """Nothing was drawn, or only the taskbar clock when the minute turned
+    over while we watched."""
+    return sum(r["frames"] for r in rows) <= 1 and sum(r["composed"] for r in rows) <= CLOCK_KPX
+
 checks = []
 
 
@@ -60,7 +68,7 @@ def main(argv):
         mark = vm.mark()
         time.sleep(5)
         rows = perf(vm, mark)
-        check("a still desktop draws no frames", not rows, str(rows))
+        check("a still desktop draws no frames", quiet(rows), str(rows))
 
         mark = vm.mark()
         for i in range(30):
@@ -68,7 +76,8 @@ def main(argv):
         time.sleep(1.2)
         rows = perf(vm, mark)
         check("moving the pointer draws frames", sum(r["frames"] for r in rows) > 0)
-        check("...and recomposes nothing", sum(r["composed"] for r in rows) == 0, str(rows))
+        check("...and recomposes nothing (the clock aside)",
+              sum(r["composed"] for r in rows) <= CLOCK_KPX, str(rows))
         show("pointer moving", rows)
 
         pid = d.launch("rs-calc")
@@ -78,7 +87,7 @@ def main(argv):
         mark = vm.mark()
         time.sleep(4)
         rows = perf(vm, mark)
-        check("a still window draws no frames", not rows, str(rows))
+        check("a still window draws no frames", quiet(rows), str(rows))
 
         mark = vm.mark()
         vm.drag(g[0] + 60, g[1] - 12, g[0] + 360, g[1] + 200, steps=40)
