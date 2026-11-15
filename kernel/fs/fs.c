@@ -156,6 +156,64 @@ static unsigned int need_sectors(unsigned int size)
 	return (size + 511) / 512;
 }
 
+/* ---- sector runs ----
+ * Whole sectors go to and from the disk in runs of up to FS_RUN sectors
+ * per ATA command, straight between the disk and the caller's buffer. One
+ * command per sector made every large read (a program image, a WAD lump)
+ * hundreds of command round-trips. */
+#define FS_RUN 128u                     /* 64 KiB: one DMA transfer */
+
+/* For moving data on the disk. One buffer is enough: the kernel does not
+ * preempt itself, so two file operations never overlap. */
+static unsigned char run_buf[FS_RUN * 512u];
+
+/* Copy `count` sectors from LBA `src` to LBA `dst`. The ranges may overlap
+ * when dst < src (each run is read whole before it is written). */
+static int copy_sectors(struct fs_mount *m, unsigned int src, unsigned int dst,
+                        unsigned int count)
+{
+	while (count > 0) {
+		unsigned int n = count < FS_RUN ? count : FS_RUN;
+		if (ata_drive_read(m->drive, src, n, run_buf) != 0)
+			return -1;
+		if (ata_drive_write(m->drive, dst, n, run_buf) != 0)
+			return -1;
+		src += n;
+		dst += n;
+		count -= n;
+	}
+	return 0;
+}
+
+/* Read `size` bytes starting `pos` bytes into the extent that begins at LBA
+ * `start`. Partial sectors at either end go through io_buf. */
+static int extent_read(struct fs_mount *m, unsigned int start, unsigned int pos,
+                       void *buf, unsigned int size)
+{
+	unsigned char *dst = (unsigned char *)buf;
+	while (size > 0) {
+		unsigned int sec = start + pos / 512, off = pos % 512, chunk;
+		if (off == 0 && size >= 512) {
+			unsigned int n = size / 512;
+			if (n > FS_RUN) n = FS_RUN;
+			if (ata_drive_read(m->drive, sec, n, dst) != 0)
+				return -1;
+			chunk = n * 512;
+		} else {
+			chunk = 512 - off;
+			if (chunk > size) chunk = size;
+			if (ata_drive_read(m->drive, sec, 1, m->io_buf) != 0)
+				return -1;
+			for (unsigned int k = 0; k < chunk; k++)
+				dst[k] = m->io_buf[off + k];
+		}
+		dst += chunk;
+		pos += chunk;
+		size -= chunk;
+	}
+	return 0;
+}
+
 static int stinkfs_file_write(struct fs_mount *m, const char *name,
                               const void *buf, unsigned int size)
 {
@@ -188,17 +246,22 @@ static int stinkfs_file_write(struct fs_mount *m, const char *name,
 	unsigned int remaining = size;
 	unsigned int lba = start;
 	const unsigned char *src = (const unsigned char *)buf;
-	while (remaining > 0) {
-		unsigned int chunk = remaining < 512 ? remaining : 512;
+	while (remaining >= 512) {
+		unsigned int n = remaining / 512;
+		if (n > FS_RUN) n = FS_RUN;
+		if (ata_drive_write(m->drive, lba, n, src) != 0)
+			return -1;
+		src += n * 512;
+		remaining -= n * 512;
+		lba += n;
+	}
+	if (remaining > 0) {                       /* the tail, zero-padded to a sector */
 		for (int k = 0; k < 512; k++)
 			m->io_buf[k] = 0;
-		for (unsigned int k = 0; k < chunk; k++)
+		for (unsigned int k = 0; k < remaining; k++)
 			m->io_buf[k] = src[k];
 		if (ata_drive_write(m->drive, lba, 1, m->io_buf) != 0)
 			return -1;
-		src += chunk;
-		remaining -= chunk;
-		lba++;
 	}
 
 	return stinkfs_dir_save(m);
@@ -217,22 +280,8 @@ static int stinkfs_file_read_at(struct fs_mount *m, const char *name, void *buf,
 	unsigned int avail = size - offset;
 	unsigned int n = avail < maxsize ? avail : maxsize;
 
-	unsigned int remaining = n;
-	unsigned int pos = offset;
-	unsigned char *dst = (unsigned char *)buf;
-	while (remaining > 0) {
-		unsigned int sec = d->files[i].start + pos / 512;
-		unsigned int off = pos % 512;
-		unsigned int chunk = 512 - off;
-		if (chunk > remaining) chunk = remaining;
-		if (ata_drive_read(m->drive, sec, 1, m->io_buf) != 0)
-			return -1;
-		for (unsigned int k = 0; k < chunk; k++)
-			dst[k] = m->io_buf[off + k];
-		dst += chunk;
-		remaining -= chunk;
-		pos += chunk;
-	}
+	if (extent_read(m, d->files[i].start, offset, buf, n) != 0)
+		return -1;
 	return (int)n;
 }
 
@@ -245,12 +294,10 @@ static int stinkfs_file_delete(struct fs_mount *m, const char *name)
 	unsigned int freed = need_sectors(d->files[i].size);
 	unsigned int hole  = d->files[i].start;
 
-	for (unsigned int lba = hole + freed; lba < d->next_free; lba++) {
-		if (ata_drive_read(m->drive, lba, 1, m->io_buf) != 0)
-			return -1;
-		if (ata_drive_write(m->drive, lba - freed, 1, m->io_buf) != 0)
-			return -1;
-	}
+	/* Close the gap: everything stored after the file moves down. */
+	if (freed > 0 &&
+	    copy_sectors(m, hole + freed, hole, d->next_free - (hole + freed)) != 0)
+		return -1;
 
 	for (unsigned int j = 0; j < d->count; j++)
 		if (d->files[j].start > hole)
@@ -281,12 +328,8 @@ static int stinkfs_grow(struct fs_mount *m, int i, unsigned int new_size)
 
 	if (d->next_free + new_sect > m->data_end) return -1;
 	unsigned int dst = d->next_free;
-	for (unsigned int s = 0; s < old_sect; s++) {
-		if (ata_drive_read(m->drive, start + s, 1, m->io_buf) != 0)
-			return -1;
-		if (ata_drive_write(m->drive, dst + s, 1, m->io_buf) != 0)
-			return -1;
-	}
+	if (copy_sectors(m, start, dst, old_sect) != 0)
+		return -1;
 	d->next_free += new_sect;
 	d->files[i].start = dst;
 	return 0;
@@ -300,14 +343,23 @@ static int stinkfs_put(struct fs_mount *m, unsigned int start, unsigned int pos,
 	while (remaining > 0) {
 		unsigned int sec = start + pos / 512;
 		unsigned int off = pos % 512;
-		unsigned int chunk = 512 - off;
-		if (chunk > remaining) chunk = remaining;
-		if (ata_drive_read(m->drive, sec, 1, m->io_buf) != 0)
-			return -1;
-		for (unsigned int k = 0; k < chunk; k++)
-			m->io_buf[off + k] = src[k];
-		if (ata_drive_write(m->drive, sec, 1, m->io_buf) != 0)
-			return -1;
+		unsigned int chunk;
+		if (off == 0 && remaining >= 512) {    /* whole sectors: no need to read them first */
+			unsigned int n = remaining / 512;
+			if (n > FS_RUN) n = FS_RUN;
+			if (ata_drive_write(m->drive, sec, n, src) != 0)
+				return -1;
+			chunk = n * 512;
+		} else {                               /* part of a sector: keep the rest of it */
+			chunk = 512 - off;
+			if (chunk > remaining) chunk = remaining;
+			if (ata_drive_read(m->drive, sec, 1, m->io_buf) != 0)
+				return -1;
+			for (unsigned int k = 0; k < chunk; k++)
+				m->io_buf[off + k] = src[k];
+			if (ata_drive_write(m->drive, sec, 1, m->io_buf) != 0)
+				return -1;
+		}
 		pos += chunk;
 		remaining -= chunk;
 		src += chunk;
