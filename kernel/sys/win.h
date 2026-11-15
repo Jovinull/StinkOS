@@ -83,6 +83,7 @@ int  win_legacy_draw(int pid);
 /* Input syscalls for a process that owns a window read that window's own
  * queues, so a background window cannot take keys meant for the focused
  * one. Each returns 1 when it handled the call (result in *out). */
+int win_console_owner(void);
 int  win_getkey(int pid, int *out);
 int  win_getkeyevent(int pid, unsigned int *out);
 int  win_has_window(int pid);

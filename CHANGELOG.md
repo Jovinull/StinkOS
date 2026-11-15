@@ -85,6 +85,8 @@ reproduces it.
   128. Doom reached its first frame in 115 s under KVM, 12 s now.
 - `make audit` scanned the vendored Doom sources it claimed to skip.
 - `SYS_CLIP_READ` into a read-only page halted the kernel.
+- A program running in the background took keys typed at the shell: the
+  console keyboard now goes to the foreground program only.
 - Kernel objects were not rebuilt when a header changed.
 
 ### Known issues

@@ -401,12 +401,17 @@ void syscall_dispatch(struct regs *r)
 		break;
 	case 3: {                                  /* SYS_GETKEY: -> char or 0 */
 		/* A window owner reads its own window's keys (only the focused
-		 * window is given any); everyone else reads the global queue. */
+		 * window is given any). Without windows there is one keyboard
+		 * queue, and it belongs to the program in front: a process
+		 * running in the background gets nothing, so it cannot take
+		 * the characters typed at the shell that started it. */
 		int k;
 		if (win_getkey(proc_current()->pid, &k))
 			r->eax = (unsigned int)k;
-		else
+		else if (proc_current()->pid == win_console_owner())
 			r->eax = (unsigned char)keyboard_getchar();
+		else
+			r->eax = 0;
 		break;
 	}
 	case 4:                                    /* SYS_ALLOC: -> user page or 0 */
@@ -1023,8 +1028,10 @@ void syscall_dispatch(struct regs *r)
 		unsigned int ev;
 		if (win_getkeyevent(proc_current()->pid, &ev))
 			r->eax = ev;
-		else
+		else if (proc_current()->pid == win_console_owner())
 			r->eax = keyboard_get_event();
+		else
+			r->eax = 0;                        /* in the background: see SYS_GETKEY */
 		break;
 	}
 	case 28: {                                 /* SYS_AUDIO_PLAY: ebx=samples ecx=length edx=volume -> handle or -1 */
