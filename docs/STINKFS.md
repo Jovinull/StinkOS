@@ -62,12 +62,23 @@ directory that fails is refused rather than used.
 ## Allocation
 
 Every file is **contiguous on disk** -- always. There is no extent list and
-no fragmentation handling. When a write needs more sectors than the file
-already occupies the kernel allocates a fresh run starting at `next_free`,
-bumps `next_free`, and abandons the old run if the file is being replaced.
-This is simple to reason about but means *delete + create + delete + ...*
-loops eventually exhaust the data region; a future compaction pass would
-sweep gaps closed.
+no fragmentation handling.
+
+* A write that fits in the sectors the file already has is done in place.
+* A write or append that needs more sectors grows the file where it is if
+  it is the last one on the disk. Otherwise the file gets a fresh run at
+  `next_free` (an append copies the old contents there first) and its old
+  run is abandoned: nothing reuses it until the files after it are
+  deleted or the image is rebuilt. A file rewritten larger and larger
+  therefore eats the data region.
+* A delete closes the gap at once: every sector stored after the file is
+  moved down and the directory entries are adjusted. Space is reclaimed,
+  but the cost is proportional to how much data follows the file, and
+  the kernel does nothing else while it runs.
+
+Data moves in runs of up to 128 sectors per disk command; partial
+sectors at the ends of an unaligned request go through a one-sector
+bounce buffer.
 
 ## Operations
 
@@ -84,15 +95,14 @@ Userland that wants forgiving names must normalise them itself.
 | `fs_file_append`      | 0 / -1                | grows in place if next_free, else moves |
 | `fs_file_read`        | bytes, -1             | full read                               |
 | `fs_file_read_at`     | bytes, -1             | random read from `offset`               |
-| `fs_file_delete`      | 0 / -1                | removes the directory entry only        |
+| `fs_file_delete`      | 0 / -1                | removes the entry and compacts the data |
 | `fs_file_size`        | size, -1              | lookup by name                          |
 | `fs_file_count`       | count                 | active entries                          |
 | `fs_file_info`        | 0 / -1                | walk directory by index                 |
 | `fs_file_lba_sectors` | 0 / -1                | absolute LBA + sector span for loader   |
 
 Every mutating op writes the directory back (`FS_DIR_SECTORS` sectors at
-`FS_DIR_LBA`) at the end of the call. Data sectors are written through a single
-`io_buf[512]` bounce buffer.
+`FS_DIR_LBA`) at the end of the call.
 
 ## VFS layer
 
@@ -129,7 +139,8 @@ sanity-check that the cloned disk matches the source byte-for-byte.
 | Permissions                 | none                        | Single-user kernel                        |
 | Directories / hierarchy     | none                        | Flat namespace is enough today            |
 | Journal / crash safety      | none                        | Power loss mid-write can corrupt the dir  |
-| Compaction / defragment     | none                        | Delete, and any rewrite that grows a file, leaks the abandoned run until the image is rebuilt |
+| Journal for data moves      | none                        | A failure in the middle of a delete's compaction leaves later files damaged |
+| Reuse of abandoned runs     | none                        | A file that outgrows its run and is not the last on the disk leaves the old run unused |
 | Symlinks / hard links       | none                        | Out of scope                              |
 | Extended attributes / xattr | none                        | Out of scope                              |
 

@@ -35,8 +35,8 @@ still gets RTO checks.
 
 Nothing in the stack runs in interrupt context. The e1000 interrupt
 handler only acknowledges the card and wakes `knet`, a kernel thread
-that calls `net_poll_once()` until the ring is empty and otherwise wakes
-on a timer for the protocol clocks. Because the kernel does not preempt
+that calls `net_poll_once()` for up to 64 frames per wake-up and otherwise
+wakes on a timer for the protocol clocks. Because the kernel does not preempt
 itself, `knet` and a process inside a socket syscall never touch the
 stack's tables and packet buffers at the same time, and no locks are
 needed. Programs do not have to poll to keep connections alive.
