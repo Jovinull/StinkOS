@@ -69,6 +69,7 @@ struct win {
 	int           w, h;                /* client size in pixels */
 	unsigned int  flags;
 	int           visible;
+	int           retired;             /* session over: hidden, waiting for its owner to exit */
 	unsigned int  z;                   /* higher = closer to the viewer */
 	char          title[40];
 	unsigned int  frames[WIN_MAX_FRAMES];
@@ -104,6 +105,7 @@ static int           hover_close = -1;
 static int           over = -1;        /* window whose client area last had the pointer */
 static int           last_mx = -1, last_my = -1;
 static unsigned char last_mb;
+static int           resync = 1;       /* button state is stale: take it as it is */
 static int           cur_drawn, cur_x, cur_y;
 
 static char          clock_txt[6] = "--:--";
@@ -230,7 +232,7 @@ static int slot_of(int pid)
 static int any_window(void)
 {
 	for (int i = 0; i < WIN_MAX; i++)
-		if (wins[i].pid)
+		if (wins[i].pid && !wins[i].retired)
 			return 1;
 	return 0;
 }
@@ -771,6 +773,12 @@ static void mouse_step(void)
 	int mx, my;
 	unsigned char mb;
 	mouse_get_state(&mx, &my, &mb);
+	if (resync) {
+		/* First look after the screen was someone else's: a button that
+		 * is already down was not pressed on anything of ours. */
+		last_mb = mb;
+		resync = 0;
+	}
 	int moved = (mx != last_mx || my != last_my);
 	int changed = mb ^ last_mb;                /* buttons that flipped */
 	int down = (mb & 1) && !(last_mb & 1);
@@ -940,12 +948,22 @@ static void clock_step(void)
 
 static void kwm_main(void)
 {
+	int idle = 1;
+
 	perf_calibrate();
 	for (;;) {
 		if (!any_window()) {                   /* text menu / legacy mode: stay out of the way */
 			cur_drawn = 0;
+			idle = 1;
 			proc_block(20);
 			continue;
+		}
+		if (idle) {
+			/* Taking the screen: nothing on it is ours yet, and the
+			 * back buffer holds whatever the last session left. */
+			idle = 0;
+			resync = 1;
+			damage_all();
 		}
 		if (!fs_pid) {
 			mouse_step();
@@ -987,7 +1005,6 @@ void win_init(void)
 		back = 0;
 		return;
 	}
-	kwm->priority = 8;                         /* ahead of ordinary processes (16) */
 	serial_write("win: compositor ready\n");
 }
 
@@ -1050,6 +1067,8 @@ int win_create(int pid, unsigned int w, unsigned int h, unsigned int flags)
 	struct win *s = &wins[si];
 
 	int need = (int)((w * h * 4u + 4095u) / 4096u);
+	if (need > WIN_MAX_FRAMES)                 /* a screen larger than frames[] was sized for */
+		return -1;
 	if (alloc_frames(s->frames, need) != 0)
 		return -1;
 	/* The buffer is part of the contract: a window whose pixels are not
@@ -1067,6 +1086,7 @@ int win_create(int pid, unsigned int w, unsigned int h, unsigned int flags)
 	s->y        = 0;
 	s->flags    = flags;
 	s->visible  = 0;
+	s->retired  = 0;
 	s->z        = 0;
 	s->title[0] = 0;
 	s->ev_r = s->ev_w = s->key_r = s->key_w = s->scan_r = s->scan_w = 0;
@@ -1077,7 +1097,7 @@ int win_create(int pid, unsigned int w, unsigned int h, unsigned int flags)
 int win_show(int pid, int x, int y, const char *title)
 {
 	int si = slot_of(pid);
-	if (si < 0)
+	if (si < 0 || wins[si].retired)
 		return -1;
 	struct win *s = &wins[si];
 	if (title) {
@@ -1086,15 +1106,21 @@ int win_show(int pid, int x, int y, const char *title)
 			s->title[i] = title[i];
 		s->title[i] = 0;
 	}
+	if (s->visible)
+		damage(outer(s));                      /* where it is now, in case it moves */
 	if (!decorated(s)) {
 		s->x = 0;
 		s->y = 0;
+	} else if (s->visible && (x < 0 || y < 0)) {
+		/* already placed, no new position asked for: only the title changes */
 	} else {
 		int top = WIN_TITLE_H + WIN_BORDER;
 		if (x < 0 || y < 0) {                  /* let the kernel place it: cascade */
 			x = 72 + 28 * si;
 			y = 56 + 28 * si;
 		}
+		if (x > scr_w) x = scr_w;              /* keep the sums below in range */
+		if (y > scr_h) y = scr_h;
 		/* x, y name the outer top-left corner. */
 		s->x = x + WIN_BORDER;
 		s->y = y + top;
@@ -1239,6 +1265,8 @@ int win_resize(int pid, unsigned int w, unsigned int h)
 		return 0;
 
 	int need = (int)((w * h * 4u + 4095u) / 4096u);
+	if (need > WIN_MAX_FRAMES)
+		return -1;
 	if (alloc_frames(fresh, need) != 0)
 		return -1;                             /* the old buffer is untouched */
 
@@ -1283,6 +1311,7 @@ void win_proc_exit(int pid)
 		fs_pid = 0;
 		keyboard_flush();                      /* keys meant for it are not for a window */
 		mouse_reset_delta();
+		resync = 1;
 		cur_drawn = 0;
 		damage_all();
 	}
@@ -1291,15 +1320,26 @@ void win_proc_exit(int pid)
 void win_session_end(void)
 {
 	for (int i = 0; i < WIN_MAX; i++) {
-		if (!wins[i].pid)
+		struct win *w = &wins[i];
+		if (!w->pid)
 			continue;
-		struct proc *p = proc_get(wins[i].pid);
-		if (p && p->pid > 1)
-			proc_kill(p);                      /* exits at its next return to ring 3 */
-		/* Not our address space: the frames are freed here and the
-		 * owner's PG_SHARED mappings die with it; it never runs user
-		 * code again. */
-		destroy_slot(i, 0);
+		struct proc *p = proc_get(w->pid);
+		if (p && proc_kill(p) == 0) {
+			/* It exits at its next return to ring 3. Until then it may
+			 * still be inside a syscall that writes to its buffer, and
+			 * the mapping can only be removed in its own address space:
+			 * the window is hidden and keeps its frames, and
+			 * win_proc_exit destroys it when the owner goes. */
+			w->visible = 0;
+			w->retired = 1;
+			if (grab == i)        grab = -1;
+			if (drag == i)        drag = -1;
+			if (rsz == i)         rsz = -1;
+			if (hover_close == i) hover_close = -1;
+			if (over == i)        over = -1;
+		} else {
+			destroy_slot(i, 0);                /* no owner left to wait for */
+		}
 	}
 	fs_pid = 0;
 	focus = -1;

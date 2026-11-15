@@ -1368,7 +1368,9 @@ void syscall_dispatch(struct regs *r)
 	case 93: {                               /* SYS_CLIP_READ: ebx=buf ecx=max -> n */
 		unsigned int umax = r->ecx;
 		if (umax > 4096) umax = 4096;
-		if (umax > 0 && !paging_user_range_ok(r->ebx, umax)) {
+		/* The kernel writes here: the buffer must be writable, not just
+		 * mapped (a read-only page would fault in ring 0). */
+		if (umax > 0 && !paging_user_range_writable(r->ebx, umax)) {
 			r->eax = (unsigned int)-1;
 			break;
 		}

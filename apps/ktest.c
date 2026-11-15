@@ -205,6 +205,15 @@ static int t_text_kwrite(void)
 	if (memcmp(before, text, sizeof(before)) != 0)
 		FAIL("kernel overwrote read-only .text shared with the parent");
 	if (code != 1) FAIL("fread into .text was not rejected (child exit %d)", code);
+
+	/* The same rule for the clipboard, which only checked that its
+	 * destination was mapped: the kernel then faulted on it in ring 0. */
+	char two[2] = { 0, 0 };
+	if (sys_clip_write("kt", 2) != 2) FAIL("clip_write failed");
+	if (sys_clip_read(text, 2) != -1) FAIL("clip_read into .text was not rejected");
+	if (memcmp(before, text, sizeof(before)) != 0) FAIL("clip_read overwrote .text");
+	if (sys_clip_read(two, 2) != 2 || two[0] != 'k' || two[1] != 't')
+		FAIL("clip_read into an ordinary buffer failed");
 	return 0;
 }
 
@@ -1178,6 +1187,25 @@ static int t_win_unmap(void)
 	if (code == 7) FAIL("a forked child could write its parent's window buffer");
 	if (code == 8) FAIL("the parent's window buffer changed across a fork");
 	if (code != 1) FAIL("fork with a window open: exit %d", code);
+
+	/* A window owner that dies of a fault gives everything back, like one
+	 * that exits: ten of them, and the frame count is where it started. */
+	unsigned int base = free_pages();
+	for (int i = 0; i < 10; i++) {
+		pid = sys_fork();
+		if (pid < 0) FAIL("fork failed");
+		if (pid == 0) {
+			if (win_open(400, 300) != 0) child_exit(2);
+			*(volatile int *)0 = 1;         /* fault with the window open */
+			child_exit(3);
+		}
+		code = sys_waitpid(pid);
+		if (code != 139) FAIL("faulting window owner %d: exit %d, want 139", i, code);
+	}
+	unsigned int after = free_pages();
+	if (after != base) FAIL("%d frames lost over 10 window owners that faulted", (int)(base - after));
+	if (win_open(200, 100) != 0) FAIL("no window slot left after the owners faulted");
+	sys_win_destroy();
 	return 0;
 }
 
