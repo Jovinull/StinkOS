@@ -116,7 +116,8 @@ and owns the taskbar and pointer.
 * Flags: `1` desktop (no chrome, bottom of the stack, not in the
   taskbar), `2` resizable.
 * `struct win_event { int type, x, y, buttons, key; }`: `1` mouse (client
-  coordinates; `buttons` = state, `key` = buttons that changed), `2` key
+  coordinates; `buttons` = state, `key` = buttons that changed; one event
+  with `x = y = -1` when the pointer leaves the client area), `2` key
   (`key` = character), `3` close box, `4` resize request (`x`, `y` = new
   client size; answer with `SYS_WIN_RESIZE`), `5` raw key event,
   `6` focus (`x` = 1 gained).
