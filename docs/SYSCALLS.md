@@ -105,6 +105,11 @@ polls rather than spin.
 `SYS_KILL` is a request: the target exits by itself the next time it
 returns to ring 3 (exit code 137). `SYS_WAITPID` on it then succeeds.
 
+Kernel threads appear in the process table (`knet`, `kwm`) but are not
+valid targets: `SYS_KILL`, `SYS_SUSPEND`, `SYS_RAISE` and `SYS_SETPRIO`
+return -1 for them. `SYS_SETPRIO` accepts priorities 9 to 31 (lower is
+better; 16 is the default); 0 to 8 are the kernel's.
+
 ## Windows
 
 A process owns at most one window. After `SYS_WIN_CREATE` its pixels
